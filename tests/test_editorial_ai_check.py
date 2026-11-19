@@ -50,10 +50,10 @@ class EditorialAiChecksTest(unittest.TestCase):
                 "lightgbm": {"status": "completed", "data": {"probability": light}},
                 "ai_accent_detector": {"status": "completed", "data": {"ai_accent_score": accent}},
             }
-        self.assertTrue(checker.threshold_review(reports(0.10))["passed"])
+        self.assertTrue(checker.threshold_review(reports(0.25))["passed"])
         self.assertTrue(checker.threshold_review(reports(0.01, 1, 1, 1))["passed"])
-        self.assertFalse(checker.threshold_review(reports(0.10001, 0, 0, 0))["passed"])
-        self.assertEqual(checker.threshold_review(reports(0.05))["primary_model"], "rubert_v4")
+        self.assertFalse(checker.threshold_review(reports(0.25001, 0, 0, 0))["passed"])
+        self.assertEqual(checker.threshold_review(reports(0.05))["primary_model"], "rubert_v4")\n        self.assertEqual(checker.threshold_review(reports(0.25))["checks"]["rubert_v4"]["limit_percent"], 25)
         self.assertEqual(checker.threshold_review(reports(0.05))["checks"]["rubert_v4"]["score_percent"], 5.0)
 
     def test_missing_primary_score_does_not_pass(self):
