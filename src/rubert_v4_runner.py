@@ -60,10 +60,10 @@ def main():
         "window_probabilities": [round(p, 6) for p in values],
         "mean_probability": sum(values) / len(values),
         "model_native_threshold": min(thresholds),
-        "editorial_limit_percent": 10,
+        "editorial_limit_percent": 25,
         "word_count": word_count(text),
         "prediction_native": "ai" if any(p >= t for p, t in zip(values, thresholds)) else "human",
-        "note": "The max-over-windows score is a conservative editor rule, not a calibrated whole-document probability. Longer texts have more chances to contain a high-scoring window. The 10% cutoff is a house preference and not proof of authorship."
+        "note": "The max-over-windows score is a conservative editor rule, not a calibrated whole-document probability. Longer texts have more chances to contain a high-scoring window. The 25% cutoff is a house preference and not proof of authorship."
     }, ensure_ascii=False))
 
 
