@@ -51,7 +51,7 @@ jobs:
               local_dir=".rubert-upstream/models",
           )
           PY
-      - name: Run independent read-only checks
+      - name: Run primary ruBERT over all article windows and three comparison checks
         env:
           ARTICLE_SLUG: ${{ github.event_name == 'push' && 'cinema-01-truman-show-real-photos' || inputs.slug }}
         run: |
