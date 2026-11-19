@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ARTICLES = ROOT / "content" / "articles"
 def main():
     files = sorted(ARTICLES.glob("*.json"))
-    summary = {"total":len(files),"drafts":0,"approved":0,"channels":{},"short_text":[],"missing_images":[],"pending_rights":[],"pending_editorial":[],"ai_score_missing":[],"above_ai_threshold":[]}
+    summary = {"total":len(files),"drafts":0,"approved":0,"channels":{},"short_text":[],"missing_images":[],"pending_rights":[],"pending_editorial":[],"ai_review_pending":[],"independent_ai_checks_missing":[]}
     for p in files:
         d = json.loads(p.read_text(encoding="utf-8"))
         name = d.get("title",p.name)
@@ -21,8 +21,10 @@ def main():
         if len(images)<7:summary["missing_images"].append({"article":name,"count":len(images)})
         if d.get("rights_reviewed") is not True: summary["pending_rights"].append(name)
         if d.get("editorial_reviewed") is not True: summary["pending_editorial"].append(name)
-        if d.get("ai_score") is None:summary["ai_score_missing"].append(name)
-        elif float(d["ai_score"])>20:summary["above_ai_threshold"].append(name)
+        if d.get("ai_reviewed") is not True:summary["ai_review_pending"].append(name)
+        checks=d.get("ai_checks",[])
+        providers={x.get("provider","").strip().lower() for x in checks if isinstance(x,dict) and x.get("status")=="completed" and isinstance(x.get("provider"),str) and x.get("provider","").strip()} if isinstance(checks,list) else set()
+        if len(providers)<2:summary["independent_ai_checks_missing"].append(name)
     print("EDITORIAL AUDIT — SAFE, READ-ONLY",flush=True)
     print(json.dumps(summary,ensure_ascii=False,indent=2),flush=True)
     (ROOT/"editorial-audit.json").write_text(json.dumps(summary,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
