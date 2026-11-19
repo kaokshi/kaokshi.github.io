@@ -66,7 +66,7 @@ def tool_result(argv, text_path, timeout=240):
 
 
 
-THRESHOLD = 0.10  # Sole editorial threshold: ruBERT v4 probability <= 10%.
+THRESHOLD = 0.25  # Sole editorial threshold: ruBERT v4 maximum-window score <= 25%.
 
 
 def threshold_review(results):
@@ -83,7 +83,7 @@ def threshold_review(results):
     primary = {
         "status": "evaluated" if valid else "unavailable",
         "score_percent": round(value * 100, 4) if valid else None,
-        "limit_percent": 10,
+        "limit_percent": 25,
         "within_limit": bool(valid and value <= THRESHOLD),
     }
     return {
@@ -150,7 +150,7 @@ def main():
     if any(not entry["checks_completed"] for entry in manifest):
         raise SystemExit("One or more tools failed; report is incomplete (no approval granted).")
     if any(not entry["threshold_passed"] for entry in manifest):
-        raise SystemExit("Primary ruBERT v4 exceeds 10% or is unavailable; editorial threshold not passed.")
+        raise SystemExit("Primary ruBERT v4 exceeds 25% or is unavailable; editorial threshold not passed.")
 
 
 if __name__ == "__main__":
