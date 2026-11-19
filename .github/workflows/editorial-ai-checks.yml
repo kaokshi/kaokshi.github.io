@@ -40,6 +40,20 @@ jobs:
           else
             python src/editorial_ai_check.py
           fi
+      - name: Print numeric results for the trial article
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for p in sorted(Path("editorial-check-reports").glob("*.json")):
+              if p.name == "index.json":
+                  continue
+              d=json.loads(p.read_text(encoding="utf-8"))
+              print("REPORT_JSON_START", p.name)
+              print(json.dumps({"slug":d.get("article_slug"),"characters_without_spaces":d.get("characters_without_spaces"),"checks":d.get("checks")},ensure_ascii=False))
+              print("REPORT_JSON_END")
+          PY
       - name: Preserve review report (never publish to site)
         if: always()
         uses: actions/upload-artifact@v4
