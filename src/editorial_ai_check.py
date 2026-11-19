@@ -65,6 +65,32 @@ def tool_result(argv, text_path, timeout=240):
         return {"status": "error", "reason": "CLI did not return JSON", "output_excerpt": p.stdout[:350]}
 
 
+
+THRESHOLD = 0.10  # Normalized 0..1 scores: 10% is the maximum inclusive.
+
+
+def threshold_review(results):
+    """Conservative editorial gate. A missing, malformed or >10% score fails."""
+    reviewed = {}
+    for model, score_field in (
+        ("modernbert", "probability"),
+        ("lightgbm", "probability"),
+        ("ai_accent_detector", "ai_accent_score"),
+    ):
+        check = results.get(model, {})
+        data = check.get("data")
+        value = data.get(score_field) if isinstance(data, dict) else None
+        if check.get("status") != "completed" or isinstance(value, bool) or not isinstance(value, (int, float)) or not (0 <= value <= 1):
+            reviewed[model] = {"status": "unavailable", "score_percent": None, "limit_percent": 10, "within_limit": False}
+        else:
+            reviewed[model] = {"status": "evaluated", "score_percent": round(value * 100, 4), "limit_percent": 10, "within_limit": value <= THRESHOLD}
+    return {
+        "checks": reviewed,
+        "passed": all(v["within_limit"] for v in reviewed.values()),
+        "note": "AI Accent is a style index, NOT AI authorship probability. Three scores are not independent proof of origin.",
+    }
+
+
 def evaluate(path):
     article = json.loads(path.read_text(encoding="utf-8"))
     text = extract_text(article.get("body_html", ""))
@@ -87,6 +113,7 @@ def evaluate(path):
         "channel": article.get("channel"),
         "characters_without_spaces": len(re.sub(r"\s", "", text)),
         "checks": results,
+        "editorial_threshold": threshold_review(results),
         "all_checks_completed": all(x["status"] == "completed" for x in results.values()),
         "editorial_approved": False,
         "publication_authorized": False,
@@ -106,11 +133,13 @@ def main():
         result = evaluate(article)
         destination = target / (article.stem + ".json")
         destination.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        manifest.append({"article": article.stem, "report": destination.name, "checks_completed": result["all_checks_completed"]})
+        manifest.append({"article": article.stem, "report": destination.name, "checks_completed": result["all_checks_completed"], "threshold_passed": result["editorial_threshold"]["passed"]})
         print(f'{article.stem}: {sum(x["status"] == "completed" for x in result["checks"].values())}/3 tools completed')
     (target / "index.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if any(not entry["checks_completed"] for entry in manifest):
         raise SystemExit("One or more tools failed; report is incomplete (no approval granted).")
+    if any(not entry["threshold_passed"] for entry in manifest):
+        raise SystemExit("One or more diagnostic scores exceeds 10% or is unavailable; editorial threshold not passed.")
 
 
 if __name__ == "__main__":
