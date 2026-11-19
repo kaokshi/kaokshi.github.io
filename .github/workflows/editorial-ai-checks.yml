@@ -63,12 +63,20 @@ jobs:
           if [ "$EVENT_NAME" = "push" ]; then
             git diff --name-only "$PREVIOUS_SHA" "$GITHUB_SHA" -- 'content/articles/*.json' > /tmp/changed-editorial-articles.txt
             if [ -s /tmp/changed-editorial-articles.txt ]; then
+              args=()
               while IFS= read -r filename; do
-                slug="$(basename "$filename" .json)"
-                python src/editorial_ai_check.py --slug "$slug"
+                if [ -f "$filename" ]; then
+                  slug="$(basename "$filename" .json)"
+                  args+=(--slug "$slug")
+                fi
               done < /tmp/changed-editorial-articles.txt
+              if [ "${#args[@]}" -gt 0 ]; then
+                python src/editorial_ai_check.py "${args[@]}"
+              else
+                echo "Only article deletions; no analysis to run"
+              fi
             else
-              # Workflow-only changes: regression test the existing film pilot; never edit it.
+              # Workflow-only updates: smoke test an existing read-only draft.
               python src/editorial_ai_check.py --slug cinema-01-truman-show-real-photos
             fi
           elif [ -n "$ARTICLE_SLUG" ]; then
