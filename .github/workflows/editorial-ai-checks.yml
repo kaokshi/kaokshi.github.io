@@ -1,5 +1,9 @@
 name: Editorial AI checks (read-only)
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/editorial-ai-checks.yml'
   workflow_dispatch:
     inputs:
       slug:
@@ -29,7 +33,7 @@ jobs:
           aiw-ru models install modernbert lightgbm
       - name: Run independent read-only checks
         env:
-          ARTICLE_SLUG: ${{ inputs.slug }}
+          ARTICLE_SLUG: ${{ github.event_name == 'push' && 'cinema-01-truman-show-real-photos' || inputs.slug }}
         run: |
           if [ -n "$ARTICLE_SLUG" ]; then
             python src/editorial_ai_check.py --slug "$ARTICLE_SLUG"
