@@ -42,6 +42,26 @@ class EditorialAiChecksTest(unittest.TestCase):
             self.assertEqual(saved["status"], "draft")
             self.assertFalse(saved["publication_authorized"])
 
+    def test_each_model_must_be_at_most_ten_percent(self):
+        def reports(modern, light, accent):
+            return {
+                "modernbert": {"status": "completed", "data": {"probability": modern}},
+                "lightgbm": {"status": "completed", "data": {"probability": light}},
+                "ai_accent_detector": {"status": "completed", "data": {"ai_accent_score": accent}},
+            }
+        self.assertTrue(checker.threshold_review(reports(0.10, 0.10, 0.10))["passed"])
+        self.assertFalse(checker.threshold_review(reports(0.11, 0.01, 0.01))["passed"])
+        self.assertFalse(checker.threshold_review(reports(0.01, 0.11, 0.01))["passed"])
+        self.assertFalse(checker.threshold_review(reports(0.01, 0.01, 0.11))["passed"])
+        result = checker.threshold_review(reports(0.0045, 0.6932, 0.0991))
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["checks"]["lightgbm"]["score_percent"], 69.32)
+
+    def test_missing_score_does_not_pass(self):
+        checks = {k: {"status": "completed", "data": {}} for k in
+                  ("modernbert", "lightgbm", "ai_accent_detector")}
+        self.assertFalse(checker.threshold_review(checks)["passed"])
+
     def test_slug_validation(self):
         with self.assertRaises(ValueError):
             checker.selected_articles("../../bad")
