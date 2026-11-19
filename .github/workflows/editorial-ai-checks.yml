@@ -71,7 +71,7 @@ jobs:
                   continue
               d=json.loads(p.read_text(encoding="utf-8"))
               print("REPORT_JSON_START", p.name)
-              print(json.dumps({"slug":d.get("article_slug"),"characters_without_spaces":d.get("characters_without_spaces"),"checks":d.get("checks")},ensure_ascii=False))
+              print(json.dumps({"slug":d.get("article_slug"),"characters_without_spaces":d.get("characters_without_spaces"),"checks":d.get("checks"),"editorial_threshold":d.get("editorial_threshold")},ensure_ascii=False))
               print("REPORT_JSON_END")
           PY
       - name: Preserve review report (never publish to site)
