@@ -53,7 +53,20 @@ def read_posts(now):
             continue
         if post.get("editorial_reviewed") is not True or post.get("rights_reviewed") is not True:
             continue
-        if post.get("ai_score") is None or not 0 <= float(post["ai_score"]) <= 20:
+        # Legacy single-detector ai_score is not sufficient for publication.
+        # A documented review of at least two independent completed checks is required.
+        checks = post.get("ai_checks", [])
+        if post.get("ai_reviewed") is not True or not isinstance(checks, list):
+            continue
+        providers = {
+            check.get("provider", "").strip().lower()
+            for check in checks
+            if isinstance(check, dict)
+            and check.get("status") == "completed"
+            and isinstance(check.get("provider"), str)
+            and check.get("provider", "").strip()
+        }
+        if len(providers) < 2:
             continue
         if len(re.sub(r"\s", "", strip_tags(post.get("body_html", "")))) < 3000:
             continue
