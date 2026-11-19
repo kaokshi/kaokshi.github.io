@@ -29,6 +29,37 @@ class WebsiteTest(unittest.TestCase):
         with mock.patch.object(build, "config", return_value=({"publication_enabled":True},"https://kaokshi.github.io")):
             self.assertEqual(build.read_posts(now), [])
 
+    def test_multi_provider_review_gate(self):
+        import json
+        import tempfile
+        import unittest.mock as mock
+        from pathlib import Path
+        now = datetime(2100,1,1,tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            article = {
+                "channel":"science", "slug":"check-example",
+                "title":"Тестовое название",
+                "body_html":"<p>" + "а" * 3100 + "</p>",
+                "status":"approved",
+                "publication_authorized":True, "release_hold":False,
+                "editorial_reviewed":True, "rights_reviewed":True,
+                "publish_at":"2099-01-01T00:00:00+03:00",
+                "image_files":["asset"] * 7,
+                "ai_score":0, "ai_check_provider":"ZeroGPT",
+                "ai_reviewed":False, "ai_checks":[],
+            }
+            (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+            with mock.patch.object(build,"ARTICLES",folder), mock.patch.object(build,"BASE",folder), mock.patch.object(build,"config",return_value=({"publication_enabled":True},"https://kaokshi.github.io")), mock.patch.object(Path,"is_file",return_value=True):
+                self.assertEqual(build.read_posts(now),[], "Legacy ai_score must never allow release")
+                article["ai_reviewed"]=True
+                article["ai_checks"]=[{"provider":"Copyleaks","status":"completed"}]
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(build.read_posts(now),[], "One provider must not be enough")
+                article["ai_checks"].append({"provider":"GPTZero","status":"completed"})
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(len(build.read_posts(now)),1)
+
     def test_draft_not_published(self):
         self.assertEqual(build.read_posts(datetime(2026,11,19,tzinfo=timezone.utc)),[])
 if __name__=="__main__":
