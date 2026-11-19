@@ -68,6 +68,27 @@ def read_posts(now):
         }
         if len(providers) < 2:
             continue
+        # Main editorial detector must have an actual traceable, completed review.
+        # The other three checks are comparison-only, never averaged or thresholded.
+        # This does NOT grant publication: user authorization remains mandatory.
+        by_provider = {
+            ch.get("provider", "").strip().lower(): ch
+            for ch in checks
+            if isinstance(ch, dict)
+            and isinstance(ch.get("provider"), str)
+            and ch.get("status") == "completed"
+        }
+        required = {"rubert_v4", "modernbert", "lightgbm", "ai_accent_detector"}
+        if not required.issubset(by_provider):
+            continue
+        if any(not isinstance(by_provider[k].get("report_ref"), str)
+               or not by_provider[k]["report_ref"].strip() for k in required):
+            continue
+        rubert_score = by_provider["rubert_v4"].get("score_percent")
+        if (isinstance(rubert_score, bool)
+                or not isinstance(rubert_score, (int, float))
+                or not 0 <= rubert_score <= 25):
+            continue
         if len(re.sub(r"\s", "", strip_tags(post.get("body_html", "")))) < 3000:
             continue
         images = post.get("image_files", [])
