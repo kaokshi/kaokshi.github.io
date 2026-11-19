@@ -1,0 +1,46 @@
+name: Editorial AI checks (read-only)
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: "Existing article slug; leave empty to check all articles"
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: editorial-ai-checks
+  cancel-in-progress: false
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-editorial.txt
+      - name: Install free open-source text tools
+        run: python -m pip install -r requirements-editorial.txt
+      - name: Download published open models to runner cache
+        run: |
+          aiw-ru models install modernbert lightgbm
+      - name: Run independent read-only checks
+        env:
+          ARTICLE_SLUG: ${{ inputs.slug }}
+        run: |
+          if [ -n "$ARTICLE_SLUG" ]; then
+            python src/editorial_ai_check.py --slug "$ARTICLE_SLUG"
+          else
+            python src/editorial_ai_check.py
+          fi
+      - name: Preserve review report (never publish to site)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-ai-review
+          path: editorial-check-reports/
+          if-no-files-found: warn
+          retention-days: 7
