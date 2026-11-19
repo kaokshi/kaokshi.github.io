@@ -31,6 +31,23 @@ def _tokens(text):
         return re.findall(r"[а-яёa-z]+", text.lower())
 
 
+def morphology_repetitions(tokens):
+    """Count repeated Russian lemmas; report unavailable if pymorphy3 is absent."""
+    try:
+        import pymorphy3
+        morph = pymorphy3.MorphAnalyzer()
+    except (ImportError, OSError, ValueError) as exc:
+        return {"status": "unavailable", "reason": str(exc)[:150], "repeated_lemmas": []}
+    lemmas = Counter()
+    for word in tokens:
+        if len(word) < 5 or word in STOPWORDS or not re.fullmatch(r"[а-яё]+", word):
+            continue
+        lemmas[morph.parse(word)[0].normal_form] += 1
+    return {"status": "completed",
+            "repeated_lemmas": [{"lemma": word, "count": count}
+                                for word, count in lemmas.most_common(12) if count >= 8]}
+
+
 def text_style(text):
     tokens = _tokens(text)
     long_sentences = []
@@ -47,6 +64,7 @@ def text_style(text):
         "words": len(tokens),
         "long_sentences": long_sentences[:30],
         "repeated_words": repeated[:12],
+        "russian_morphology": morphology_repetitions(tokens),
         "cliche_occurrences": {term: len(re.findall(re.escape(term), text.lower())) for term in CLICHES if term in text.lower()},
         "note": "Suggestions to edit for clarity, not authorship evidence.",
     }
