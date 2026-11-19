@@ -19,6 +19,10 @@ class WebsiteTest(unittest.TestCase):
             root=ET.fromstring(rss.read_text("utf-8"))
             self.assertEqual(root.tag,"rss")
             self.assertEqual(root.attrib["version"],"2.0")
+    def test_publication_globally_disabled(self):
+        settings, _ = build.config()
+        self.assertIs(settings.get("publication_enabled"), False)
+        self.assertEqual(build.read_posts(datetime(2026,12,10,tzinfo=timezone.utc)), [])
     def test_draft_not_published(self):
         self.assertEqual(build.read_posts(datetime(2026,11,19,tzinfo=timezone.utc)),[])
 if __name__=="__main__":

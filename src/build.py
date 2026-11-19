@@ -37,6 +37,10 @@ def parse_date(s):
         raise ValueError("Publication time must have timezone")
     return dt
 def read_posts(now):
+    # Global publication freeze: NO articles or populated RSS without explicit approval.
+    settings, _ = config()
+    if settings.get('publication_enabled') is not True:
+        return []
     published = []
     for path in sorted(ARTICLES.glob("*.json")):
         post = json.loads(path.read_text(encoding="utf-8"))
