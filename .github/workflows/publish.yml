@@ -34,11 +34,15 @@ jobs:
           python-version: '3.12'
       - name: Audit editorial drafts (no publishing)
         run: python src/audit.py
-      - name: Quality audit across all channels (read-only)\n        run: python src/editorial_quality.py\n      - name: Run basic tests
+      - name: Quality audit across all channels (read-only)
+        run: python src/editorial_quality.py
+      - name: Run basic tests
         run: python -m unittest discover -s tests -v
       - name: Build static site and RSS
         run: python src/build.py
-      - name: Verify RSS XML across all three channels\n        run: python src/rss_verify.py\n      - name: Configure GitHub Pages
+      - name: Verify RSS XML across all three channels
+        run: python src/rss_verify.py
+      - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload website
         uses: actions/upload-pages-artifact@v3
