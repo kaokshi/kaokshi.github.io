@@ -90,7 +90,17 @@ jobs:
             args+=(--slug science-01-krasnye-spraity)
             args+=(--slug cinema-01-truman-show-real-photos)
           fi
-          python src/editorial_language_tool.py "${args[@]}" --output editorial-quality-reports/languagetool.json
+          failures=0
+          for ((i=0; i<${#args[@]}; i+=2)); do
+            slug="${args[i+1]}"
+            if ! python src/editorial_language_tool.py --slug "$slug" --output "editorial-quality-reports/languagetool-$slug.json"; then
+              failures=$((failures+1))
+            fi
+          done
+          if [ "$failures" -gt 0 ]; then
+            echo "LanguageTool incomplete for $failures article(s); read per-article reports"
+            exit 1
+          fi
       - name: Verify three RSS feeds without publishing
         run: |
           python src/build.py
