@@ -42,12 +42,24 @@ jobs:
         run: python src/build.py
       - name: Verify RSS XML across all three channels
         run: python src/rss_verify.py
+      - name: Respect global publication freeze
+        id: release
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          d=json.loads(Path("config/site.json").read_text(encoding="utf-8"))
+          print("enabled=" + ("true" if d.get("publication_enabled") is True else "false"))
+          PY
       - name: Configure GitHub Pages
+        if: steps.release.outputs.enabled == 'true'
         uses: actions/configure-pages@v5
       - name: Upload website
+        if: steps.release.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
       - name: Publish to GitHub Pages
+        if: steps.release.outputs.enabled == 'true'
         id: deployment
         uses: actions/deploy-pages@v4
