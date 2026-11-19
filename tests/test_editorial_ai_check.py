@@ -33,7 +33,7 @@ class EditorialAiChecksTest(unittest.TestCase):
                                         "body_html": "<p>Тестовая статья.</p>",
                                         "status": "draft", "publication_authorized": False}, ensure_ascii=False), encoding="utf-8")
             mocked = {"status": "completed", "data": {"example": True}}
-            with patch.object(checker, "tool_result", return_value=mocked):
+            with patch.object(checker, "ROOT", Path(tmp)), patch.object(checker, "tool_result", return_value=mocked):
                 result = checker.evaluate(path)
             self.assertTrue(result["all_checks_completed"])
             self.assertIs(result["editorial_approved"], False)
