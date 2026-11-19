@@ -61,6 +61,15 @@ class EditorialAiChecksTest(unittest.TestCase):
         self.assertFalse(checker.threshold_review({"rubert_v4": {"status": "completed", "data": {"probability": True}}})["passed"])
         self.assertFalse(checker.threshold_review({"rubert_v4": {"status": "error"}})["passed"])
 
+    def test_rubert_windows_cover_long_text(self):
+        from rubert_v4_runner import windows
+        words = [f"слово{i}" for i in range(340)]
+        segments = windows(" ".join(words))
+        self.assertGreater(len(segments), 2)
+        self.assertEqual(segments[0].split()[0], "слово0")
+        self.assertEqual(segments[-1].split()[-1], "слово339")
+        self.assertTrue(all(len(x.split()) <= 85 for x in segments))
+
     def test_slug_validation(self):
         with self.assertRaises(ValueError):
             checker.selected_articles("../../bad")
