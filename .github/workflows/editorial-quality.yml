@@ -1,0 +1,90 @@
+name: Editorial quality (three channels, read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/articles/**'
+      - 'content/assets/**'
+      - 'src/editorial_quality.py'
+      - 'src/editorial_export_md.py'
+      - 'src/editorial_language_tool.py'
+      - 'src/rss_verify.py'
+      - 'requirements-quality.txt'
+      - '.vale.ini'
+      - 'editorial-styles/**'
+      - '.github/workflows/editorial-quality.yml'
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: "Optional article slug for focused review"
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install free quality tools
+        run: python -m pip install -r requirements-quality.txt
+      - name: Channel-specific quality, image duplicates, internal similarity
+        env:
+          ARTICLE_SLUG: ${{ inputs.slug }}
+        run: |
+          if [ -n "$ARTICLE_SLUG" ]; then
+            python src/editorial_quality.py --slug "$ARTICLE_SLUG"
+          else
+            python src/editorial_quality.py
+          fi
+      - name: Export texts for local Vale review
+        run: python src/editorial_export_md.py
+      - name: Install Vale 3.13.0
+        id: vale_install
+        continue-on-error: true
+        run: |
+          curl -fL --retry 2 -o /tmp/vale.tgz https://github.com/errata-ai/vale/releases/download/v3.13.0/vale_3.13.0_Linux_64-bit.tar.gz
+          mkdir -p /tmp/vale
+          tar xzf /tmp/vale.tgz -C /tmp/vale vale
+          sudo install /tmp/vale/vale /usr/local/bin/vale
+      - name: Vale Russian style rules
+        if: steps.vale_install.outcome == 'success'
+        continue-on-error: true
+        run: vale --output=JSON editorial-quality-reports/vale-input/ > editorial-quality-reports/vale.json
+      - name: Check cited web links with Lychee
+        if: hashFiles('editorial-quality-reports/links.txt') != ''
+        continue-on-error: true
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: '--no-progress --max-concurrency 3 --timeout 20 editorial-quality-reports/links.txt'
+          output: editorial-quality-reports/lychee.md
+          fail: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Russian grammar sample - legends
+        continue-on-error: true
+        run: python src/editorial_language_tool.py --slug legends-01-prohodnaya-17 --output editorial-quality-reports/languagetool-legends.json
+      - name: Russian grammar sample - science
+        continue-on-error: true
+        run: python src/editorial_language_tool.py --slug science-01-krasnye-spraity --output editorial-quality-reports/languagetool-science.json
+      - name: Russian grammar sample - cinema
+        continue-on-error: true
+        run: python src/editorial_language_tool.py --slug cinema-01-truman-show-real-photos --output editorial-quality-reports/languagetool-cinema.json
+      - name: Verify three RSS feeds without publishing
+        run: |
+          python src/build.py
+          python src/rss_verify.py
+      - name: Preserve quality report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-quality-review
+          path: editorial-quality-reports/
+          if-no-files-found: warn
+          retention-days: 14
