@@ -134,13 +134,17 @@ def evaluate(path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--slug", help="Optional existing article slug; omitted means all drafts")
+    parser.add_argument("--slug", action="append", help="Existing article slug; repeat to check multiple files")
     parser.add_argument("--output", default=str(OUTPUT), help="Report directory, not part of site output")
     args = parser.parse_args()
     target = Path(args.output)
     target.mkdir(parents=True, exist_ok=True)
     manifest = []
-    for article in selected_articles(args.slug):
+    if args.slug:
+        articles = list(dict.fromkeys(path for slug in args.slug for path in selected_articles(slug)))
+    else:
+        articles = selected_articles()
+    for article in articles:
         result = evaluate(article)
         destination = target / (article.stem + ".json")
         destination.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
