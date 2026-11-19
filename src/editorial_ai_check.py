@@ -66,28 +66,32 @@ def tool_result(argv, text_path, timeout=240):
 
 
 
-THRESHOLD = 0.10  # Normalized 0..1 scores: 10% is the maximum inclusive.
+THRESHOLD = 0.10  # Sole editorial threshold: ruBERT v4 probability <= 10%.
 
 
 def threshold_review(results):
-    """Conservative editorial gate. A missing, malformed or >10% score fails."""
-    reviewed = {}
-    for model, score_field in (
-        ("modernbert", "probability"),
-        ("lightgbm", "probability"),
-        ("ai_accent_detector", "ai_accent_score"),
-    ):
-        check = results.get(model, {})
-        data = check.get("data")
-        value = data.get(score_field) if isinstance(data, dict) else None
-        if check.get("status") != "completed" or isinstance(value, bool) or not isinstance(value, (int, float)) or not (0 <= value <= 1):
-            reviewed[model] = {"status": "unavailable", "score_percent": None, "limit_percent": 10, "within_limit": False}
-        else:
-            reviewed[model] = {"status": "evaluated", "score_percent": round(value * 100, 4), "limit_percent": 10, "within_limit": value <= THRESHOLD}
+    """Only ruBERT v4 controls threshold. Three other models are comparison-only."""
+    check = results.get("rubert_v4", {})
+    data = check.get("data")
+    value = data.get("probability") if isinstance(data, dict) else None
+    valid = (
+        check.get("status") == "completed"
+        and not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and 0 <= value <= 1
+    )
+    primary = {
+        "status": "evaluated" if valid else "unavailable",
+        "score_percent": round(value * 100, 4) if valid else None,
+        "limit_percent": 10,
+        "within_limit": bool(valid and value <= THRESHOLD),
+    }
     return {
-        "checks": reviewed,
-        "passed": all(v["within_limit"] for v in reviewed.values()),
-        "note": "AI Accent is a style index, NOT AI authorship probability. Three scores are not independent proof of origin.",
+        "primary_model": "rubert_v4",
+        "checks": {"rubert_v4": primary},
+        "passed": primary["within_limit"],
+        "comparison_only": ["modernbert", "lightgbm", "ai_accent_detector"],
+        "note": "Only ruBERT v4 controls the diagnostic threshold. Other model scores are comparison only, not independent proof of authorship.",
     }
 
 
@@ -98,7 +102,14 @@ def evaluate(path):
     with tempfile.TemporaryDirectory(prefix="editorial-ai-") as work:
         document = Path(work) / "draft.txt"
         document.write_text(text, encoding="utf-8")
-        # Both model classifiers share the LLMTrace training corpus.
+        # ruBERT v4 is primary; the three original tools are comparison only.
+        rubert_python = ROOT / ".rubert-venv" / "bin" / "python"
+        rubert_source = ROOT / ".rubert-upstream"
+        results["rubert_v4"] = tool_result(
+            [str(rubert_python), str(ROOT / "src" / "rubert_v4_runner.py"), "--source", str(rubert_source)],
+            document, timeout=600
+        )
+        # Both comparison classifiers share the LLMTrace training corpus.
         # They MUST NOT be represented as independent proof of authorship.
         for model in ("modernbert", "lightgbm"):
             results[model] = tool_result(["aiw-ru", "classify", "--model", model, "--json"], document)
@@ -134,12 +145,12 @@ def main():
         destination = target / (article.stem + ".json")
         destination.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         manifest.append({"article": article.stem, "report": destination.name, "checks_completed": result["all_checks_completed"], "threshold_passed": result["editorial_threshold"]["passed"]})
-        print(f'{article.stem}: {sum(x["status"] == "completed" for x in result["checks"].values())}/3 tools completed')
+        print(f'{article.stem}: {sum(x["status"] == "completed" for x in result["checks"].values())}/4 tools completed')
     (target / "index.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if any(not entry["checks_completed"] for entry in manifest):
         raise SystemExit("One or more tools failed; report is incomplete (no approval granted).")
     if any(not entry["threshold_passed"] for entry in manifest):
-        raise SystemExit("One or more diagnostic scores exceeds 10% or is unavailable; editorial threshold not passed.")
+        raise SystemExit("Primary ruBERT v4 exceeds 10% or is unavailable; editorial threshold not passed.")
 
 
 if __name__ == "__main__":
