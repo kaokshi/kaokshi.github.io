@@ -23,6 +23,12 @@ class WebsiteTest(unittest.TestCase):
         settings, _ = build.config()
         self.assertIs(settings.get("publication_enabled"), False)
         self.assertEqual(build.read_posts(datetime(2026,12,10,tzinfo=timezone.utc)), [])
+    def test_approved_article_requires_release_authorization(self):
+        import unittest.mock as mock
+        now = datetime(2100,1,1,tzinfo=timezone.utc)
+        with mock.patch.object(build, "config", return_value=({"publication_enabled":True},"https://kaokshi.github.io")):
+            self.assertEqual(build.read_posts(now), [])
+
     def test_draft_not_published(self):
         self.assertEqual(build.read_posts(datetime(2026,11,19,tzinfo=timezone.utc)),[])
 if __name__=="__main__":

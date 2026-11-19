@@ -48,6 +48,9 @@ def read_posts(now):
             raise ValueError("Unknown channel in " + str(path))
         if post.get("status") != "approved":
             continue
+        # A separate, per-article release command is mandatory.
+        if post.get("publication_authorized") is not True or post.get("release_hold") is not False:
+            continue
         if post.get("editorial_reviewed") is not True or post.get("rights_reviewed") is not True:
             continue
         if post.get("ai_score") is None or not 0 <= float(post["ai_score"]) <= 20:
