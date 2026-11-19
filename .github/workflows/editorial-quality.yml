@@ -27,6 +27,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -67,15 +69,28 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Russian grammar sample - legends
+      - name: Local Russian grammar for all edited articles (and three channel smoke tests)
         continue-on-error: true
-        run: python src/editorial_language_tool.py --slug legends-01-prohodnaya-17 --output editorial-quality-reports/languagetool-legends.json
-      - name: Russian grammar sample - science
-        continue-on-error: true
-        run: python src/editorial_language_tool.py --slug science-01-krasnye-spraity --output editorial-quality-reports/languagetool-science.json
-      - name: Russian grammar sample - cinema
-        continue-on-error: true
-        run: python src/editorial_language_tool.py --slug cinema-01-truman-show-real-photos --output editorial-quality-reports/languagetool-cinema.json
+        env:
+          REQUESTED_SLUG: ${{ inputs.slug }}
+          EVENT_NAME: ${{ github.event_name }}
+          PREVIOUS_SHA: ${{ github.event.before }}
+        run: |
+          args=()
+          if [ -n "$REQUESTED_SLUG" ]; then
+            args+=(--slug "$REQUESTED_SLUG")
+          elif [ "$EVENT_NAME" = "push" ]; then
+            while IFS= read -r filename; do
+              slug="$(basename "$filename" .json)"
+              args+=(--slug "$slug")
+            done < <(git diff --name-only "$PREVIOUS_SHA" "$GITHUB_SHA" -- 'content/articles/*.json')
+          fi
+          if [ "${#args[@]}" -eq 0 ]; then
+            args+=(--slug legends-01-prohodnaya-17)
+            args+=(--slug science-01-krasnye-spraity)
+            args+=(--slug cinema-01-truman-show-real-photos)
+          fi
+          python src/editorial_language_tool.py "${args[@]}" --output editorial-quality-reports/languagetool.json
       - name: Verify three RSS feeds without publishing
         run: |
           python src/build.py
