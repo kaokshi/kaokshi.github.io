@@ -42,25 +42,24 @@ class EditorialAiChecksTest(unittest.TestCase):
             self.assertEqual(saved["status"], "draft")
             self.assertFalse(saved["publication_authorized"])
 
-    def test_each_model_must_be_at_most_ten_percent(self):
-        def reports(modern, light, accent):
+    def test_rubert_only_threshold(self):
+        def reports(rubert, modern=0.95, light=0.95, accent=0.95):
             return {
+                "rubert_v4": {"status": "completed", "data": {"probability": rubert}},
                 "modernbert": {"status": "completed", "data": {"probability": modern}},
                 "lightgbm": {"status": "completed", "data": {"probability": light}},
                 "ai_accent_detector": {"status": "completed", "data": {"ai_accent_score": accent}},
             }
-        self.assertTrue(checker.threshold_review(reports(0.10, 0.10, 0.10))["passed"])
-        self.assertFalse(checker.threshold_review(reports(0.11, 0.01, 0.01))["passed"])
-        self.assertFalse(checker.threshold_review(reports(0.01, 0.11, 0.01))["passed"])
-        self.assertFalse(checker.threshold_review(reports(0.01, 0.01, 0.11))["passed"])
-        result = checker.threshold_review(reports(0.0045, 0.6932, 0.0991))
-        self.assertFalse(result["passed"])
-        self.assertEqual(result["checks"]["lightgbm"]["score_percent"], 69.32)
+        self.assertTrue(checker.threshold_review(reports(0.10))["passed"])
+        self.assertTrue(checker.threshold_review(reports(0.01, 1, 1, 1))["passed"])
+        self.assertFalse(checker.threshold_review(reports(0.10001, 0, 0, 0))["passed"])
+        self.assertEqual(checker.threshold_review(reports(0.05))["primary_model"], "rubert_v4")
+        self.assertEqual(checker.threshold_review(reports(0.05))["checks"]["rubert_v4"]["score_percent"], 5.0)
 
-    def test_missing_score_does_not_pass(self):
-        checks = {k: {"status": "completed", "data": {}} for k in
-                  ("modernbert", "lightgbm", "ai_accent_detector")}
-        self.assertFalse(checker.threshold_review(checks)["passed"])
+    def test_missing_primary_score_does_not_pass(self):
+        self.assertFalse(checker.threshold_review({})["passed"])
+        self.assertFalse(checker.threshold_review({"rubert_v4": {"status": "completed", "data": {"probability": True}}})["passed"])
+        self.assertFalse(checker.threshold_review({"rubert_v4": {"status": "error"}})["passed"])
 
     def test_slug_validation(self):
         with self.assertRaises(ValueError):
