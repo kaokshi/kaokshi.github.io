@@ -58,7 +58,23 @@ class WebsiteTest(unittest.TestCase):
                 self.assertEqual(build.read_posts(now),[], "One provider must not be enough")
                 article["ai_checks"].append({"provider":"GPTZero","status":"completed"})
                 (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
-                self.assertEqual(len(build.read_posts(now)),1)
+                self.assertEqual(build.read_posts(now), [], "Legacy two-provider checks cannot bypass ruBERT gate")
+                article["ai_checks"] = [
+                    {"provider": "rubert_v4", "status": "completed", "score_percent": 25,
+                     "report_ref": "https://github.com/kaokshi/kaokshi.github.io/actions/runs/123"},
+                    {"provider": "modernbert", "status": "completed", "report_ref": "https://github.com/example"},
+                    {"provider": "lightgbm", "status": "completed", "report_ref": "https://github.com/example"},
+                    {"provider": "ai_accent_detector", "status": "completed", "report_ref": "https://github.com/example"},
+                ]
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(len(build.read_posts(now)), 1, "Approved item with confirmed reports may be eligible")
+                article["ai_checks"][0]["score_percent"] = 25.01
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(build.read_posts(now), [], "Primary ruBERT score over 25% must block release")
+                article["ai_checks"][0]["score_percent"] = 24
+                article["ai_checks"][1]["report_ref"] = ""
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(build.read_posts(now), [], "A missing comparison report must block release")
 
     def test_draft_not_published(self):
         self.assertEqual(build.read_posts(datetime(2026,11,19,tzinfo=timezone.utc)),[])
