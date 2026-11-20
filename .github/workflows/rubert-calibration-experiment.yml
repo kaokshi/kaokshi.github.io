@@ -4,6 +4,7 @@ on:
     paths:
       - 'src/rubert_calibration.py'
       - 'src/rubert_v4_runner.py'
+      - 'experiments/rubert_cross_article_test.py'
       - 'tests/test_rubert_calibration.py'
       - 'experiments/rubert-ninth-floor-window-scores.json'
       - '.github/workflows/rubert-calibration-experiment.yml'
@@ -48,3 +49,40 @@ jobs:
           name: rubert-shadow-calibration
           path: editorial-calibration-reports/
           retention-days: 14
+  real-articles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned ruBERT v4 only
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Fetch pinned model assets (no other detectors)
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+            "k1y0mi/ru-ai-text-detector",
+            repo_type="model",
+            revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+            allow_patterns=["v4_model/*","v4_calibrator.joblib","threshold_v4.json"],
+            local_dir=".rubert-upstream/models",
+          )
+          PY
+      - name: Score six genuine drafts across two active channels
+        run: python experiments/rubert_cross_article_test.py
+      - name: Upload private six-article statistical report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubert-six-article-shadow
+          path: editorial-calibration-reports/cross-article.json
+          retention-days: 14
+          if-no-files-found: warn
