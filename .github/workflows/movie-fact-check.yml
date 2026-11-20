@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'src/movie_fact_check.py'
+      - 'src/movie_semantic.py'
       - 'tests/test_movie_fact_check.py'
       - 'config/movie_reference_index.json'
       - 'content/articles/cinema-01-truman-show-real-photos.json'
@@ -19,7 +20,7 @@ permissions:
 jobs:
   evidence-pilot:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,6 +28,9 @@ jobs:
           python-version: '3.12'
       - name: Install optional evidence lookup libraries (no video)
         run: python -m pip install "requests==2.32.5" "cinemagoer"
+      - name: Install local semantic embedding model runtime
+        run: |
+          python -m pip install "sentence-transformers==3.4.1" "numpy<2"
       - name: Verify local safety and mapping tests
         run: python -m unittest tests.test_movie_fact_check -v
       - name: Compare film plot and still references with external sources
@@ -34,7 +38,7 @@ jobs:
           MOVIE_SLUG: ${{ inputs.slug }}
         run: |
           slug="${MOVIE_SLUG:-cinema-01-truman-show-real-photos}"
-          python src/movie_fact_check.py --slug "$slug" --imdb
+          python src/movie_fact_check.py --slug "$slug" --imdb --semantic
       - name: Display movie review summary and representative results
         if: always()
         run: |
@@ -48,6 +52,10 @@ jobs:
               print("SUMMARY",json.dumps(d["summary"],ensure_ascii=False))
               for item in d["article_sections"]:
                   print("SECTION",json.dumps({k:item.get(k) for k in ("section","status","lexical_overlap","source_url")},ensure_ascii=False))
+              semantic=d.get("semantic_plot_search", {})
+              print("SEMANTIC_SUMMARY",json.dumps({"status":semantic.get("status"),"model":semantic.get("model"),"source_passages":semantic.get("source_passages"),"article_passages":semantic.get("article_passages"),"reason":semantic.get("reason")},ensure_ascii=False))
+              for item in semantic.get("matches", []):
+                  print("SEMANTIC_SECTION",json.dumps({"section":item["section"],"status":item["status"],"top_matches":item.get("candidate_matches", [])[:2]},ensure_ascii=False))
               for item in d["stills"]:
                   print("STILL",json.dumps({k:item.get(k) for k in ("index","source_url","structural_status","warnings","visual_scene_match")},ensure_ascii=False))
           PY
