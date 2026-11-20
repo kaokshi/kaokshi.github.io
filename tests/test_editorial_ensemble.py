@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
-from editorial_ensemble import fit,score,evaluate,route_revision
+from editorial_ensemble import fit,score,evaluate,route_revision,ACTIVE,SUPPORTED_GENRES
 
 def example(n, label, channel="legends", split="train", source=None):
     signal = 80 if label == "ai" else 20
@@ -65,6 +65,31 @@ class EnsembleTests(unittest.TestCase):
         self.assertFalse(v["release"])
         self.assertEqual(route_revision(channel="science",score_percent=99,threshold=80,validated=True,
               attempt=0,substantive_issues=["Repeated paragraph"],checks_completed=False)["decision"],"owner_review")
+    def test_cinema_separate_model_training_and_holdout(self):
+        self.assertIn("cinema", SUPPORTED_GENRES)
+        self.assertNotIn("cinema", ACTIVE)
+        train = [example(i,"human",channel="cinema") for i in range(30)]
+        train += [example(30+i,"ai",channel="cinema") for i in range(30)]
+        model = fit(train)
+        self.assertEqual(model["channel"],"cinema")
+        self.assertEqual(model["status"],"experimental_unvalidated")
+        self.assertGreater(score(model,example(900,"ai",channel="cinema")),
+                           score(model,example(901,"human",channel="cinema")))
+        holdout=[example(100+i,"human",channel="cinema",split="holdout") for i in range(120)]
+        holdout += [example(300+i,"ai",channel="cinema",split="holdout") for i in range(120)]
+        result=evaluate(model,holdout,90,train)
+        self.assertEqual(result["human_holdout_n"],120)
+        self.assertEqual(result["ai_holdout_n"],120)
+        self.assertFalse(result["eligible_for_release"])
+        self.assertEqual(route_revision(channel="cinema",score_percent=99,threshold=80,
+              validated=True,attempt=0,substantive_issues=["repeat"])["decision"],"paused_channel")
+    def test_cinema_model_is_genre_specific(self):
+        train = [example(i,"human",channel="cinema") for i in range(30)]
+        train += [example(30+i,"ai",channel="cinema") for i in range(30)]
+        model=fit(train)
+        with self.assertRaisesRegex(ValueError,"Wrong genre"):
+            score(model,example(500,"human",channel="science"))
+
     def test_paused_cinema(self):
         self.assertEqual(route_revision(channel="cinema",score_percent=99,threshold=80,
               validated=True,attempt=0,substantive_issues=["repeat"])["decision"],"paused_channel")
