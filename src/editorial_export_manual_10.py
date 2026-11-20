@@ -16,6 +16,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm, Pt
 from editorial_ai_check import extract_text
+from editorial_length import MIN_CHARS, MAX_CHARS, count_characters, length_finding
 
 ROOT=Path(__file__).resolve().parents[1]
 OUTPUT=ROOT/"editorial-manual-launch-10"
@@ -52,10 +53,9 @@ def make_one(channel,slug,place):
     if a.get("status")!="draft":
         raise ValueError("Expected owner-review draft")
     paras=clean_paragraphs(a.get("body_html",""))
-    body="\n".join(paras)
-    n=len(re.sub(r"\s","",body))
-    if n<3000:
-        raise ValueError(f"{slug} too short: {n}")
+    n = count_characters(a.get("body_html", ""))
+    if length_finding(n):
+        raise ValueError(f"{slug} body length {n} outside {MIN_CHARS}–{MAX_CHARS}")
     doc=Document()
     sec=doc.sections[0]
     sec.top_margin=Cm(2.2)
@@ -110,7 +110,7 @@ def main():
     guide=(
       "ПАКЕТ ДЛЯ РУЧНОГО ЗАПУСКА ДВУХ КАНАЛОВ ЯНДЕКС ДЗЕН\n"
       "Десять существующих редакционных черновиков: пять мистических + пять научных.\n"
-      "Все тексты полные (от 3000 символов без пробелов), документы Word с проверкой сохранения абзацев.\n\n"
+      f"Все тексты содержат {MIN_CHARS}–{MAX_CHARS} символов без пробелов. В Word проверено сохранение абзацев.\n\n"
       "Перед публикацией каждой статьи обязательно:\n"
       "1. Прочитать и одобрить текст, проверить непротиворечивость и заголовок.\n"
       "2. Для научпопа проверить числовые и научные утверждения по первичным источникам.\n"
@@ -138,7 +138,7 @@ def main():
         assert len([p for p in z.namelist() if p.endswith(".docx")])==10
     print(json.dumps({"archive":str(final),"size":final.stat().st_size,
         "article_count":len(manifest["articles"]),
-        "all_3000_plus":all(a["text_length_nonspace"]>=3000 for a in manifest["articles"]),
+        "all_within_article_length": all(not length_finding(a["text_length_nonspace"]) for a in manifest["articles"]),
         "publication_authorized":False},ensure_ascii=False))
 
 if __name__=="__main__":

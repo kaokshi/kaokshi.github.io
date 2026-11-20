@@ -15,9 +15,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from editorial_ai_check import extract_text, ROOT, CONTENT
+from editorial_length import count_characters, length_finding
 
 CHANNELS = {"cinema", "legends", "science"}
-MIN_CHARS = 3000
 STOPWORDS = {"который", "которая", "которые", "потому", "однако", "сейчас", "только", "после", "перед", "через", "когда", "потом", "снова", "можно", "очень", "этого", "также"}
 CLICHES = ("не просто", "на самом деле", "стоит отметить", "важно понимать",
            "в современном мире", "таким образом", "в заключение", "погрузимся в")
@@ -103,15 +103,16 @@ def inspect_article(path):
 def inspect_draft(article, *, fallback_slug=None):
     channel = article.get("channel")
     text = extract_text(article.get("body_html", ""))
-    chars = len(re.sub(r"\s", "", text))
+    chars = count_characters(article.get("body_html", ""))
     imgs = article.get("image_files") or []
     sources = article.get("image_sources") or []
     photo_refs = [item.get("file") for item in sources if isinstance(item, dict)]
     problems = []
     if channel not in CHANNELS:
         problems.append("unknown_channel")
-    if chars < MIN_CHARS:
-        problems.append("short_article")
+    issue = length_finding(chars)
+    if issue:
+        problems.append(issue)
     if len(imgs) < 7:
         problems.append("fewer_than_seven_images")
     if len(set(imgs)) != len(imgs):
@@ -147,9 +148,10 @@ def inspect_draft(article, *, fallback_slug=None):
     }
 
 
-def similarity_report(entries, *, candidate=None):
+def similarity_report(entries, *, candidate=None, drafts=()):
     """Internal duplicate detection across all three channels; not web plagiarism."""
-    documents = []
+    documents = [(draft, None) for draft in drafts
+                 if candidate is None or draft.get("slug") != candidate.get("slug")]
     for path in entries:
         a = json.loads(path.read_text(encoding="utf-8"))
         if candidate is not None and a.get("slug", path.stem) == candidate.get("slug"):

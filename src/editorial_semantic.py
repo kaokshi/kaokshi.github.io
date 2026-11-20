@@ -1,11 +1,9 @@
 """Diagnose verifiable defects and apply only separately justified paragraph edits."""
 
-from html import unescape
-import re
+from html import escape, unescape
 
 from editorial_agent_v1 import article_digest
-from editorial_ai_check import extract_text
-from editorial_quality import MIN_CHARS
+from editorial_length import MIN_CHARS, MAX_CHARS, count_characters, length_distance
 from editorial_revision import PlainParagraphs, assistant_edit
 from editorial_writer import Pending
 
@@ -92,7 +90,58 @@ def revise(article, issues, provider, reviewed=None):
         if edit.get("remove") is True and issue["category"] != "filler":
             raise ValueError("Only diagnosed filler can be removed as a whole paragraph")
     candidate, changes = assistant_edit(article, {"base_text_sha256": digest, "edits": edits}, allow_remove=True)
-    chars = lambda draft: len(re.sub(r"\s", "", extract_text(draft["body_html"])))
-    if chars(candidate) < min(MIN_CHARS, chars(article)):
-        raise ValueError("Revision would reduce the draft below the minimum length")
     return candidate, changes
+
+
+def resize_article(article, provider, documents=()):
+    html = article["body_html"]
+    count = count_characters(html)
+    blocks = paragraphs(article)
+    spans = PlainParagraphs(html).paragraphs
+    if not spans:
+        raise ValueError("No editable paragraphs for length adjustment")
+    expand = count < MIN_CHARS
+    direction = "expand" if expand else "trim"
+    target = (MIN_CHARS + 400 - count) if expand else (count - MAX_CHARS + 400)
+    instruction = (
+        f"Добавь перед концовкой самостоятельный фрагмент примерно на {target} символов "
+        "без пробелов. Для мистики разработай действие и мотивацию, для науки углуби объяснение "
+        "только по приложенным источникам. Сохраняй голос автора. Верни paragraphs."
+        if expand else
+        f"Сократи примерно на {target} символов без пробелов. Сжимай повторы и отступления, "
+        "сохрани ключевые факты и события, развязку и подпись. Верни replacements "
+        "с paragraph и after. Для удаления абзаца передай пустой after."
+    )
+    output = provider("revise", {
+        "mode": "resize", "direction": direction, "instruction": instruction,
+        "text_sha256": article_digest(article), "title": article["title"], "channel": article["channel"],
+        "paragraphs": blocks, "characters": count,
+        "documents": [{**doc, "text": doc["text"][:4500]} for doc in documents[:3]],
+    })
+    if expand:
+        additions = output["paragraphs"]
+        if (not isinstance(additions, list) or not additions
+                or not all(isinstance(p, str) and p.strip() for p in additions)):
+            raise ValueError("Length expansion needs substantive paragraphs")
+        old = {" ".join(block["text"].split()).casefold() for block in blocks}
+        normalized = {" ".join(p.split()).casefold() for p in additions}
+        if len(normalized) != len(additions) or old.intersection(normalized):
+            raise ValueError("Expansion would duplicate existing text")
+        pos = spans[-1][0]
+        fragment = "".join(f"<p>{escape(p.strip(), quote=False)}</p>\n" for p in additions)
+        candidate = {**article, "body_html": html[:pos] + fragment + html[pos:]}
+    else:
+        edits = []
+        for row in output["replacements"]:
+            number = row["paragraph"]
+            if type(number) is not int or not 1 <= number < len(blocks):
+                raise ValueError("Invalid reduction target or attempted removal of the ending")
+            edits.append({"paragraph": number, "before": blocks[number - 1]["text"],
+                          "after": row["after"], "remove": row["after"] == "",
+                          "reason": "Сокращён фрагмент для соблюдения редакционного объёма."})
+        candidate, _ = assistant_edit(article, {"base_text_sha256": article_digest(article),
+                                                 "edits": edits}, allow_remove=True)
+    after = count_characters(candidate["body_html"])
+    if length_distance(after) >= length_distance(count):
+        raise ValueError(f"Length repair did not bring the article closer to the range ({count} → {after})")
+    return candidate, [f"Объём статьи приведён ближе к норме {MIN_CHARS}–{MAX_CHARS}: {count} → {after}."]

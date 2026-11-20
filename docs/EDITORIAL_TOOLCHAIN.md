@@ -29,7 +29,7 @@
 
 ## Необходимые документы, чтобы статья могла ПОТОМ выйти
 
-Глобальный `publication_enabled:true` только по явной команде владельца; каждый конкретный материал отдельно: `status: approved`, `editorial_reviewed:true`, `rights_reviewed:true`, `publication_authorized:true`, `release_hold:false`, минимум 3000 символов без пробелов и 7 существующих иллюстраций.
+Глобальный `publication_enabled:true` только по явной команде владельца; каждый конкретный материал отдельно: `status: approved`, `editorial_reviewed:true`, `rights_reviewed:true`, `publication_authorized:true`, `release_hold:false`, 3000–6000 символов без пробелов и 7 существующих иллюстраций.
 
 Также публикационный шлюз `src/build.py` проверяет `ai_reviewed:true` и четыре отдельных `ai_checks` с `provider` в `rubert_v4`, `modernbert`, `lightgbm`, `ai_accent_detector`, `status:completed` и непустым `report_ref`. Для `rubert_v4` необходим подтверждённый `score_percent` от 0 до **25** включительно. **Ни один тест/скрипт не записывает эти поля автоматически**: их после проверки подлинного отчёта и утверждения подписывает редакция. Устаревшие показатели ZeroGPT и пара любых других провайдеров больше не позволяют выпустить статью.
 

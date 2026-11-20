@@ -11,9 +11,9 @@ from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
 
-from editorial_ai_check import ROOT, extract_text
+from editorial_ai_check import ROOT
 from editorial_agent_v1 import ACTIVE, MAX_AGENT, MAX_ASSISTANT, THRESHOLD, article_digest, validate_ai_report
-from editorial_quality import MIN_CHARS
+from editorial_length import preserves_length
 from editorial_revision_checks import check_draft
 
 
@@ -71,15 +71,15 @@ def automatic_edit(article, attempted):
                 edits.append((start, end, ""))
         if edits:
             candidate = {**article, "body_html": replace_spans(html, edits)}
-            chars = len(re.sub(r"\s", "", extract_text(candidate["body_html"])))
-            if chars >= MIN_CHARS:
+            if preserves_length(html, candidate["body_html"]):
                 return candidate, "duplicate_paragraph", f"Удалено соседних дословных повторов абзацев: {len(edits)}."
     if "duplicate_comma" not in attempted:
         edits = [(start + 3, end - 4, DUPLICATE_COMMA.sub(",", fragment))
                  for start, end, fragment in paragraphs if DUPLICATE_COMMA.search(fragment)]
         if edits:
-            return ({**article, "body_html": replace_spans(html, edits)}, "duplicate_comma",
-                    f"Исправлены двойные запятые между словами в абзацах: {len(edits)}.")
+            candidate = {**article, "body_html": replace_spans(html, edits)}
+            if preserves_length(html, candidate["body_html"]):
+                return candidate, "duplicate_comma", f"Исправлены двойные запятые между словами: {len(edits)}."
     return None
 
 
@@ -117,7 +117,10 @@ def assistant_edit(article, response, *, allow_remove=False):
         used.add(number)
         spans.append((start, end, "") if remove else (start + 3, end - 4, escape(after, quote=False)))
         changes.append(reason)
-    return {**article, "body_html": replace_spans(html, spans)}, changes
+    candidate = {**article, "body_html": replace_spans(html, spans)}
+    if not preserves_length(html, candidate["body_html"]):
+        raise ValueError("The edit would move the article farther from the permitted length")
+    return candidate, changes
 
 
 def append_version(case, article, stage, changes, rule=None):
@@ -185,10 +188,13 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
             reasons.append("model_a_editorial_review")
         if len(versions) > 1:
             previous = versions[-2]
+            if {"short_article", "long_article"}.intersection(previous["report"]["findings"]):
+                case.pop("recommended_text_sha256", None)
             new_findings = sorted(set(report["findings"]) - set(previous["report"]["findings"]))
             if new_findings:
                 version["new_findings"] = new_findings
-                case["recommended_text_sha256"] = previous["text_sha256"]
+                if not {"short_article", "long_article"}.intersection(previous["report"]["findings"]):
+                    case["recommended_text_sha256"] = previous["text_sha256"]
                 reasons.append("revision_introduced_new_findings")
         agent_versions = [v for v in versions if v["stage"] == "agent"]
         attempted = {v["rule"] for v in agent_versions}
@@ -196,12 +202,14 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
         can_edit = version["stage"] != "assistant" and len(agent_versions) < MAX_AGENT
         semantic = report.get("semantic", {})
         facts = report.get("facts", {})
-        if can_edit and semantic_editor is not None and semantic.get("issues"):
+        size_issue = next((issue for issue in ("short_article", "long_article") if issue in reasons), None)
+        if can_edit and semantic_editor is not None and (semantic.get("issues") or size_issue):
             candidate = semantic_editor(article, report)
             if candidate:
                 draft, changes = candidate
                 if article_digest(draft) not in {v["text_sha256"] for v in versions}:
-                    append_version(case, draft, "agent", changes, "semantic")
+                    append_version(case, draft, "agent", changes,
+                                   "article_length" if size_issue else "semantic")
                     save(case)
                     continue
                 report["semantic_edit_status"] = "repeats_previous_version"
@@ -211,6 +219,11 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
             append_version(case, candidate, "agent", [change], rule)
             save(case)
             continue
+        pending_edit = report.get("semantic_edit_status")
+        if can_edit and pending_edit in {"provider_error", "fact_check_pending"}:
+            case["decision"] = "semantic_review_pending" if pending_edit == "provider_error" else pending_edit
+            save(case)
+            return
         if semantic.get("issues"):
             reasons.append("semantic_issues")
         if facts.get("status") == "completed" and any(c["verdict"] != "confirmed" for c in facts["claims"]):
@@ -220,7 +233,7 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
         if semantic and semantic.get("status") != "completed":
             reasons.append("semantic_review_pending")
         unresolved_text = bool(edit) or bool({
-            "short_article", "fiction_claim_of_reality_review", "similar_article",
+            "short_article", "long_article", "fiction_claim_of_reality_review", "similar_article",
             "grammar_review", "style_review", "revision_introduced_new_findings", "semantic_issues", "open_claims",
         }.intersection(reasons))
         if version["stage"] != "assistant" and unresolved_text:
@@ -237,11 +250,14 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
 
 
 def save_case(path, case):
+    save_text(path, json.dumps(case, ensure_ascii=False, indent=2) + "\n")
+
+
+def save_text(path, content):
     with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as stream:
         temporary = Path(stream.name)
         try:
-            json.dump(case, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
+            stream.write(content)
             stream.flush()
             temporary.replace(path)
         finally:

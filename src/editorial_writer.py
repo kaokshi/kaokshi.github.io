@@ -5,6 +5,7 @@ import argparse
 from hashlib import sha256
 from html import escape
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -12,7 +13,7 @@ import unicodedata
 
 from editorial_ai_check import ROOT
 from editorial_agent_v1 import ACTIVE
-from editorial_quality import MIN_CHARS
+from editorial_length import count_characters, length_finding, MIN_CHARS, MAX_CHARS
 from editorial_revision import save_case
 
 GUIDES = {
@@ -38,15 +39,24 @@ def command_provider(executable):
         request = json.dumps({"task": task, **payload}, ensure_ascii=False)
         try:
             proc = subprocess.run([str(executable.expanduser().resolve())], input=request, capture_output=True,
-                                  text=True, encoding="utf-8", timeout=240, check=False)
+                                  text=True, encoding="utf-8", timeout=445, check=False)
             if proc.returncode:
-                raise Pending("provider_error", f"Provider exit code {proc.returncode}")
+                reason = proc.stderr[:240].strip() if executable.name == "editorial_local_llm.py" else ""
+                raise Pending("provider_error", reason or f"Provider exit code {proc.returncode}")
             response = json.loads(proc.stdout)
             if not isinstance(response, dict):
                 raise ValueError("Expected an object")
             return response
         except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             raise Pending("provider_error", type(exc).__name__) from exc
+    if executable is None:
+        invoke.identity = {"kind": "not_configured"}
+    elif executable.name == "editorial_local_llm.py":
+        invoke.identity = {"kind": os.environ.get("ZEN_LLM_BACKEND", "llama.cpp"),
+                           "model": os.environ.get("ZEN_LLM_MODEL"),
+                           "revision": os.environ.get("ZEN_LLM_MODEL_REVISION")}
+    else:
+        invoke.identity = {"kind": "local_executable", "name": executable.name}
     return invoke
 
 
@@ -61,7 +71,7 @@ def private_path(path):
     return path
 
 
-def write_article(channel, topic, provider, existing_titles=()):
+def write_article(channel, topic, provider, existing_titles=(), *, documents=(), allow_length_repair=False):
     if channel not in ACTIVE or not topic_key(topic):
         raise ValueError("Use a nonempty topic for legends or science")
     all_titles = list(existing_titles)
@@ -70,9 +80,14 @@ def write_article(channel, topic, provider, existing_titles=()):
     channel_name, genre_prompt = GUIDES[channel]
     reply = provider("write", {
         "channel": channel, "topic": topic, "existing_titles": all_titles,
+        "documents": [{**doc, "text": doc["text"][:4500]} for doc in documents[:3]],
         "instruction": f"{genre_prompt} Дай заголовок, зацепку, развитие и естественный финал. "
-                       f"Напиши 3500–5000 знаков без пробелов на русском. Используй "
-                       f"конкретные формулировки. Заверши оригинальным призывом подписаться "
+                       f"Обязательный объём {MIN_CHARS}–{MAX_CHARS} символов без пробелов. "
+                       f"Целься в 4000–4500 символов без пробелов, раскрывай тему сценами или "
+                       f"конкретными примерами. Для науки используй прочитанные документы, "
+                       f"указывай границы доказанного и не добавляй непроверяемых подробностей. "
+                       f"Сделай 6–8 достаточно содержательных абзацев, сохраняй естественный ритм. "
+                       f"Заверши оригинальным призывом подписаться "
                        f"на канал «{channel_name}». Ответ JSON с title, paragraphs и cta.",
     })
     title, blocks, cta = reply.get("title"), reply.get("paragraphs"), reply.get("cta")
@@ -87,11 +102,15 @@ def write_article(channel, topic, provider, existing_titles=()):
     if len(set(map(topic_key, blocks))) != len(blocks):
         raise ValueError("Writer output has duplicate paragraphs")
     prose = " ".join(blocks)
-    if len(re.sub(r"\s", "", prose)) < MIN_CHARS or len(re.findall(r"[а-яё]", prose, re.I)) < MIN_CHARS // 2:
-        raise ValueError("Writer output needs at least 3000 non-whitespace characters and Russian prose")
+    body = "\n".join(f"<p>{escape(p, quote=False)}</p>" for p in blocks)
+    chars = count_characters(body)
+    if len(re.findall(r"[а-яё]", prose, re.I)) < chars // 2:
+        raise ValueError("Writer output must be predominantly Russian prose")
+    if not allow_length_repair and length_finding(chars):
+        raise ValueError(f"Draft has {chars} characters outside the range {MIN_CHARS}–{MAX_CHARS}")
     slug = channel + "-draft-" + sha256(topic_key(topic).encode()).hexdigest()[:16]
     return {"slug": slug, "channel": channel, "title": title.strip(), "status": "draft",
-            "body_html": "\n".join(f"<p>{escape(p, quote=False)}</p>" for p in blocks),
+            "body_html": body,
             "sources": [], "image_files": [], "editorial_reviewed": False,
             "publication_authorized": False, "release_hold": True}
 
@@ -109,7 +128,7 @@ def main():
             raise ValueError("Output already exists")
         from editorial_ai_check import CONTENT
         from editorial_quality import similarity_report
-        corpus = sorted(CONTENT.glob(f"{args.channel}-*.json"))
+        corpus = sorted(CONTENT.glob("*.json"))
         titles = [json.loads(p.read_text(encoding="utf-8"))["title"] for p in corpus]
         article = write_article(args.channel, args.topic, command_provider(args.provider), titles)
         if similarity_report(corpus, candidate=article):

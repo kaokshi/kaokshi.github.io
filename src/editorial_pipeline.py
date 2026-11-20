@@ -11,12 +11,13 @@ import re
 
 from editorial_agent_v1 import ACTIVE, article_digest
 from editorial_ai_check import CONTENT
-from editorial_factcheck import fact_check
+from editorial_factcheck import fact_check, valid_sources
 from editorial_quality import similarity_report
 from editorial_research import europe_pmc
-from editorial_revision import run_case, save_case
+from editorial_revision import run_case, save_case, save_text
 from editorial_revision_checks import check_draft
-from editorial_semantic import diagnose, revise
+from editorial_semantic import diagnose, revise, resize_article
+from editorial_length import count_characters, extract_text, length_finding
 from editorial_writer import Pending, command_provider, private_path, topic_key, write_article
 
 
@@ -33,20 +34,14 @@ def validate_draft(article, channel):
     article_digest(article)
 
 
-def new_case(root, directory, existing, channel, topic, provider):
+def new_case(root, directory, existing, channel, topic, provider, *, documents=()):
     if existing is None:
-        originals = sorted(CONTENT.glob(f"{channel}-*.json"))
-        other_cases = sorted(root.glob(f"{channel}-*/case.json"))
+        originals = sorted(CONTENT.glob("*.json"))
+        peers = sorted(root.glob("*/case.json"))
         titles = [load(path)["title"] for path in originals]
-        titles.extend(load(path)["versions"][0]["article"]["title"] for path in other_cases)
-        article = write_article(channel, topic, provider, titles)
-        if similarity_report(originals, candidate=article):
-            raise ValueError("Generated draft resembles a repository article")
-        # Cases retain the current draft as a regular JSON file for reuse by the corpus checker.
-        others = [path.parent / "draft.json" for path in other_cases
-                  if (path.parent / "draft.json").is_file()]
-        if similarity_report(others, candidate=article):
-            raise ValueError("Generated draft resembles a draft already in this workspace")
+        titles.extend(load(path)["versions"][0]["article"]["title"] for path in peers)
+        article = write_article(channel, topic, provider, titles, documents=tuple(documents),
+                                allow_length_repair=True)
     else:
         article = existing
     validate_draft(article, channel)
@@ -54,14 +49,30 @@ def new_case(root, directory, existing, channel, topic, provider):
             "topic_sha256": sha256(topic_key(topic).encode()).hexdigest() if topic else None,
             "publication_authorized": False, "rss_delivery_authorized": False, "handoff": None,
             "versions": [{"stage": "original", "article": article, "text_sha256": article_digest(article)}]}
-    save_case(directory / "case.json", case)
+    if existing is None:
+        case["writer_provider"] = getattr(provider, "identity", None)
+        with (root / ".catalog-lock").open("a") as catalog:
+            flock(catalog, LOCK_EX)
+            peers = [load(path)["versions"][-1]["article"] for path in root.glob("*/case.json")]
+            if (topic_key(article["title"]) in {topic_key(peer["title"]) for peer in peers}
+                    or similarity_report(originals, candidate=article, drafts=peers)):
+                raise ValueError("Generated draft resembles an article already in the editorial corpus")
+            save_case(directory / "case.json", case)
+    else:
+        save_case(directory / "case.json", case)
     return case
 
 
-def assemble_report(article, provider, research, documents, reviewed, checkpoint, quality):
-    semantic = diagnose(article, provider, reviewed)
+def assemble_report(article, provider, research, documents, reviewed, checkpoint, quality,
+                    *, saved=None):
+    saved = saved or {}
+    semantic = saved.get("semantic_review")
+    if not semantic or semantic["status"] != "completed":
+        semantic = diagnose(article, provider, reviewed)
     checkpoint("semantic_review", semantic)
-    facts = fact_check(article, provider, research, documents, reviewed)
+    facts = saved.get("fact_check")
+    if not facts or facts["status"] not in {"completed", "not_applicable"}:
+        facts = fact_check(article, provider, research, documents, reviewed)
     checkpoint("fact_check", facts)
     if facts["status"] == "completed":
         disputed = [c for c in facts["claims"] if c["verdict"] == "disputed"]
@@ -71,7 +82,7 @@ def assemble_report(article, provider, research, documents, reviewed, checkpoint
              "evidence": claim["evidence"]} for claim in disputed
         ]]
     report = quality(article, [source["url"] for source in facts["sources"]])
-    return {**report, "semantic": semantic, "facts": facts}
+    return {**report, "semantic": semantic, "facts": facts, "llm": getattr(provider, "identity", None)}
 
 
 def execute(case, directory, provider, research, documents, reviews, response, quality):
@@ -83,17 +94,31 @@ def execute(case, directory, provider, research, documents, reviews, response, q
     def check(article):
         version = case["versions"][-1]
         reviewed = reviews.get(version["text_sha256"])
+        identity = getattr(provider, "identity", None)
+        inputs = [identity, reviewed, documents,
+                  getattr(research, "__name__", None), version["text_sha256"]]
+        key = sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        reuse = identity is not None and version.get("stage_input_sha256") == key
+        if not reuse:
+            version["stages"] = {}
+        version["stage_input_sha256"] = key
 
         def checkpoint(stage, report):
             version.setdefault("stages", {})[stage] = report
             save(case)
 
-        return assemble_report(article, provider, research, documents, reviewed, checkpoint, quality)
+        return assemble_report(article, provider, research, documents, reviewed, checkpoint, quality,
+                               saved=version["stages"])
 
     def semantic_editor(article, report):
         try:
-            edited = revise(article, report["semantic"]["issues"], provider,
-                            reviews.get(article_digest(article)))
+            if {"short_article", "long_article"}.intersection(report["findings"]):
+                if article["channel"] == "science" and not documents:
+                    raise Pending("fact_check_pending", "Science expansion or compression requires retrieved sources")
+                edited = resize_article(article, provider, tuple(documents or ()))
+            else:
+                edited = revise(article, report["semantic"]["issues"], provider,
+                                reviews.get(article_digest(article)))
             report["semantic_edit_status"] = "proposed" if edited else "no_applicable_edit"
             return edited
         except Pending as exc:
@@ -112,9 +137,14 @@ def execute(case, directory, provider, research, documents, reviews, response, q
         draft = case["versions"][-2]
     else:
         draft = version
-    save_case(directory / "draft.json", draft["article"])
+    article = draft["article"]
+    prose = "\n\n".join(line.strip() for line in extract_text(article["body_html"]).splitlines() if line.strip())
+    save_case(directory / "draft.json", article)
+    save_text(directory / "draft.md", f'# {article["title"]}\n\n{prose}\n')
     save_case(directory / "reports.json", {
         "decision": case["decision"], "draft_sha256": draft["text_sha256"],
+        "draft_characters_without_whitespace": count_characters(article["body_html"]),
+        "writer_provider": case.get("writer_provider"),
         "last_checked_version": version["text_sha256"], "handoff": case["handoff"],
         "versions": [{k: v for k, v in row.items() if k != "article"} for row in case["versions"]],
     })
@@ -135,6 +165,7 @@ def main():
     researchers = parser.add_mutually_exclusive_group()
     researchers.add_argument("--research-provider", type=Path, help="Configured search and reading executable")
     researchers.add_argument("--europe-pmc", action="store_true", help="Retrieve public research abstracts")
+    parser.add_argument("--research-query", help="Public source discovery query for the topic")
     parser.add_argument("--source-documents", type=Path, help="JSON with retrieved documents")
     parser.add_argument("--review", type=Path, help="Operator review for specific text hashes")
     parser.add_argument("--assistant-response", type=Path)
@@ -175,12 +206,23 @@ def main():
             flock(lock, LOCK_EX)
             path = directory / "case.json"
             try:
-                with (root / ".catalog-lock").open("a") as catalog:
-                    flock(catalog, LOCK_EX)
-                    if path.is_file():
-                        case = load(path)
-                    else:
-                        case = new_case(root, directory, existing, args.channel, args.topic, provider)
+                saved_docs = directory / "source-documents.json"
+                if documents is None and saved_docs.is_file():
+                    documents = load(saved_docs)["documents"]
+                if documents is None and args.topic and args.channel == "science" and research and args.provider:
+                    try:
+                        documents = research("discover", {"topic": args.topic, "search_query": args.research_query,
+                                                         "claims": []})["documents"]
+                    except Pending:
+                        documents = None
+                if documents:
+                    documents = list(valid_sources(documents).values())
+                    save_case(saved_docs, {"documents": documents})
+                if path.is_file():
+                    case = load(path)
+                else:
+                    case = new_case(root, directory, existing, args.channel, args.topic, provider,
+                                    documents=documents or ())
             except Pending as exc:
                 save_case(directory / "writer-status.json", {"status": exc.status, "reason": str(exc)})
                 print(json.dumps({"status": exc.status, "directory": str(directory)}))
@@ -189,8 +231,11 @@ def main():
                 save_case(directory / "writer-status.json", {"status": "draft_rejected", "reason": str(exc)})
                 raise
             if args.topic:
+                first = case["versions"][0]
+                count = count_characters(first["article"]["body_html"])
                 save_case(directory / "writer-status.json", {"status": "draft_created",
-                          "text_sha256": case["versions"][0]["text_sha256"]})
+                          "text_sha256": first["text_sha256"], "characters": count,
+                          "length_finding": length_finding(count)})
             if existing is not None and existing != case["versions"][0]["article"]:
                 raise ValueError("Resume using the original draft for this case")
             if existing is None and case.get("topic_sha256") != topic_digest:
