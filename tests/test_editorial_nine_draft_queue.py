@@ -26,9 +26,9 @@ class NineDraftTests(unittest.TestCase):
         self.assertIn("cinema",ACTIVE)
         def provider(task,request):
             return {"title":"Новый кинообзор",
-                    "paragraphs":["Подробный кинообзор. "*130,
-                                  "События развиваются. "*130,
-                                  "Рецензия завершена. "*130],
+                    "paragraphs":["Подробный кинообзор. "*75,
+                                  "События развиваются. "*75,
+                                  "Рецензия завершена. "*75],
                     "cta":"Подпишитесь на канал «Кадр за Кадром» ради новых киноисторий."}
         a=write_article("cinema","Кинолента, о которой не писали",provider)
         self.assertEqual(a["channel"],"cinema")
@@ -51,6 +51,7 @@ class NineDraftTests(unittest.TestCase):
     def test_bad_distribution_and_duplicates(self):
         p=plan()
         p["tasks"][-1]["channel"]="science"
+        p["tasks"][-1]["research_query"]="scientific evidence new topic"
         with self.assertRaisesRegex(ValueError,"exactly three"):
             validate_plan(p)
         p=plan()
