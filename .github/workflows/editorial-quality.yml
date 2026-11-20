@@ -70,7 +70,6 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Local Russian grammar for all edited articles (and three channel smoke tests)
-        continue-on-error: true
         env:
           REQUESTED_SLUG: ${{ inputs.slug }}
           EVENT_NAME: ${{ github.event_name }}
