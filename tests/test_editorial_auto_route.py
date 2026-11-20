@@ -123,7 +123,7 @@ class RoutingTests(unittest.TestCase):
         self.evidence["ai"]["checks"]["modernbert"]["score_percent"] = 99
         self.evidence["ai"]["checks"]["lightgbm"]["score_percent"] = 99
         self.assertEqual(route.decide(self.article, self.evidence)["disposition"],
-                         "automatic_release_candidate")
+                         "send_for_owner_review")
         self.evidence["ai"]["checks"]["lightgbm"]["status"] = "error"
         self.assertIn("ai_check_incomplete", route.decide(self.article, self.evidence)["blockers"])
 
