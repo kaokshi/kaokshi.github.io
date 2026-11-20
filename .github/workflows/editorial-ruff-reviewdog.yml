@@ -34,7 +34,20 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
-          report=json.loads((Path(os.environ['RUNNER_TEMP'])/'ruff-rdjson.json').read_text())
+          report_path=Path(os.environ['RUNNER_TEMP'])/'ruff-rdjson.json'
+          report=json.loads(report_path.read_text())
+          # Ruff rdjson contains absolute runner paths; GitHub PR API expects
+          # paths relative to the repository. Absolute paths cause HTTP 422.
+          repo_root=Path.cwd().resolve()
+          for diagnostic in report.get('diagnostics',[]):
+              location=diagnostic.get('location') or {}
+              if 'path' in location:
+                  absolute=Path(location['path']).resolve()
+                  try:
+                      location['path']=absolute.relative_to(repo_root).as_posix()
+                  except ValueError as exc:
+                      raise RuntimeError('Ruff emitted path outside the repository') from exc
+          report_path.write_text(json.dumps(report,ensure_ascii=False))
           print("RUFF_DIAGNOSTICS",len(report.get('diagnostics',[])))
           for diagnostic in report.get('diagnostics',[]):
               loc=diagnostic.get('location') or {}
