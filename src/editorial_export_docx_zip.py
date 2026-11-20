@@ -14,7 +14,6 @@ from pathlib import Path
 from docx import Document
 from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.style import WD_STYLE_TYPE
 
 from editorial_ai_check import extract_text
 
