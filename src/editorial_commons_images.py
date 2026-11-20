@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 from editorial_writer import private_path
 
 API="https://commons.wikimedia.org/w/api.php"
-ALLOWED_LICENSES = {
+KNOWN_LICENSES = {
     "CC0": "CC0-1.0",
     "CC0 1.0": "CC0-1.0",
     "CC BY 4.0": "CC-BY-4.0",
@@ -64,18 +64,17 @@ def candidate(page):
     if not isinstance(metadata,dict):
         return None
     license_label=value(metadata,"LicenseShortName")
-    license_id=ALLOWED_LICENSES.get(license_label.upper())
+    license_id=KNOWN_LICENSES.get(license_label.upper())
     pageurl=info.get("descriptionurl","")
     imageurl=info.get("url","")
     if (not isinstance(pageurl,str) or not pageurl.startswith("https://commons.wikimedia.org/wiki/")
             or not isinstance(imageurl,str) or urlsplit(imageurl).scheme!="https"
             or urlsplit(imageurl).hostname not in {"upload.wikimedia.org","commons.wikimedia.org"}):
         return None
-    if not license_id:
-        return None
     return {"title":title,"source_page":pageurl,
             "asset_url":imageurl,
             "license_claimed":license_id,
+            "license_status": "recognized_claim_unverified" if license_id else "unknown_or_restricted",
             "license_label":license_label,
             "license_url":value(metadata,"LicenseUrl"),
             "artist":value(metadata,"Artist"),
@@ -89,7 +88,7 @@ def candidate(page):
             "license_verified":False,
             "image_inspected":False,
             "editor_approved":False,
-            "rights_warning":"Machine-readable license is an unverified claim; review source page, creator, restrictions and attribution before use."}
+            "rights_warning":"All images may be found as candidates, including unknown or restricted licenses. Discovery does not give permission to republish; verify rights separately."}
 
 
 def search(query, limit=20, opener=urlopen):
