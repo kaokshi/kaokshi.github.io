@@ -1,0 +1,48 @@
+name: Sapling external diagnostic (manual, read-only)
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: "Exact existing article slug"
+        required: true
+        type: string
+      max_chars:
+        description: "Characters sent (300-10000; default 1900)"
+        required: false
+        default: "1900"
+        type: string
+permissions:
+  contents: read
+jobs:
+  optional-sapling-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run offline unit tests (no API call)
+        run: python -m unittest discover -s tests -p test_sapling_external_diagnostic.py
+      - name: Check that API key is configured
+        env:
+          SAPLING_API_KEY: ${{ secrets.SAPLING_API_KEY }}
+        run: |
+          if [ -z "$SAPLING_API_KEY" ]; then
+            echo "::error::Missing SAPLING_API_KEY repository secret. No API request was made."
+            exit 1
+          fi
+      - name: Request one article diagnostic (never release)
+        env:
+          SAPLING_API_KEY: ${{ secrets.SAPLING_API_KEY }}
+          ARTICLE_SLUG: ${{ inputs.slug }}
+          MAX_CHARS: ${{ inputs.max_chars }}
+        run: python src/sapling_external_diagnostic.py --slug "$ARTICLE_SLUG" --max-chars "$MAX_CHARS"
+      - name: Archive only metadata and scores (no article text)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sapling-diagnostic
+          path: sapling-diagnostic-reports/
+          if-no-files-found: ignore
+          retention-days: 7
