@@ -57,11 +57,11 @@ class EnsembleTests(unittest.TestCase):
     def test_no_score_only_rewrites(self):
         v=route_revision(channel="science",score_percent=99,threshold=80,validated=True,
               attempt=0,substantive_issues=[])
-        self.assertEqual(v["reason"],"high_score_without_proven_defect")
+        self.assertEqual(v["decision"],"quality_cleared_for_other_release_gates")
     def test_unvalidated_and_missing_check_fail_closed(self):
         v=route_revision(channel="science",score_percent=99,threshold=80,validated=False,
               attempt=0,substantive_issues=["Repeated paragraph"])
-        self.assertEqual(v["decision"],"owner_review")
+        self.assertEqual(v["decision"],"targeted_revision")
         self.assertFalse(v["release"])
         self.assertEqual(route_revision(channel="science",score_percent=99,threshold=80,validated=True,
               attempt=0,substantive_issues=["Repeated paragraph"],checks_completed=False)["decision"],"owner_review")
@@ -89,6 +89,29 @@ class EnsembleTests(unittest.TestCase):
         model=fit(train)
         with self.assertRaisesRegex(ValueError,"Wrong genre"):
             score(model,example(500,"human",channel="science"))
+
+    def test_no_ai_threshold_needed_for_real_defects(self):
+        r=route_revision(channel="legends",attempt=0,substantive_issues=["Repeated phrase"],
+                         score_percent=None,threshold=None,validated=False)
+        self.assertEqual(r["decision"],"targeted_revision")
+        self.assertEqual(r["attempt_next"],1)
+    def test_ai_score_alone_never_forces_rewrite(self):
+        for score in (0, 60, 100, None):
+            r=route_revision(channel="science",attempt=0,substantive_issues=[],
+                             score_percent=score,validated=False)
+            self.assertEqual(r["decision"],"quality_cleared_for_other_release_gates")
+            self.assertFalse(r["release"])
+    def test_after_two_attempts_owner_gets_unresolved_issues(self):
+        r=route_revision(channel="science",attempt=2,
+                         substantive_issues=["Fact not confirmed"],validated=False)
+        self.assertEqual(r["decision"],"owner_review")
+        self.assertEqual(r["reason"],"two_revisions_exhausted")
+        self.assertEqual(r["issues"],["Fact not confirmed"])
+    def test_incomplete_checks_without_threshold_still_block(self):
+        r=route_revision(channel="legends",attempt=0,
+                         substantive_issues=[],checks_completed=False)
+        self.assertEqual(r["decision"],"owner_review")
+        self.assertFalse(r["release"])
 
     def test_paused_cinema(self):
         self.assertEqual(route_revision(channel="cinema",score_percent=99,threshold=80,
