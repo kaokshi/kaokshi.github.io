@@ -86,8 +86,14 @@ def threshold_review(results):
         "limit_percent": 25,
         "within_limit": bool(valid and value <= THRESHOLD),
     }
+    full = data.get("whole_document") if isinstance(data, dict) else None
+    full_score = full.get("score_percent") if isinstance(full, dict) else None
+    if not (isinstance(full_score, (int, float)) and not isinstance(full_score, bool) and 0 <= full_score <= 100):
+        full_score = None
     return {
         "primary_model": "rubert_v4",
+        "whole_document_index_percent": full_score,
+        "whole_document_index_explanation": "0–100 points; larger = stronger ruBERT AI signal across the complete text. Not a calibrated probability.",
         "checks": {"rubert_v4": primary},
         "passed": primary["within_limit"],
         "comparison_only": ["modernbert", "lightgbm", "ai_accent_detector"],

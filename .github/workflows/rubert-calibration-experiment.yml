@@ -1,0 +1,141 @@
+name: EXPERIMENT - ruBERT v4 calibration, shadow only
+on:
+  pull_request:
+    paths:
+      - 'src/rubert_calibration.py'
+      - 'src/rubert_v4_runner.py'
+      - 'experiments/rubert_cross_article_test.py'
+      - 'experiments/rubert_labeled_benchmark.py'
+      - 'tests/test_rubert_calibration.py'
+      - 'experiments/rubert-ninth-floor-window-scores.json'
+      - '.github/workflows/rubert-calibration-experiment.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate metrics, provenance and leak protection
+        run: python -m unittest tests.test_rubert_calibration -v
+      - name: Recompute honest alternative diagnostics on real prior ruBERT output
+        run: |
+          python src/rubert_calibration.py \
+            --windows-json experiments/rubert-ninth-floor-window-scores.json \
+            --output editorial-calibration-reports/ninth-floor.json
+      - name: Verify unchanged active 25-percent limit and no publication
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.editorial_ai_check import THRESHOLD
+          assert THRESHOLD == .25
+          cfg=json.loads(Path('config/site.json').read_text())
+          assert cfg['publication_enabled'] is False
+          report=json.loads(Path('editorial-calibration-reports/ninth-floor.json').read_text())
+          assert report['release_gate_changed'] is False
+          assert report['ai_generation_probability'] is None
+          assert report['whole_document']['all_words_covered'] is True
+          print('WHOLE_DOCUMENT_RUBERT_INDEX', report['whole_document']['score_percent'])
+          print("RESEARCH_ONLY: release threshold unchanged, no site/RSS deployment")
+          PY
+      - name: Save read-only statistics
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubert-shadow-calibration
+          path: editorial-calibration-reports/
+          retention-days: 14
+  real-articles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned ruBERT v4 only
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Fetch pinned model assets (no other detectors)
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+            "k1y0mi/ru-ai-text-detector",
+            repo_type="model",
+            revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+            allow_patterns=["v4_model/*","v4_calibrator.joblib","threshold_v4.json"],
+            local_dir=".rubert-upstream/models",
+          )
+          PY
+      - name: Score six genuine drafts across two active channels
+        run: python experiments/rubert_cross_article_test.py
+      - name: Upload private six-article statistical report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubert-six-article-shadow
+          path: editorial-calibration-reports/cross-article.json
+          retention-days: 14
+          if-no-files-found: warn
+  labeled-controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install our existing pinned ruBERT only
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Download same pinned ruBERT v4 weights as newsroom
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+            "k1y0mi/ru-ai-text-detector",
+            repo_type="model",
+            revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+            allow_patterns=["v4_model/*","v4_calibrator.joblib","threshold_v4.json"],
+            local_dir=".rubert-upstream/models",
+          )
+          PY
+      - name: Evaluate public original and AI-labeled texts using our ruBERT
+        run: |
+          .rubert-venv/bin/python experiments/rubert_labeled_benchmark.py
+      - name: Verify labels are exploratory and no release happened
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("editorial-calibration-reports/verified-label-benchmark.json").read_text())
+          assert r["total_n"]>=32
+          assert r["change_production_threshold"] is False
+          assert r["publication_authorized"] is False
+          assert r["rss_modified"] is False
+          cfg=json.loads(Path("config/site.json").read_text())
+          assert cfg["publication_enabled"] is False
+          print("BENCHMARK_ONLY",r["total_n"],"candidate labels scored; NO_RELEASE")
+          PY
+      - name: Upload numerical audit only (no corpus article bodies)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubert-labeled-control-rates
+          path: editorial-calibration-reports/verified-label-benchmark.json
+          retention-days: 14
+          if-no-files-found: warn

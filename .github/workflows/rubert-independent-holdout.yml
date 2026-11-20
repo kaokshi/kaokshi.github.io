@@ -1,0 +1,62 @@
+name: EXPERIMENT - ruBERT independent holdout (no site/RSS)
+on:
+  pull_request:
+    paths:
+      - 'experiments/rubert_independent_holdout.py'
+      - '.github/workflows/rubert-independent-holdout.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-unseen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install only our existing pinned ruBERT v4
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Load pinned model assets
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+            "k1y0mi/ru-ai-text-detector",
+            repo_type="model",
+            revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+            allow_patterns=["v4_model/*","v4_calibrator.joblib","threshold_v4.json"],
+            local_dir=".rubert-upstream/models"
+          )
+          PY
+      - name: Verify preregistered candidate thresholds on disjoint source IDs
+        run: .rubert-venv/bin/python experiments/rubert_independent_holdout.py
+      - name: Guard production thresholds, no release
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          from src.editorial_ai_check import THRESHOLD
+          r=json.loads(Path("editorial-calibration-reports/independent-holdout.json").read_text())
+          assert r["thresholds_selected_before_holdout"] == {"essay":95,"scientific":85}
+          assert r["total_n"] >= 120
+          assert r["publishing_threshold_changed"] is False
+          assert r["publication_authorized"] is False
+          assert THRESHOLD == .25
+          assert json.loads(Path("config/site.json").read_text())["publication_enabled"] is False
+          print("INDEPENDENT_HOLDOUT_ONLY",r["total_n"],"no release")
+          PY
+      - name: Upload numerical evaluation only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubert-disjoint-holdout-rates
+          path: editorial-calibration-reports/independent-holdout.json
+          retention-days: 14
+          if-no-files-found: warn

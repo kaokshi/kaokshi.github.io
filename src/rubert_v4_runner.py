@@ -19,12 +19,9 @@ def windows(text):
     words = re.findall(r"\S+", text)
     if not words:
         return []
-    if len(words) <= WINDOW_WORDS:
-        return [" ".join(words)]
-    starts = list(range(0, len(words) - WINDOW_WORDS + 1, STRIDE_WORDS))
-    if starts[-1] != len(words) - WINDOW_WORDS:
-        starts.append(len(words) - WINDOW_WORDS)
-    return [" ".join(words[start:start + WINDOW_WORDS]) for start in starts]
+    from rubert_calibration import legacy_window_spans
+    spans = legacy_window_spans(len(words), WINDOW_WORDS, STRIDE_WORDS)
+    return [" ".join(words[start:end]) for start, end in spans]
 
 
 def main():
@@ -43,6 +40,10 @@ def main():
         raise SystemExit("Text is empty")
     scorer = get("v4")
     values = [float(p) for p in scorer.proba(segments, bs=1)]
+    from rubert_calibration import document_coverage_score, legacy_window_spans
+    total_words = len(re.findall(r"\S+", text))
+    window_spans = legacy_window_spans(total_words, WINDOW_WORDS, STRIDE_WORDS)
+    whole_document = document_coverage_score(values, window_spans, total_words)
     if any(not 0 <= p <= 1 for p in values):
         raise SystemExit("Invalid calibrated model values")
     thresholds = [float(scorer.threshold_for(word_count(segment))) for segment in segments]
@@ -59,11 +60,15 @@ def main():
         "window_count": len(segments),
         "window_probabilities": [round(p, 6) for p in values],
         "mean_probability": sum(values) / len(values),
+        "whole_document": whole_document,
+        "whole_document_index_percent": whole_document["score_percent"],
+        "window_spans": window_spans,
+        "document_word_count": total_words,
         "model_native_threshold": min(thresholds),
         "editorial_limit_percent": 25,
         "word_count": word_count(text),
         "prediction_native": "ai" if any(p >= t for p, t in zip(values, thresholds)) else "human",
-        "note": "The max-over-windows score is a conservative editor rule, not a calibrated whole-document probability. Longer texts have more chances to contain a high-scoring window. The 25% cutoff is a house preference and not proof of authorship."
+        "note": "The whole_document_index_percent is an overlap-corrected whole-article 0-100 heuristic, not P(AI). The legacy max-over-windows probability and 25% hard gate remain unchanged until validated on labeled controls."
     }, ensure_ascii=False))
 
 
