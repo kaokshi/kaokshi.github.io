@@ -57,7 +57,7 @@ class Tests(unittest.TestCase):
         self.assertTrue(module.qualify_validation(synthetic,sandbox["validation_requirements"]))
         self.assertEqual(module.decide_revision("legends",self.report,sandbox,synthetic)["decision"],
                          "targeted_editorial_revision")
-        self.assertEqual(self.policy["status"],"awaiting_independent_validation")
+        self.assertEqual(self.policy["status"],"owner_selected_unvalidated_editorial_triage")
 
     def test_higher_signal_not_ai_probability(self):
         self.assertIsNone(self.policy["thresholds"]["legends"])
