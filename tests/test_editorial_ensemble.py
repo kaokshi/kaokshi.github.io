@@ -112,6 +112,28 @@ class EnsembleTests(unittest.TestCase):
         self.assertEqual(r["decision"],"owner_review")
         self.assertFalse(r["release"])
 
+    def test_owner_threshold_30_requires_validation(self):
+        high=route_revision(channel="legends",attempt=0,substantive_issues=[],
+                            score_percent=75,validated=False)
+        self.assertEqual(high["decision"],"quality_cleared_for_other_release_gates")
+        flagged=route_revision(channel="legends",attempt=0,substantive_issues=[],
+                               score_percent=30.0001,validated=True)
+        self.assertEqual(flagged["decision"],"editorial_review_required")
+        self.assertFalse(flagged["release"])
+        clear=route_revision(channel="science",attempt=0,substantive_issues=[],
+                             score_percent=30.0,validated=True)
+        self.assertEqual(clear["decision"],"quality_cleared_for_other_release_gates")
+    def test_two_attempts_with_validated_high_index_then_owner(self):
+        kwargs={"channel":"legends","substantive_issues":["Repeated content"],
+                "score_percent":77,"validated":True}
+        self.assertEqual(route_revision(**kwargs,attempt=0)["attempt_next"],1)
+        self.assertEqual(route_revision(**kwargs,attempt=1)["attempt_next"],2)
+        self.assertEqual(route_revision(**kwargs,attempt=2)["decision"],"owner_review")
+    def test_approved_threshold_cannot_be_silently_changed(self):
+        with self.assertRaisesRegex(ValueError,"exactly 30"):
+            route_revision(channel="legends",attempt=0,substantive_issues=[],
+                           score_percent=55,threshold=25,validated=True)
+
     def test_paused_cinema(self):
         self.assertEqual(route_revision(channel="cinema",score_percent=99,threshold=80,
               validated=True,attempt=0,substantive_issues=["repeat"])["decision"],"paused_channel")
