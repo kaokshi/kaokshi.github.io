@@ -30,6 +30,7 @@ jobs:
         run: python -m pip install "requests==2.32.5" "cinemagoer"
       - name: Install local semantic embedding model runtime
         run: |
+          python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
           python -m pip install "sentence-transformers==3.4.1" "numpy<2"
       - name: Verify local safety and mapping tests
         run: python -m unittest tests.test_movie_fact_check -v
