@@ -13,6 +13,7 @@ from pathlib import Path
 from editorial_ai_check import CONTENT
 from editorial_nine_draft_queue import validate_plan
 from editorial_writer import Pending, command_provider, private_path, topic_key
+from editorial_no_repeat import topic_duplicate_reason
 
 PROVIDER=Path(__file__).resolve().parent/"editorial_local_llm.py"
 
@@ -69,6 +70,10 @@ def create_plan(day,workspace,provider):
     prior={topic_key(t) for t in archive}
     if any(topic_key(x["topic"]) in prior for x in tasks):
         raise ValueError("Topic exactly repeats a previous draft or plan")
+    for item in tasks:
+        issue = topic_duplicate_reason(item["channel"], item["topic"], archive)
+        if issue:
+            raise ValueError("Refuse repeated editorial topic: " + issue)
     return plan
 
 

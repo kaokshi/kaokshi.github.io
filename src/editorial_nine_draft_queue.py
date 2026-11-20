@@ -16,6 +16,7 @@ import sys
 
 from editorial_two_channel_pilot import endpoint_ready, dossier_summary, run_one
 from editorial_writer import private_path, topic_key
+from editorial_no_repeat import topic_duplicate_reason
 
 CHANNELS = ("legends", "science", "cinema")
 DAILY_COUNT = 3
@@ -39,6 +40,8 @@ def validate_plan(plan):
         if channel not in count or not isinstance(topic, str) or not (8 <= len(topic.strip()) <= 180):
             raise ValueError("Unknown channel or invalid topic")
         key = topic_key(topic)
+        if topic_duplicate_reason(channel, topic):
+            raise ValueError("Repeated editorial topic prohibited: " + topic_duplicate_reason(channel, topic))
         if not key or key in seen:
             raise ValueError("Duplicate or empty topic")
         seen.add(key)
