@@ -8,6 +8,9 @@ on:
       - 'experiments/approval_preview.html'
       - '.github/workflows/remaining-tools-experiment.yml'
   workflow_dispatch:
+concurrency:
+  group: experimental-editorial-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -113,6 +116,7 @@ jobs:
           path: editorial-remaining-tests/services.json
 
   n8n-ephemeral:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -138,6 +142,7 @@ jobs:
         if: always()
         run: docker rm -f editorial-n8n || true
   changedetection-ephemeral:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
