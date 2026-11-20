@@ -1,0 +1,27 @@
+{
+  "source_run_url": "https://github.com/kaokshi/kaokshi.github.io/actions/runs/44687507196",
+  "article_slug": "legends-11-devyaty-etazh-na-rechnoy",
+  "model": "ruBERT v4",
+  "aggregation": "max_window_probability",
+  "window_probabilities": [
+    0.6,
+    0.481481,
+    0.303797,
+    0.112676,
+    0.303797,
+    0.481481,
+    0.481481,
+    0.112676,
+    0.112676,
+    0.112676,
+    0.112676,
+    0.303797,
+    0.112676,
+    0.303797,
+    0.112676,
+    0.090909,
+    0.303797
+  ],
+  "window_count": 17,
+  "notice": "Scores transcribed from the completed first-party GitHub run; not a labeled calibration dataset."
+}
