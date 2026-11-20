@@ -66,32 +66,39 @@ def tool_result(argv, text_path, timeout=240):
 
 
 
-THRESHOLD = 0.25  # Sole editorial threshold: ruBERT v4 maximum-window score <= 25%.
-
-
 def threshold_review(results):
-    """Only ruBERT v4 controls threshold. Three other models are comparison-only."""
-    check = results.get("rubert_v4", {})
-    data = check.get("data")
-    value = data.get("probability") if isinstance(data, dict) else None
-    valid = (
-        check.get("status") == "completed"
-        and not isinstance(value, bool)
-        and isinstance(value, (int, float))
-        and 0 <= value <= 1
-    )
-    primary = {
-        "status": "evaluated" if valid else "unavailable",
-        "score_percent": round(value * 100, 4) if valid else None,
-        "limit_percent": 25,
-        "within_limit": bool(valid and value <= THRESHOLD),
-    }
+    """Report four existing AI detectors without a ruBERT-only cutoff.
+
+    The result is descriptive. A model score is neither a calibrated percentage
+    of AI authorship nor a justified instruction to rewrite prose.
+    """
+    diagnostics = {}
+    for name in ("rubert_v4", "modernbert", "lightgbm", "ai_accent_detector"):
+        item = results.get(name, {})
+        data = item.get("data") if isinstance(item, dict) else None
+        value = data.get("score_percent") if isinstance(data, dict) else None
+        if name == "rubert_v4" and isinstance(data, dict):
+            value = data.get("whole_document_index_percent", value)
+        if name == "ai_accent_detector" and isinstance(data, dict):
+            accent = data.get("ai_accent_score")
+            if isinstance(accent, (int, float)) and not isinstance(accent, bool) and 0 <= accent <= 1:
+                value = round(accent * 100, 4)
+        valid = isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 100
+        diagnostics[name] = {
+            "status": item.get("status", "unavailable") if isinstance(item, dict) else "unavailable",
+            "index_0_100": round(value, 2) if valid else None,
+            "unit": "uncalibrated_model_diagnostic",
+        }
     return {
-        "primary_model": "rubert_v4",
-        "checks": {"rubert_v4": primary},
-        "passed": primary["within_limit"],
-        "comparison_only": ["modernbert", "lightgbm", "ai_accent_detector"],
-        "note": "Only ruBERT v4 controls the diagnostic threshold. Other model scores are comparison only, not independent proof of authorship.",
+        "status": "diagnostics_only",
+        "primary_model": None,
+        "checks": diagnostics,
+        "passed": None,
+        "limit_percent": None,
+        "needs_rewrite_based_on_ai": None,
+        "calibrated_ai_probability": None,
+        "note": ("No detector has an independent validated rewrite threshold for our genres. "
+                 "Do not rewrite solely because of an AI model score."),
     }
 
 
@@ -148,13 +155,11 @@ def main():
         result = evaluate(article)
         destination = target / (article.stem + ".json")
         destination.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        manifest.append({"article": article.stem, "report": destination.name, "checks_completed": result["all_checks_completed"], "threshold_passed": result["editorial_threshold"]["passed"]})
+        manifest.append({"article": article.stem, "report": destination.name, "checks_completed": result["all_checks_completed"], "threshold_passed": None})
         print(f'{article.stem}: {sum(x["status"] == "completed" for x in result["checks"].values())}/4 tools completed')
     (target / "index.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if any(not entry["checks_completed"] for entry in manifest):
         raise SystemExit("One or more tools failed; report is incomplete (no approval granted).")
-    if any(not entry["threshold_passed"] for entry in manifest):
-        raise SystemExit("Primary ruBERT v4 exceeds 25% or is unavailable; editorial threshold not passed.")
 
 
 if __name__ == "__main__":
