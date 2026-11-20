@@ -10,5 +10,6 @@
   "ai_score": 0,
   "image_files": [],
   "source_docx": "01_Prohodnaya_17.docx",
-  "characters_without_spaces": 3287
+  "characters_without_spaces": 3287,
+  "stage_pipeline_fixture": "temporary_PR_routing_test_only_no_publication"
 }
