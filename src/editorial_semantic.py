@@ -25,6 +25,8 @@ def diagnose(article, provider, reviewed=None):
         origin = "operator"
     else:
         origin = "model"
+        genre = ("Для мистики отдельно проверь, не прерывают ли сюжет псевдонаучные ссылки "
+                 "и авторские объяснения сюжета. Для научпопа отметь неподтверждённые факты.")
         try:
             response = provider("diagnose", {
                 "title": article["title"], "channel": article["channel"],
@@ -33,7 +35,7 @@ def diagnose(article, provider, reviewed=None):
                                 "Проверь начало, хронологию, логику, пустые абзацы, "
                                 "естественность и необоснованные утверждения. Верни issues "
                                 "с id, category, paragraph, quote и reason. Цитируй "
-                                f"точно. Категории: {', '.join(sorted(CATEGORIES))}."),
+                                f"точно. Категории: {', '.join(sorted(CATEGORIES))}. {genre}"),
             })
         except Pending as exc:
             return {"status": exc.status, "reason": str(exc), "text_sha256": digest, "issues": []}
@@ -75,7 +77,8 @@ def revise(article, issues, provider, reviewed=None):
                             "факты и смысл. Для спорных фактов опирайся на приложенное "
                             "обоснование и избегай новых утверждений. Верни edits с "
                             "issue_id, paragraph, before, after, reason. Для удаления "
-                            "пустого абзаца укажи remove: true и пустой after."),
+                            "пустого абзаца укажи remove: true и пустой after. "
+                            "Дай одну сводную правку на абзац."),
         })
     index = {i["id"]: i for i in issues}
     edits = response.get("edits")

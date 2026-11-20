@@ -63,7 +63,9 @@ class WriterTests(unittest.TestCase):
             self.assertIn("мотивацию", request["instruction"])
             return reply
 
+        reply["paragraphs"].append(reply["cta"])
         article = write_article("legends", "Сумерки", provider)
+        self.assertEqual(article["body_html"].count(reply["cta"]), 1)
         self.assertIn("&lt;script&gt;", article["body_html"])
         self.assertTrue(article["release_hold"])
         self.assertFalse(article["publication_authorized"])

@@ -19,11 +19,12 @@ from editorial_revision import save_case
 
 GUIDES = {
     "legends": ("Легенды тёмных улиц", "Создай оригинальный вымышленный сюжет. "
-                "Проверь хронологию, мотивацию персонажей и причинно-следственные связи. "
-                "Явно обозначь вымысел."),
+                "Покажи мотивацию и хронологию через действия. "
+                "Веди художественное повествование до развязки. Не вставляй научных справок, "
+                "ссылок на исследования и комментариев о том, как устроен сюжет."),
     "science": ("За гранью очевидного", "Объясни явление понятным языком. "
-                "Отметь границы доказанного, избегай догадок и вымышленных ссылок. "
-                "Точные факты должны быть проверяемыми по первоисточникам."),
+                "Используй прочитанные документы, точные факты сверяй с первоисточниками. "
+                "Отметь границы доказанного, избегай догадок, вымышленных ссылок и цитат."),
 }
 
 
@@ -88,11 +89,12 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
         "instruction": f"{genre_prompt} Дай заголовок, зацепку, развитие и естественный финал. "
                        f"Обязательный объём {MIN_CHARS}–{MAX_CHARS} символов без пробелов. "
                        f"Целься в 4000–4500 символов без пробелов, раскрывай тему сценами или "
-                       f"конкретными примерами. Для науки используй прочитанные документы, "
-                       f"указывай границы доказанного и не добавляй непроверяемых подробностей. "
+                       f"конкретными примерами. "
                        f"Сделай 6–8 достаточно содержательных абзацев, сохраняй естественный ритм. "
-                       f"Заверши оригинальным призывом подписаться "
-                       f"на канал «{channel_name}». Ответ JSON с title, paragraphs и cta.",
+                       f"Подбери самостоятельный короткий заголовок. "
+                       f"Запиши оригинальный призыв подписаться на канал «{channel_name}» "
+                       f"только в отдельное поле cta. Свяжи его с темой материала. "
+                       f"Не дублируй абзацы. Ответ JSON с title, paragraphs и cta.",
     })
     title, blocks, cta = reply.get("title"), reply.get("paragraphs"), reply.get("cta")
     if (not isinstance(title, str) or not title.strip() or not isinstance(blocks, list)
@@ -102,7 +104,10 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
         raise ValueError("Writer output needs a title, article paragraphs and a channel-specific CTA")
     if topic_key(title) in {topic_key(t) for t in all_titles}:
         raise ValueError("Generated title duplicates another article")
-    blocks = [p.strip() for p in blocks] + [cta.strip()]
+    cta_key = topic_key(cta)
+    blocks = [p.strip() for p in blocks if topic_key(p) != cta_key] + [cta.strip()]
+    if len(blocks) < 4:
+        raise ValueError("Writer output needs at least three distinct prose paragraphs before the CTA")
     if len(set(map(topic_key, blocks))) != len(blocks):
         raise ValueError("Writer output has duplicate paragraphs")
     prose = " ".join(blocks)

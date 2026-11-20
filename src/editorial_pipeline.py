@@ -40,7 +40,22 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
         peers = sorted(root.glob("*/case.json"))
         titles = [load(path)["title"] for path in originals]
         titles.extend(load(path)["versions"][0]["article"]["title"] for path in peers)
-        article = write_article(channel, topic, provider, titles, documents=tuple(documents),
+        response_path = directory / "writer-response.json"
+        status_path = directory / "writer-status.json"
+
+        def generate(task, payload):
+            inputs = [getattr(provider, "identity", None), task, payload]
+            key = sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+            saved = load(response_path) if response_path.is_file() else {}
+            status = load(status_path) if status_path.is_file() else {}
+            if (inputs[0] is not None and saved.get("input_sha256") == key
+                    and status.get("status") != "draft_rejected"):
+                return saved["response"]
+            reply = provider(task, payload)
+            save_case(response_path, {"input_sha256": key, "response": reply})
+            return reply
+
+        article = write_article(channel, topic, generate, titles, documents=tuple(documents),
                                 allow_length_repair=True)
     else:
         article = existing
