@@ -2,5 +2,11 @@
   "site_url": "https://kaokshi.github.io",
   "site_name": "Три истории мира",
   "timezone": "Europe/Moscow",
-  "publication_enabled": false
+  "publication_enabled": false,
+  "auto_release_enabled": true,
+  "auto_release_active_channels": [
+    "legends",
+    "science"
+  ],
+  "auto_release_risk_threshold": 20
 }
