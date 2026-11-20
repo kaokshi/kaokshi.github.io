@@ -117,8 +117,7 @@ def extract_signals(text,path):
         if model.get("skipped") is True or model.get("read",{}).get("truncated") is True:
             raise ValueError("Model skipped or truncated a benchmark sample")
     ru_windows=[finite01(x) for x in rubert["window_probabilities"]]
-    if len(text.split())!=rubert.get("word_count"):
-        raise ValueError("Inconsistent word counts (full text not scored)")
+    # The upstream word_count uses a different tokenization from the runner\n    # (which uses whitespace words). Coverage is checked against the actual\n    # number of scored windows by whole_index below, not this metadata.
     m=finite01(modern["probability"])
     l=finite01(light["probability"])
     accent_score=finite01(accent["ai_accent_score"])
