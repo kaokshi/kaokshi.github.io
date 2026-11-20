@@ -20,6 +20,10 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 
 - `src/editorial_two_channel_pilot.py` is the private Qwen two-channel orchestration tool. Run only with a real preconfigured loopback LLM and a private workspace outside the repository; `--status-only` verifies saved cases without calling a provider. Before claiming the editorial agent is ready, complete both genuine articles with fresh hashes, full source and quality checks, images with rights, and a verifiable owner handoff. Never present localhost transport tests as a Qwen production pilot. See `docs/EDITORIAL_TWO_CHANNEL_PILOT.md`.
 
+## Private handoff packet
+
+- Generate owner/ChatGPT handoff material only via `src/editorial_owner_packet.py` to a private path outside GitHub; verify per-version SHA-256 and record `transport_status=not_connected`. The packet does not send itself. Do not upload article text, case histories, credentials, or image assets to public Actions logs or artifacts. See `docs/EDITORIAL_OWNER_PACKET.md`.
+
 ## Self-learning feature (requested 20 November 2026)
 
 Self-learning is **feedback-driven improvement**, not uncontrolled online model training. Configuration: `config/agent_learning.json`.
