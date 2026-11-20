@@ -100,7 +100,7 @@ def main():
       "created_at":datetime.now(timezone.utc).isoformat(),
       "purpose":"OWNER_REVIEW_MANUAL_PUBLICATION_ONLY",
       "publication_authorized_by_export":False,
-      "warning":"No rights-cleared images attached, editorial approval pending, automated checks not guaranteed on current file hashes",
+      "warning":"Images not attached; editorial approval pending; automatic checks not guaranteed on current file hashes",
       "articles":[]}
     for channel,slugs in BATCH.items():
         for i,slug in enumerate(slugs,start=1):
@@ -114,7 +114,7 @@ def main():
       "Перед публикацией каждой статьи обязательно:\n"
       "1. Прочитать и одобрить текст, проверить непротиворечивость и заголовок.\n"
       "2. Для научпопа проверить числовые и научные утверждения по первичным источникам.\n"
-      "3. Самостоятельно подобрать и проверить права на изображения; в текущих DOCX фотографии НЕ приложены.\n"
+      "3. Подобрать подходящие по смыслу и атмосфере изображения; в текущих DOCX фотографии НЕ приложены. Не использовать заведомо запрещённые материалы.\n"
       "4. Убедиться, что выбран правильный канал, оформление и ссылка на подписку.\n"
       "5. Опубликовать вручную в Дзене; записать URL и дату в журнал запуска.\n"
       "6. Не включать автоматический выпуск или RSS в GitHub.\n\n"
@@ -122,7 +122,7 @@ def main():
       "Показатели ИИ-детекторов здесь не придуманы: финальные показатели только из отдельных успешных проверок тех же SHA.\n"
     )
     (OUTPUT/"README.txt").write_text(guide,encoding="utf-8")
-    rows=["channel,slug,date_published_msk,zen_article_url,owner_approved,images_rights_checked,science_facts_checked,notes"]
+    rows=["channel,slug,date_published_msk,zen_article_url,owner_approved,images_selected,science_facts_checked,notes"]
     for ch,slugs in BATCH.items():
         for slug in slugs:
             rows.append(f"{ch},{slug},,,,,,")
