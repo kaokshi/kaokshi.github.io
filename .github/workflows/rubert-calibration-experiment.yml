@@ -1,0 +1,47 @@
+name: EXPERIMENT - ruBERT v4 calibration, shadow only
+on:
+  pull_request:
+    paths:
+      - 'src/rubert_calibration.py'
+      - 'tests/test_rubert_calibration.py'
+      - 'experiments/rubert-ninth-floor-window-scores.json'
+      - '.github/workflows/rubert-calibration-experiment.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate metrics, provenance and leak protection
+        run: python -m unittest tests.test_rubert_calibration -v
+      - name: Recompute honest alternative diagnostics on real prior ruBERT output
+        run: |
+          python src/rubert_calibration.py \
+            --windows-json experiments/rubert-ninth-floor-window-scores.json \
+            --output editorial-calibration-reports/ninth-floor.json
+      - name: Verify unchanged active 25-percent limit and no publication
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.editorial_ai_check import THRESHOLD
+          assert THRESHOLD == .25
+          cfg=json.loads(Path('config/site.json').read_text())
+          assert cfg['publication_enabled'] is False
+          report=json.loads(Path('editorial-calibration-reports/ninth-floor.json').read_text())
+          assert report['release_gate_changed'] is False
+          assert report['ai_generation_probability'] is None
+          print("RESEARCH_ONLY: release threshold unchanged, no site/RSS deployment")
+          PY
+      - name: Save read-only statistics
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubert-shadow-calibration
+          path: editorial-calibration-reports/
+          retention-days: 14
