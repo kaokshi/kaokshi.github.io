@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Тест редакторского согласования</title></head>
+<body><main>
+<h1>Редакторское согласование — локальный тест</h1>
+<p>Демонстрационная форма. Никаких публикаций и отправки данных.</p>
+<label>Канал <select id="channel">
+  <option value="legends">Легенды тёмных улиц</option>
+  <option value="science">За гранью очевидного</option>
+  <option value="cinema">Кадр за Кадром</option>
+</select></label>
+<label>Текст <textarea id="draft"></textarea></label>
+<label>Комментарий <textarea id="comment"></textarea></label>
+<button type="button" id="revision">Вернуть на исправление</button>
+<button type="button" id="approve">Согласовать редакцию</button>
+<div id="state" role="status">Ожидает редактора</div>
+<script>
+(function(){
+ const output=document.getElementById('state');
+ const content=document.getElementById('draft');
+ const note=document.getElementById('comment');
+ let decision='pending';
+ function update(action){
+   if(!content.value.trim()){output.textContent='Текст отсутствует';return;}
+   if(action==='revision'&&!note.value.trim()){
+     output.textContent='Нужно указать замечание';return;
+   }
+   decision=action==='revision'?'changes_requested':'editorially_approved';
+   const result={channel:document.getElementById('channel').value,decision,
+      reviewed:true,publication_authorized:false,article_text:content.value,
+      review_note:note.value};
+   output.textContent=JSON.stringify(result);
+   window.__localReviewResult=result;
+ }
+ document.getElementById('revision').addEventListener('click',()=>update('revision'));
+ document.getElementById('approve').addEventListener('click',()=>update('approve'));
+})();
+</script></main></body></html>
