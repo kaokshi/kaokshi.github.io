@@ -32,6 +32,8 @@ on:
       - 'tests/test_real_nine_qwen_e2e.py'
       - 'src/editorial_encrypted_review.py'
       - 'tests/test_editorial_encrypted_review.py'
+      - 'src/editorial_request_review.py'
+      - 'tests/test_editorial_request_review.py'
       - 'tests/test_model_a_85_trend.py'
       - 'src/editorial_auto_route.py'
       - 'src/editorial_auto_release.py'
@@ -59,7 +61,7 @@ jobs:
         run: python -m pip install 'cryptography>=44,<48'
       - name: Regression suite for model A and agent
         run: |
-          python -m unittest             tests.test_editorial_agent_v1             tests.test_editorial_pipeline             tests.test_editorial_llm_http             tests.test_editorial_two_channel_pilot             tests.test_editorial_owner_packet             tests.test_editorial_commons_images             tests.test_editorial_nine_draft_queue             tests.test_editorial_daily_topic_plan             tests.test_editorial_daily_owner_packet             tests.test_editorial_qwen_writer_recovery             tests.test_real_nine_qwen_e2e             tests.test_editorial_encrypted_review             tests.test_model_a_85_trend             tests.test_editorial_ai_check             tests.test_editorial_auto_route             tests.test_editorial_auto_release             tests.test_editorial_ai_revision_policy             tests.test_build -v
+          python -m unittest             tests.test_editorial_agent_v1             tests.test_editorial_pipeline             tests.test_editorial_llm_http             tests.test_editorial_two_channel_pilot             tests.test_editorial_owner_packet             tests.test_editorial_commons_images             tests.test_editorial_nine_draft_queue             tests.test_editorial_daily_topic_plan             tests.test_editorial_daily_owner_packet             tests.test_editorial_qwen_writer_recovery             tests.test_real_nine_qwen_e2e             tests.test_editorial_encrypted_review             tests.test_editorial_request_review             tests.test_model_a_85_trend             tests.test_editorial_ai_check             tests.test_editorial_auto_route             tests.test_editorial_auto_release             tests.test_editorial_ai_revision_policy             tests.test_build -v
       - name: Smoke-test two-channel status-only CLI without a model
         run: |
           python src/editorial_two_channel_pilot.py \
