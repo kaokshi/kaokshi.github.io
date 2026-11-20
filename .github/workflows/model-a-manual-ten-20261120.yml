@@ -1,0 +1,67 @@
+name: Model A 10 manual launch articles (research only)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/model-a-manual-ten-20261120.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-ten:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-editorial.txt
+      - name: Install Model A and AI Accent
+        run: |
+          python -m pip install -r requirements-editorial.txt
+          aiw-ru models install modernbert lightgbm transformer
+      - name: Analyze ten frozen existing drafts
+        run: |
+          python src/editorial_ai_check.py \
+            --slug legends-01-prohodnaya-17 \
+            --slug legends-02-poslednyaya-elektrichka \
+            --slug legends-03-lift-dvoynoy-zvonok \
+            --slug legends-04-okno-na-cherdake \
+            --slug legends-05-dvor-na-fotografii \
+            --slug science-01-krasnye-spraity \
+            --slug science-02-svetyascheesya-more \
+            --slug science-03-tardigrady \
+            --slug science-04-temnaya-materiya \
+            --slug science-05-polyarnoe-siyanie
+      - name: Validate numeric results and print concise report
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected=["legends-01-prohodnaya-17","legends-02-poslednyaya-elektrichka","legends-03-lift-dvoynoy-zvonok","legends-04-okno-na-cherdake","legends-05-dvor-na-fotografii","science-01-krasnye-spraity","science-02-svetyascheesya-more","science-03-tardigrady","science-04-temnaya-materiya","science-05-polyarnoe-siyanie"]
+          reports=Path("editorial-check-reports")
+          assert len(expected)==10
+          print("TEN_REPORTS_START")
+          for slug in expected:
+              r=json.loads((reports/(slug+".json")).read_text("utf-8"))
+              assert r["article_slug"]==slug and r["all_checks_completed"],slug
+              review=r["editorial_threshold"]
+              assert review["status"]=="completed" and review["model_a_index_0_100"] is not None
+              comps={name:round(r["checks"][name]["data"]["score_percent"],2) for name in ("modernbert","lightgbm","transformer")}
+              style=round(r["checks"]["ai_accent_detector"]["data"]["ai_accent_score"]*100,2)
+              print(json.dumps({"slug":slug,"channel":r["channel"],"sha256":r["text_sha256"],
+                                "characters_without_spaces":r["characters_without_spaces"],
+                                "components":comps,"model_a_index":round(review["model_a_index_0_100"],2),
+                                "over_80":review["exceeds_owner_review_threshold"],
+                                "ai_accent_style":style},ensure_ascii=False))
+          print("TEN_REPORTS_END")
+          PY
+      - name: Keep reports, never publish
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-a-manual-ten-reports-20261120
+          path: editorial-check-reports/
+          if-no-files-found: warn
+          retention-days: 14
