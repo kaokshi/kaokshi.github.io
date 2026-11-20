@@ -64,7 +64,15 @@ def submit_one(page, text, slug):
         target.fill(text,timeout=12000)
     except Exception as exc:
         return {"status":"form_fill_failed","error":type(exc).__name__+":"+str(exc)[:230]}
-    page.wait_for_timeout(13000)
+    # The visible form does NOT submit on input alone. Press its public button.
+    button=page.get_by_role("button",name=re.compile(r"Check again|Проверить",re.I))
+    if button.count() and button.first.is_visible():
+        try:
+            button.first.click(timeout=10000)
+            print("WEB_FORM_CLICKED_CHECK_AGAIN",slug,flush=True)
+        except Exception as exc:
+            print("WEB_FORM_CLICK_ERROR",slug,type(exc).__name__,str(exc)[:220],flush=True)
+    page.wait_for_timeout(14000)
     print("WEB_FORM_AFTER_FILL",slug,json.dumps(page_summary(page),ensure_ascii=False)[:2800],flush=True)
     page.screenshot(path=str(OUT/(slug+"-after.png")),full_page=False)
     visible=page.locator("body").inner_text()
