@@ -6,7 +6,6 @@ Training needs provenance-verified labelled HUMAN and AI examples, with
 four *actual* detector results for the same immutable text. No placeholder
 or guessed scores. AI Accent is a style feature, not a probability.
 """
-import hashlib
 import json
 import math
 from pathlib import Path
