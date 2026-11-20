@@ -21,15 +21,15 @@ from editorial_encrypted_review import save_encrypted_review
 
 # Existing films, genre-specific mysteries, scientific topics searchable in Europe PMC.
 TASKS=[
- {"channel":"legends","topic":"Звонок из квартиры, которую опечатали двадцать лет назад"},
- {"channel":"legends","topic":"Последняя электричка, на которой никто не выходит"},
- {"channel":"legends","topic":"Ночной консьерж и отражение в пустом лифте"},
- {"channel":"science","topic":"Как тихоходки переживают полное высыхание","research_query":"tardigrade desiccation tolerance protective proteins"},
- {"channel":"science","topic":"Почему человеку необходимы циркадные ритмы","research_query":"human circadian rhythm clock sleep clinical physiology"},
- {"channel":"science","topic":"Откуда берётся биолюминесценция морских бактерий","research_query":"marine bacterial bioluminescence lux operon"},
- {"channel":"cinema","topic":"Полный пересказ со спойлерами фильма Начало 2010 года"},
- {"channel":"cinema","topic":"Обзор со спойлерами фильма Престиж 2006 года"},
- {"channel":"cinema","topic":"Пересказ сюжета со спойлерами фильма Интерстеллар 2014 года"},
+ {"channel":"legends","topic":"Старый маяк и ночное сообщение по отключенному радиоприёмнику"},
+ {"channel":"legends","topic":"Трамвай через пустой промышленный район без пассажиров"},
+ {"channel":"legends","topic":"Автомобильный мост, на котором по ночам слышен стук в закрытый багажник"},
+ {"channel":"science","topic":"Как кораллы выстраивают рифы благодаря симбиозу с водорослями","research_query":"coral reef symbiosis zooxanthellae primary research"},
+ {"channel":"science","topic":"Почему на Титане могут существовать озёра жидкого метана","research_query":"Titan methane lakes Cassini observations hydrocarbon lakes"},
+ {"channel":"science","topic":"Как подводные гидротермальные источники поддерживают экосистемы","research_query":"hydrothermal vent ecosystems chemosynthesis primary research"},
+ {"channel":"cinema","topic":"Обзор сюжета со спойлерами фильма Матрица 1999 года"},
+ {"channel":"cinema","topic":"Обзор со спойлерами фильма Контакт 1997 года"},
+ {"channel":"cinema","topic":"Пересказ со спойлерами фильма Луна 2112 2009 года"},
 ]
 PLAN={"date":"2026-11-21","tasks":TASKS}
 # Existing pipeline enforces 2 agent + 1 assistant maximum and no release.
