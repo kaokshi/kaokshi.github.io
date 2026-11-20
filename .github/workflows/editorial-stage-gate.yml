@@ -1,0 +1,103 @@
+name: EXPERIMENT - editorial stages and revision routing
+on:
+  pull_request:
+    paths:
+      - 'src/editorial_stage_gate.py'
+      - 'tests/test_editorial_stage_gate.py'
+      - 'src/editorial_ai_check.py'
+      - 'content/articles/**'
+      - '.github/workflows/editorial-stage-gate.yml'
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 'Existing draft slug for read-only stage verdict'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: editorial-stage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  routing-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test all safe transition paths
+        run: python -m unittest tests.test_editorial_stage_gate -v
+      - name: Check that publication stays disabled
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          settings=json.loads(Path('config/site.json').read_text(encoding='utf-8'))
+          assert settings['publication_enabled'] is False
+          policy=json.loads(Path('config/ai_revision_policy.json').read_text(encoding='utf-8'))
+          assert policy['status']=='awaiting_independent_validation'
+          assert policy['thresholds']['legends'] is None
+          assert policy['thresholds']['science'] is None
+          assert policy['thresholds']['cinema'] is None
+          print('STAGE_TESTS_READ_ONLY, NO_RSS_RELEASE')
+          PY
+  review-existing-draft:
+    if: github.event_name == 'workflow_dispatch'
+    needs: routing-regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate first-party stage verdict, never release
+        env:
+          ARTICLE_SLUG: ${{ inputs.slug }}
+        run: python src/editorial_stage_gate.py --slug "$ARTICLE_SLUG"
+      - name: Display routing in GitHub job summary and annotations
+        if: always()
+        env:
+          ARTICLE_SLUG: ${{ inputs.slug }}
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          slug=os.environ['ARTICLE_SLUG']
+          report=Path('editorial-stage-results')/(slug+'.json')
+          summary=Path(os.environ['GITHUB_STEP_SUMMARY'])
+          if not report.is_file():
+              summary.write_text('## Stage routing failed before report creation\n',encoding='utf-8')
+              raise SystemExit(1)
+          data=json.loads(report.read_text(encoding='utf-8'))
+          outcome=data['disposition']
+          labels={'paused':'Канал временно на паузе',
+                  'needs_revision':'Вернуть в работу с конкретными замечаниями',
+                  'awaiting_evidence':'Нужны реальные отчёты GitHub',
+                  'needs_editor_review':'Требуется редакторское решение',
+                  'ready_for_next_stage':'Следующий шаг — предпросмотр для владельца'}
+          lines=[f"## {slug}: {labels[outcome]}",f"Статус: \`{outcome}\`",
+                 f"Следующий этап: \`{data.get('next_stage')}\`",
+                 "### Что исправить"]
+          lines += ['- '+x.replace('\n',' ') for x in data['revision_actions']] or ['- Нет обязательных исправлений']
+          lines += ['### Что проверить редактору']
+          lines += ['- '+x.replace('\n',' ') for x in data['editor_review_actions']] or ['- Нет']
+          lines += ['### Чего не хватает']
+          lines += ['- '+x.replace('\n',' ') for x in data['awaiting_checks']] or ['- Ничего']
+          lines += ['**Никакой публикации и RSS не выполнялось.**']
+          summary.write_text('\n\n'.join(lines)+'\n',encoding='utf-8')
+          for issue in data['revision_actions'][:10]:
+              safe=issue.replace('\n',' ').replace('%','%25').replace('\r','').replace(':',' — ')
+              print(f"::warning file=content/articles/{slug}.json::{safe}")
+          print('EDITORIAL_STAGE_OUTCOME',outcome)
+          PY
+      - name: Save stage decisions separately from publication
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-stage-verdict
+          path: editorial-stage-results/
+          if-no-files-found: warn
+          retention-days: 14
