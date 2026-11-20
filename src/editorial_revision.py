@@ -89,7 +89,7 @@ def replace_spans(html, edits):
     return html
 
 
-def assistant_edit(article, response):
+def assistant_edit(article, response, *, allow_remove=False):
     if response.get("base_text_sha256") != article_digest(article):
         raise ValueError("Assistant response does not match the current text SHA-256")
     if response.get("decision") == "no_revision":
@@ -108,12 +108,14 @@ def assistant_edit(article, response):
             raise ValueError("Invalid or repeated editable paragraph number")
         start, end, fragment = paragraphs[number - 1]
         before, after, reason = edit["before"], edit["after"], edit["reason"]
-        if before != unescape(fragment) or not all(isinstance(s, str) and s.strip() for s in (after, reason)):
-            raise ValueError("Assistant edit must identify the exact paragraph and explain the change")
+        remove = allow_remove and edit.get("remove") is True
+        if (before != unescape(fragment) or not isinstance(reason, str) or not reason.strip()
+                or not isinstance(after, str) or (remove and after != "") or (not remove and not after.strip())):
+            raise ValueError("Edit must identify the exact paragraph and explain the change")
         if before.strip() == after.strip():
             raise ValueError("Assistant edit must change the text")
         used.add(number)
-        spans.append((start + 3, end - 4, escape(after, quote=False)))
+        spans.append((start, end, "") if remove else (start + 3, end - 4, escape(after, quote=False)))
         changes.append(reason)
     return {**article, "body_html": replace_spans(html, spans)}, changes
 
@@ -144,7 +146,7 @@ def handoff(case, recipient, reasons):
         ]
 
 
-def run_case(case, check, save, response=None):
+def run_case(case, check, save, response=None, *, semantic_editor=None):
     versions = case["versions"]
     if response is not None:
         if case.get("decision") != "assistant_handoff_pending":
@@ -190,18 +192,44 @@ def run_case(case, check, save, response=None):
                 reasons.append("revision_introduced_new_findings")
         agent_versions = [v for v in versions if v["stage"] == "agent"]
         attempted = {v["rule"] for v in agent_versions}
+        edit = None
+        can_edit = version["stage"] != "assistant" and len(agent_versions) < MAX_AGENT
+        semantic = report.get("semantic", {})
+        facts = report.get("facts", {})
+        if can_edit and semantic_editor is not None and semantic.get("issues"):
+            candidate = semantic_editor(article, report)
+            if candidate:
+                draft, changes = candidate
+                if article_digest(draft) not in {v["text_sha256"] for v in versions}:
+                    append_version(case, draft, "agent", changes, "semantic")
+                    save(case)
+                    continue
+                report["semantic_edit_status"] = "repeats_previous_version"
         edit = automatic_edit(article, attempted)
-        if version["stage"] != "assistant" and len(agent_versions) < MAX_AGENT and edit:
+        if can_edit and edit:
             candidate, rule, change = edit
             append_version(case, candidate, "agent", [change], rule)
             save(case)
             continue
+        if semantic.get("issues"):
+            reasons.append("semantic_issues")
+        if facts.get("status") == "completed" and any(c["verdict"] != "confirmed" for c in facts["claims"]):
+            reasons.append("open_claims")
+        if facts.get("status") == "fact_check_pending":
+            reasons.append("fact_check_pending")
+        if semantic and semantic.get("status") != "completed":
+            reasons.append("semantic_review_pending")
         unresolved_text = bool(edit) or bool({
             "short_article", "fiction_claim_of_reality_review", "similar_article",
-            "grammar_review", "style_review", "revision_introduced_new_findings",
+            "grammar_review", "style_review", "revision_introduced_new_findings", "semantic_issues", "open_claims",
         }.intersection(reasons))
         if version["stage"] != "assistant" and unresolved_text:
             handoff(case, "chatgpt", ["local_edits_exhausted", *reasons])
+        elif semantic_editor is not None and (
+            facts.get("status") == "fact_check_pending" or semantic.get("status") != "completed"
+        ) and version["stage"] != "assistant":
+            case["decision"] = ("fact_check_pending" if facts.get("status") == "fact_check_pending"
+                                else "semantic_review_pending")
         else:
             handoff(case, "owner", [*reasons, *report["manual_checks_pending"]])
         save(case)

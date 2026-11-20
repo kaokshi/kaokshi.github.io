@@ -5,6 +5,7 @@ import argparse
 from collections import Counter
 import json
 from pathlib import Path
+import re
 
 from editorial_ai_check import ROOT
 from editorial_agent_v1 import ACTIVE, article_digest
@@ -15,6 +16,7 @@ PROPOSALS = {
     "language": "Добавить подтверждённые языковые ошибки в контрольный набор корректора.",
     "repetition": "Проверять соседние повторы и похожие материалы перед редактурой.",
     "story_logic": "Проверять последовательность событий и мотивацию персонажей по сценам.",
+    "opening": "Проверять, даёт ли вступление конкретный вопрос или сцену и ведёт ли к основной теме.",
     "image_rights": "Проверять источник, лицензию и атрибуцию каждой иллюстрации при подборе.",
 }
 DECISIONS = {"resolved", "unresolved", "regression"}
@@ -54,7 +56,9 @@ def reviewed_observations(case, feedback):
             "channel": article["channel"], "slug": article["slug"],
             "source_sha256": versions[0]["text_sha256"], "reviewed_sha256": version_sha,
             "category": category, "owner_decision": outcome, "revision_stage": version["stage"],
-            "rule": version["rule"] if version.get("rule") in {"duplicate_paragraph", "duplicate_comma"} else None,
+            "rule": version["rule"] if version.get("rule") in {
+                "duplicate_paragraph", "duplicate_comma", "semantic",
+            } else None,
             "checks_completed": report.get("automated_checks_completed") is True,
             "report_pointer": f"/versions/{i}/report",
         })
@@ -92,11 +96,49 @@ def report(observations, *, on_request=False):
     }
 
 
+def evaluate_holdout(manifest, observations):
+    """Compare paired human ratings on reviewed, previously unseen article hashes."""
+    if (manifest.get("schema") != "zen-editorial-holdout-v1" or manifest.get("reviewer") != "owner"
+            or manifest.get("blinded") is not True or not manifest.get("experiment")):
+        raise ValueError("Holdout needs an identified experiment and blinded owner review")
+    seen = {digest for row in observations for digest in (row["source_sha256"], row["reviewed_sha256"])}
+    learned_slugs = {row["slug"] for row in observations}
+    test_slugs = set()
+    genres = {channel: Counter() for channel in ACTIVE}
+    for sample in manifest["samples"]:
+        slug, channel = sample["slug"], sample["channel"]
+        base, revised = sample["baseline"], sample["candidate"]
+        hashes = (base["text_sha256"], revised["text_sha256"])
+        if (channel not in ACTIVE or slug in test_slugs or slug in learned_slugs or hashes[0] == hashes[1]
+                or not all(re.fullmatch(r"[0-9a-f]{64}", h) and h not in seen for h in hashes)):
+            raise ValueError("Holdout overlaps exposed cases or contains duplicate versions")
+        seen.update(hashes)
+        test_slugs.add(slug)
+        axes = {"facts", "language", "originality", "story_logic"}
+        baseline, candidate = base["defects"], revised["defects"]
+        if (baseline.keys() != axes or candidate.keys() != axes
+                or any(type(n) is not int or n < 0 for n in (*baseline.values(), *candidate.values()))):
+            raise ValueError("Use nonnegative owner-reviewed defect counts on each quality axis")
+        counts = genres[channel]
+        counts["pairs"] += 1
+        counts["improved"] += sum(candidate.values()) < sum(baseline.values())
+        counts["regressed"] += any(candidate[k] > baseline[k] for k in axes)
+        for axis in sorted(axes):
+            counts[f"baseline_{axis}"] += baseline[axis]
+            counts[f"candidate_{axis}"] += candidate[axis]
+    if not test_slugs:
+        raise ValueError("Holdout must contain reviewed article pairs")
+    return {"experiment": manifest["experiment"], "genres": {k: dict(v) for k, v in genres.items()},
+            "regression_detected": any(v["regressed"] for v in genres.values()),
+            "deployment_approval_required": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review", nargs=2, metavar=("CASE_JSON", "OWNER_FEEDBACK_JSON"),
                         type=Path, action="append", required=True)
     parser.add_argument("--on-request", action="store_true")
+    parser.add_argument("--holdout", type=Path, help="Blinded independent owner-reviewed comparison")
     args = parser.parse_args()
     try:
         policy = json.loads((ROOT / "config/agent_learning.json").read_text(encoding="utf-8"))
@@ -106,7 +148,10 @@ def main():
         for case, feedback in args.review:
             observations.extend(reviewed_observations(json.loads(case.read_text(encoding="utf-8")),
                                                        json.loads(feedback.read_text(encoding="utf-8"))))
-        print(json.dumps(report(observations, on_request=args.on_request), ensure_ascii=False, indent=2))
+        result = report(observations, on_request=args.on_request)
+        if args.holdout:
+            result["holdout"] = evaluate_holdout(json.loads(args.holdout.read_text(encoding="utf-8")), observations)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     except (KeyError, TypeError, ValueError, OSError) as exc:
         parser.error(str(exc))
 
