@@ -43,6 +43,32 @@ jobs:
           assert policy['thresholds']['cinema'] is None
           print('STAGE_TESTS_READ_ONLY, NO_RSS_RELEASE')
           PY
+      - name: Smoke test real legends draft without pretending absent reports passed
+        if: github.event_name == 'pull_request'
+        run: |
+          python src/editorial_stage_gate.py --slug legends-01-prohodnaya-17
+          python - <<'PY'
+          from pathlib import Path
+          import json,os
+          x=json.loads(Path('editorial-stage-results/legends-01-prohodnaya-17.json').read_text())
+          assert x['publication_authorized'] is False
+          assert x['rss_modified'] is False
+          assert x['disposition'] != 'ready_for_next_stage'
+          summary=Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with summary.open('a',encoding='utf-8') as fh:
+              fh.write('## Реальный черновик: Проходная №17\\n\\n')
+              fh.write('Редакционный маршрут: **'+x['disposition']+'**\\n\\n')
+              fh.write('Не хватает: '+', '.join(x['awaiting_checks'])+'\\n\\n')
+              fh.write('Это достоверный пробный маршрут, НЕ запись о прохождении тестов.\\n')
+          print('REAL_DRAFT_ROUTE',x['disposition'],x['awaiting_checks'])
+          PY
+      - name: Keep smoke verdict as a check artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-stage-smoke
+          path: editorial-stage-results/
+          retention-days: 14
   review-existing-draft:
     if: github.event_name == 'workflow_dispatch'
     needs: routing-regressions
