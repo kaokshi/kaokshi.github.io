@@ -1,0 +1,38 @@
+name: Model F4 research — Desklib CPU pilot
+on:
+  pull_request:
+    paths:
+      - 'research/model_f4_desklib.py'
+      - '.github/workflows/model-f4-research.yml'
+      - 'docs/MODEL_F4_RESEARCH.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  model-f4-desklib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'torch==2.5.1' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'transformers==4.46.3' 'sentencepiece>=0.2.0' 'protobuf>=5,<7' 'huggingface-hub>=0.26,<1'
+      - name: Run Desklib on all ten frozen articles
+        run: |
+          python research/model_f4_desklib.py | tee "$RUNNER_TEMP/model-f4-desklib.txt"
+      - name: Upload actual output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-f4-desklib-logs
+          path: ${{ runner.temp }}/model-f4-desklib.txt
+          if-no-files-found: warn
+          retention-days: 14
