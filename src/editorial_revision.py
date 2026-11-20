@@ -196,12 +196,9 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
                 save(case)
                 return
             if version["stage"] == "agent" and abs(delta) <= 1e-8:
-                # A plateau ends score-trend revisions. ChatGPT receives the
-                # current text for quality review; the score alone proves nothing.
-                handoff(case, "chatgpt", ["model_a_plateau_after_agent_revision",
-                                         "score_trend_stopped"])
-                save(case)
-                return
+                # A plateau stops *score-driven* edits. Existing substantive
+                # checks may still motivate targeted, bounded corrections.
+                version["model_a_trend_stop"] = True
         reasons = list(report["findings"])
         if report["grammar"]["issues"]:
             reasons.append("grammar_review")
