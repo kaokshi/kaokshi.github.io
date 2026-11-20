@@ -58,10 +58,10 @@ jobs:
           assert x['disposition'] != 'ready_for_next_stage'
           summary=Path(os.environ['GITHUB_STEP_SUMMARY'])
           with summary.open('a',encoding='utf-8') as fh:
-              fh.write('## Реальный черновик: Проходная №17\\n\\n')
-              fh.write('Редакционный маршрут: **'+x['disposition']+'**\\n\\n')
-              fh.write('Не хватает: '+', '.join(x['awaiting_checks'])+'\\n\\n')
-              fh.write('Это достоверный пробный маршрут, НЕ запись о прохождении тестов.\\n')
+              fh.write('## Реальный черновик: Проходная №17\n\n')
+              fh.write('Редакционный маршрут: **'+x['disposition']+'**\n\n')
+              fh.write('Не хватает: '+', '.join(x['awaiting_checks'])+'\n\n')
+              fh.write('Это достоверный пробный маршрут, НЕ запись о прохождении тестов.\n')
           print('REAL_DRAFT_ROUTE',x['disposition'],x['awaiting_checks'])
           PY
       - name: Keep smoke verdict as a check artifact
@@ -168,25 +168,25 @@ jobs:
           (dest/"pr-manifest.json").write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding="utf-8")
           summary=Path(os.environ["GITHUB_STEP_SUMMARY"])
           with summary.open("a",encoding="utf-8") as fh:
-              fh.write("## Автоматическая маршрутизация редакционных черновиков\\n\\n")
+              fh.write("## Автоматическая маршрутизация редакционных черновиков\n\n")
               if not rows:
-                  fh.write("В PR нет изменённых статей; проверены только правила переходов.\\n")
+                  fh.write("В PR нет изменённых статей; проверены только правила переходов.\n")
               for row in rows:
                   slug=row["slug"]
-                  fh.write(f"### {slug}: \`{row['disposition']}\`\\n\\n")
-                  fh.write("**Следующий этап:** "+str(row["next_stage"])+"\\n\\n")
+                  fh.write(f"### {slug}: \`{row['disposition']}\`\n\n")
+                  fh.write("**Следующий этап:** "+str(row["next_stage"])+"\n\n")
                   for label,key in (("Исправить","revision_actions"),
                                     ("Решение редактора","editor_review_actions"),
                                     ("Дозапустить проверки","awaiting_checks")):
-                      fh.write("**"+label+"**\\n\\n")
+                      fh.write("**"+label+"**\n\n")
                       for item in row[key]:
-                          fh.write("- "+item.replace("\\n"," ")+"\\n")
+                          fh.write("- "+item.replace("\n"," ")+"\n")
                       if not row[key]:
-                          fh.write("- Нет\\n")
-                      fh.write("\\n")
-                  fh.write("**Публикация и RSS запрещены.**\\n\\n")
+                          fh.write("- Нет\n")
+                      fh.write("\n")
+                  fh.write("**Публикация и RSS запрещены.**\n\n")
                   for issue in row["revision_actions"]:
-                      clean=issue.replace("%","%25").replace("\\r"," ").replace("\\n"," ")
+                      clean=issue.replace("%","%25").replace("\r"," ").replace("\n"," ")
                       print(f"::warning file=content/articles/{slug}.json::{clean}")
           print("PR_EDITORIAL_ROUTES",json.dumps([
              {"slug":r["slug"],"disposition":r["disposition"]} for r in rows],ensure_ascii=False))
@@ -268,7 +268,7 @@ jobs:
           assert cfg['publication_enabled'] is False
           result=validate()
           Path('editorial-quality-reports/rss-validation.json').write_text(
-            json.dumps(result,ensure_ascii=False,indent=2)+'\\n',encoding='utf-8')
+            json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
           assert all(v['valid'] for v in result.values())
           print('RSS_LOCAL_DRY_RUN_ONLY', {k:v['item_count'] for k,v in result.items()})
           PY
@@ -287,14 +287,14 @@ jobs:
           assert x['rss_modified'] is False
           summary=Path(os.environ['GITHUB_STEP_SUMMARY'])
           with summary.open('a',encoding='utf-8') as fh:
-              fh.write('## Реальный полный пилот: Проходная №17\\n\\n')
-              fh.write('Статус: **'+x['disposition']+'**\\n\\n')
-              fh.write('Дальнейший этап: '+str(x['next_stage'])+'\\n\\n')
+              fh.write('## Реальный полный пилот: Проходная №17\n\n')
+              fh.write('Статус: **'+x['disposition']+'**\n\n')
+              fh.write('Дальнейший этап: '+str(x['next_stage'])+'\n\n')
               for key in ('revision_actions','editor_review_actions','awaiting_checks'):
-                  fh.write('### '+key+'\\n\\n')
+                  fh.write('### '+key+'\n\n')
                   for v in x[key]:
-                      fh.write('- '+v.replace('\\n',' ')+'\\n')
-              fh.write('\\nСайт и RSS не изменены, отчёты только для редакции.\\n')
+                      fh.write('- '+v.replace('\n',' ')+'\n')
+              fh.write('\nСайт и RSS не изменены, отчёты только для редакции.\n')
           print('FULL_FIRST_PARTY_STAGE',x['disposition'])
           PY
       - name: Upload real AI, quality and routing diagnostics as private artifacts
