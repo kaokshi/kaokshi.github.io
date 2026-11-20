@@ -114,13 +114,14 @@ jobs:
           from pathlib import Path
           high=json.loads(Path("editorial-agent-routing/science-08-sinie-ogni-idzena.json").read_text())
           low=json.loads(Path("editorial-agent-routing/legends-01-prohodnaya-17.json").read_text())
-          assert high["index"] is not None and high["index"]>80
+          assert high["index"] is not None and high["index"]>85
+          assert high["review_if_above"]==85 and high["threshold_advisory_only"] is True
           assert high["decision"]=="inspect_for_substantive_issues"
-          assert low["index"] is not None and low["index"]<=80
+          assert low["index"] is not None and low["index"]<=85
           assert low["decision"]=="other_editorial_checks_required"
           assert not high["publication_authorized"] and not low["publication_authorized"]
-          print("Validated real >80 route:",high["index"])
-          print("Validated real <=80 route:",low["index"])
+          print("Validated real >85 advisory route:",high["index"])
+          print("Validated real <=85 advisory route:",low["index"])
           PY
       - name: Archive diagnostics without article text
         if: always()
