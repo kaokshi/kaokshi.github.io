@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"src"))
 from compare_aiw_replacements import merge_results, score_from_tool
 
 def result(score):
-    return {"status":"completed","data":{"score_percent":score}}
+    return {"status":"completed","data":{"probability":score/100, "skipped":False}}
 
 def sample(modern=20, light=40, bert=60, frida=90, accent=.09):
     return {"modernbert":result(modern),"lightgbm":result(light),
@@ -31,7 +31,7 @@ class CompareTests(unittest.TestCase):
 
     def test_unavailable_base_checks_fail_both(self):
         raw=sample()
-        raw["modernbert"]["data"]["score_percent"]=float("nan")
+        raw["modernbert"]["data"]["probability"]=float("nan")
         x=merge_results(raw)
         for x0 in x["variants"].values():
             self.assertIsNone(x0["score_index_0_100"])
@@ -42,7 +42,10 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(x["variants"]["mini-frida"]["score_index_0_100"],round(100/3,2))
 
     def test_boolean_invalid(self):
-        self.assertIsNone(score_from_tool(result(True)))
+        self.assertIsNone(score_from_tool({"status":"completed","data":{"probability":True}}))
+
+    def test_skipped_is_not_a_score(self):
+        self.assertIsNone(score_from_tool({"status":"completed","data":{"probability":0.1,"skipped":True}}))
 
 if __name__=="__main__":
     unittest.main()
