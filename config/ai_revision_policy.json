@@ -64,7 +64,23 @@
     "reevaluate_all_checks_after_any_text_change": true,
     "require_immutable_article_sha256_and_evidence": true,
     "owner_receives_unresolved_after_assistant_exhaustion": true,
-    "owner_approval_required_for_publication": true,
+    "owner_approval_required_for_publication": "before_global_project_launch; after launch owner explicitly authorizes automated RSS for fully checked articles",
     "automatic_publication_authorized": false
+  },
+  "future_rss_delivery": {
+    "schema": "post-launch-fully-checked-rss-v1",
+    "project_launched": false,
+    "launch_requires_explicit_owner_command": true,
+    "automatic_rss_delivery_after_launch": true,
+    "release_requires_all_applicable_editorial_checks_passed": true,
+    "release_requires_no_unresolved_substantive_defects": true,
+    "release_requires_completed_escalation_if_needed": true,
+    "release_requires_current_article_sha256_checked": true,
+    "publication_requires_site_publication_enabled": true,
+    "active_channels_only": true,
+    "unvalidated_ai_index_alone_must_not_block_or_approve": true,
+    "prelaunch_behavior": "drafts_and_owner_review_only_no_rss_transmission",
+    "postlaunch_behavior": "fully_checked_articles_may_auto_enter_rss_without_per_article_owner_approval_after_explicit_global_launch",
+    "currently_active": false
   }
 }
