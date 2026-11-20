@@ -41,10 +41,10 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
         peers = sorted(root.glob("*/case.json"))
         titles = [load(path)["title"] for path in originals]
         titles.extend(load(path)["versions"][0]["article"]["title"] for path in peers)
-        response_path = directory / "writer-response.json"
         status_path = directory / "writer-status.json"
 
         def generate(task, payload):
+            response_path = directory / ("writer-response.json" if task == "write" else "section-plan-response.json")
             inputs = [getattr(provider, "identity", None), task, payload]
             key = sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
             saved = load(response_path) if response_path.is_file() else {}
@@ -324,8 +324,14 @@ def main():
                 with (root / ".media-lock").open("a") as media_lock:
                     flock(media_lock, LOCK_EX)
                     peers = [load(p) for p in root.glob("*/assembled.json") if p != assembled_path]
-                    report = check_draft(assembled, grammar, asset_root=args.asset_root, peers=peers,
-                                         source_urls=[doc["url"] for doc in (documents or [])])
+                    def final_quality(version, urls):
+                        return check_draft(version, grammar, source_urls=urls,
+                                           asset_root=args.asset_root, peers=peers)
+
+                    report = assemble_report(
+                        assembled, provider, research, documents, reviews.get(article_digest(assembled)),
+                        lambda stage, result: save_case(directory / f"assembled-{stage}.json", result),
+                        final_quality)
                     save_case(directory / "assembled-quality.json", report)
                     audit = report["image_corpus_audit"]
                     if (report["image_similarity"]["duplicates"] or audit.get("unreadable")

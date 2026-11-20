@@ -75,7 +75,7 @@ def check_draft(article, language_tool, *, source_urls=(), asset_root=None, peer
 
     ai = evaluate_article(article)
     image_check_complete = not article.get("image_files") or (
-        image_audit["near_duplicate_status"] == "completed" and not unreadable
+        image_audit["near_duplicate_status"] == "completed" and not image_audit.get("unreadable")
     )
     complete = (validate_ai_report(article, ai) is not None and image_check_complete
                 and grammar["status"] == vale["status"] == "completed"

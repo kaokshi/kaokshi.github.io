@@ -125,6 +125,11 @@ def assistant_edit(article, response, *, allow_remove=False):
 
 
 def append_version(case, article, stage, changes, rule=None):
+    stages = [v["stage"] for v in case["versions"]]
+    if stage == "agent" and ("assistant" in stages or stages.count("agent") >= MAX_AGENT):
+        raise ValueError("Editorial agent revision limit exceeded")
+    if stage == "assistant" and stages.count("assistant") >= MAX_ASSISTANT:
+        raise ValueError("ChatGPT revision limit exceeded")
     digest = article_digest(article)
     previous = case["versions"][-1]
     if any(version["text_sha256"] == digest for version in case["versions"]):
