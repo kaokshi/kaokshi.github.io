@@ -1,0 +1,76 @@
+name: EXPERIMENT - four existing AI detectors (no publishing)
+on:
+  pull_request:
+    paths:
+      - 'experiments/four_detector_benchmark.py'
+      - 'experiments/test_four_detector_benchmark.py'
+      - '.github/workflows/four-detector-benchmark.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: research-four-detector-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 48
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline evaluation safety tests
+        run: python -m unittest discover -s experiments -p 'test_four_detector_benchmark.py' -v
+      - name: Install only four existing newsroom AI checks
+        run: |
+          python -m pip install -r requirements-editorial.txt
+          aiw-ru models install modernbert lightgbm
+      - name: Pinned ruBERT v4: same version as newsroom
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Download pinned ruBERT weights with fixed revision
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+            "k1y0mi/ru-ai-text-detector",
+            repo_type="model",
+            revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+            allow_patterns=["v4_model/*","v4_calibrator.joblib","threshold_v4.json"],
+            local_dir=".rubert-upstream/models")
+          PY
+      - name: Run 80 independently-grouped essay/science controls against four checks
+        run: python experiments/four_detector_benchmark.py
+      - name: Confirm research-only and zero release rights
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("editorial-calibration-reports/four-models/benchmark.json").read_text())
+          assert len(report["records"])==80
+          assert report["all_4_existing_models_run"] is True
+          assert report["threshold_validated"] is False
+          assert report["auto_revision_enabled"] is False
+          assert report["publication_authorized"] is False
+          assert report["rss_modified"] is False
+          assert not json.loads(Path("config/site.json").read_text())["publication_enabled"]
+          for genre in ("essay","scientific"):
+              rows=[r for r in report["records"] if r["genre"]==genre]
+              calibration={r["source_group_sha256"] for r in rows if r["split"]=="calibration"}
+              holdout={r["source_group_sha256"] for r in rows if r["split"]=="holdout"}
+              assert not calibration.intersection(holdout)
+          print("BENCHMARK_COMPLETE - not independently validated for publication")
+          PY
+      - name: Save only numeric results and hashed record IDs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: four-existing-models-benchmark
+          path: editorial-calibration-reports/four-models/benchmark.json
+          retention-days: 14
+          if-no-files-found: warn
