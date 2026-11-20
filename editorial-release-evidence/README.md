@@ -11,7 +11,7 @@ A real file must be named `editorial-release-evidence/<article-slug>.json` and r
 - Article `auto_release_candidate: true` is only allowed on genuinely new prepared drafts.
   Do not retrofit historic articles to force a release.
 - **Aggregate editorial risk:** `0..100` provisional points. `<=20` passes numerical triage;
-  `>20` requests owner review.
+  `>20` requests owner review. The score consists of **ruBERT (up to 15 points), disagreement between ModernBERT and LightGBM (0/5/10 caution points), stylistic warnings (up to 25), image warnings (up to 25), source warnings (up to 25)**. AI Accent is reported separately, not turned into a fake probability. All warning counts and two comparison scores must be present; a missing metric blocks automatic release.
 - **Hard gates:** all four AI reports completed; ruBERT maximum-window score `<=25%`,
   at least 3,000 non-whitespace characters, at least seven available and unique images,
   explicit traceable image licenses, grammar/style/links/image/RSS checks completed,
