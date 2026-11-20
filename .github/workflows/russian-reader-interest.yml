@@ -1,0 +1,58 @@
+name: Russian reader-interest and ruTS research pilot
+on:
+  pull_request:
+    paths:
+      - 'src/editorial_reader_interest.py'
+      - 'src/editorial_revision_checks.py'
+      - 'src/editorial_semantic.py'
+      - 'tests/test_editorial_reader_interest.py'
+      - '.github/workflows/russian-reader-interest.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reader-interest-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruTS and verify actual import
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruts
+          python -c "from ruts import BasicStats, ReadabilityStats, DiversityStats; print('ruTS installed')"
+      - name: Run unit tests
+        run: |
+          python -m unittest tests.test_editorial_reader_interest -v
+      - name: Run actual ruTS on ten active-channel drafts
+        run: |
+          python src/editorial_reader_interest.py \
+            --article content/articles/legends-01-prohodnaya-17.json \
+            --article content/articles/legends-02-poslednyaya-elektrichka.json \
+            --article content/articles/legends-03-lift-dvoynoy-zvonok.json \
+            --article content/articles/legends-04-okno-na-cherdake.json \
+            --article content/articles/legends-05-dvor-na-fotografii.json \
+            --article content/articles/science-01-krasnye-spraity.json \
+            --article content/articles/science-02-svetyascheesya-more.json \
+            --article content/articles/science-03-tardigrady.json \
+            --article content/articles/science-04-temnaya-materiya.json \
+            --article content/articles/science-05-polyarnoe-siyanie.json \
+            --output "$RUNNER_TEMP/reader-interest.json"
+          python - "$RUNNER_TEMP/reader-interest.json" <<'PY'
+          import json,sys
+          rows=json.load(open(sys.argv[1]))
+          assert len(rows)==10
+          assert all(row["ruts"]["status"]=="completed" for row in rows),[r["ruts"] for r in rows]
+          assert all(row["text_sha256"] and not row["is_publication_gate"] for row in rows)
+          print("Confirmed real ruTS output for 10 drafts, no publication gates")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: russian-reader-interest-10-drafts
+          path: ${{ runner.temp }}/reader-interest.json
+          if-no-files-found: warn
+          retention-days: 14
