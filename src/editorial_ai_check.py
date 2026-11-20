@@ -5,6 +5,8 @@ Never modifies article status, permissions, release flags, or site configuration
 Outputs are diagnostic estimates, not proof of authorship or publication approval.
 """
 import argparse
+import hashlib
+import math
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 import json
@@ -66,76 +68,97 @@ def tool_result(argv, text_path, timeout=240):
 
 
 
-def threshold_review(results):
-    """Report four existing AI detectors without a ruBERT-only cutoff.
+MODEL_A = ("modernbert", "lightgbm", "transformer")
+REQUIRED_CHECKS = (*MODEL_A, "ai_accent_detector")
+REVIEW_THRESHOLD = 80.0
 
-    The result is descriptive. A model score is neither a calibrated percentage
-    of AI authorship nor a justified instruction to rewrite prose.
-    """
+def normalized_aiw_result(argv, text_path):
+    """aiw-ru 2.5.2 returns probability in [0, 1]; require valid whole-doc scores."""
+    result = tool_result(argv, text_path)
+    if result.get("status") != "completed":
+        return result
+    data = result.get("data")
+    value = data.get("probability") if isinstance(data, dict) else None
+    if (not isinstance(data, dict) or data.get("skipped") is True
+            or isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or not 0 <= value <= 1):
+        return {"status": "error", "reason": "aiw_whole_document_probability_missing_or_invalid"}
+    data["score_percent"] = round(100 * value, 4)
+    return result
+
+def threshold_review(results):
+    """Owner-approved >80 diagnostic REVIEW flag, not a calibrated AI percentage."""
     diagnostics = {}
-    for name in ("rubert_v4", "modernbert", "lightgbm", "ai_accent_detector"):
+    for name in MODEL_A:
         item = results.get(name, {})
         data = item.get("data") if isinstance(item, dict) else None
         value = data.get("score_percent") if isinstance(data, dict) else None
-        if name == "rubert_v4" and isinstance(data, dict):
-            value = data.get("whole_document_index_percent", value)
-        if name == "ai_accent_detector" and isinstance(data, dict):
-            accent = data.get("ai_accent_score")
-            if isinstance(accent, (int, float)) and not isinstance(accent, bool) and 0 <= accent <= 1:
-                value = round(accent * 100, 4)
-        valid = isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 100
+        complete = (item.get("status") == "completed"
+                    and isinstance(value, (int, float)) and not isinstance(value, bool)
+                    and math.isfinite(value) and 0 <= value <= 100)
         diagnostics[name] = {
-            "status": item.get("status", "unavailable") if isinstance(item, dict) else "unavailable",
-            "index_0_100": round(value, 2) if valid else None,
+            "status": item.get("status", "unavailable"),
+            "index_0_100": round(value, 2) if complete else None,
             "unit": "uncalibrated_model_diagnostic",
         }
+    item = results.get("ai_accent_detector", {})
+    data = item.get("data") if isinstance(item, dict) else None
+    accent = data.get("ai_accent_score") if isinstance(data, dict) else None
+    accent_ok = (item.get("status") == "completed"
+                 and isinstance(accent, (int, float)) and not isinstance(accent, bool)
+                 and math.isfinite(accent) and 0 <= accent <= 1)
+    diagnostics["ai_accent_detector"] = {
+        "status": item.get("status", "unavailable"),
+        "index_0_100": round(accent * 100, 2) if accent_ok else None,
+        "unit": "style_signal_not_authorship_probability",
+    }
+    values = [diagnostics[name]["index_0_100"] for name in MODEL_A]
+    complete = accent_ok and all(v is not None for v in values)
+    index = round(sum(values) / 3, 2) if complete else None
     return {
-        "status": "diagnostics_only",
-        "primary_model": None,
+        "status": "completed" if complete else "incomplete",
+        "primary_model": "model_a",
         "checks": diagnostics,
-        "passed": None,
-        "limit_percent": None,
+        "model_a_index_0_100": index,
+        "calculation": "arithmetic_mean_of_three_correlated_uncalibrated_classifiers",
+        "review_if_above": REVIEW_THRESHOLD,
+        "exceeds_owner_review_threshold": index > REVIEW_THRESHOLD if complete else None,
         "needs_rewrite_based_on_ai": None,
         "calibrated_ai_probability": None,
-        "note": ("No detector has an independent validated rewrite threshold for our genres. "
-                 "Do not rewrite solely because of an AI model score."),
+        "note": ("Above 80 requires editorial examination and an attempted substantive "
+                 "improvement when defects exist. This index is not percent AI authorship; "
+                 "a score alone cannot verify a defect or authorize publication."),
     }
-
 
 def evaluate(path):
     article = json.loads(path.read_text(encoding="utf-8"))
-    text = extract_text(article.get("body_html", ""))
+    article_text = extract_text(article.get("body_html", ""))
+    if not article_text:
+        raise ValueError("Empty article text")
     results = {}
     with tempfile.TemporaryDirectory(prefix="editorial-ai-") as work:
         document = Path(work) / "draft.txt"
-        document.write_text(text, encoding="utf-8")
-        # ruBERT v4 is primary; the three original tools are comparison only.
-        rubert_python = ROOT / ".rubert-venv" / "bin" / "python"
-        rubert_source = ROOT / ".rubert-upstream"
-        results["rubert_v4"] = tool_result(
-            [str(rubert_python), str(ROOT / "src" / "rubert_v4_runner.py"), "--source", str(rubert_source)],
-            document, timeout=600
-        )
-        # Both comparison classifiers share the LLMTrace training corpus.
-        # They MUST NOT be represented as independent proof of authorship.
-        for model in ("modernbert", "lightgbm"):
-            results[model] = tool_result(["aiw-ru", "classify", "--model", model, "--json"], document)
+        document.write_text(article_text, encoding="utf-8")
+        for model in MODEL_A:
+            results[model] = normalized_aiw_result(
+                ["aiw-ru", "classify", "--model", model, "--json"], document)
         results["ai_accent_detector"] = tool_result(
-            ["ai-accent-detector", "--json", "--lang", "ru"], document
-        )
+            ["ai-accent-detector", "--json", "--lang", "ru"], document)
+    review = threshold_review(results)
     return {
-        "schema": "editorial-ai-check-v1",
+        "schema": "editorial-ai-check-model-a-v2",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "source_file": str(path.relative_to(ROOT)),
         "article_slug": article.get("slug", path.stem),
         "channel": article.get("channel"),
-        "characters_without_spaces": len(re.sub(r"\s", "", text)),
+        "text_sha256": hashlib.sha256(article_text.encode("utf-8")).hexdigest(),
+        "characters_without_spaces": len(re.sub(r"\s", "", article_text)),
         "checks": results,
-        "editorial_threshold": threshold_review(results),
-        "all_checks_completed": all(x["status"] == "completed" for x in results.values()),
+        "editorial_threshold": review,
+        "all_checks_completed": review["status"] == "completed",
         "editorial_approved": False,
         "publication_authorized": False,
-        "notice": "Models may be wrong. ModernBERT and LightGBM share training data. This report never authorizes publication.",
+        "notice": "Unvalidated score, not an AI-authorship percentage; this report never authorizes publication.",
     }
 
 
@@ -156,7 +179,7 @@ def main():
         destination = target / (article.stem + ".json")
         destination.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         manifest.append({"article": article.stem, "report": destination.name, "checks_completed": result["all_checks_completed"], "threshold_passed": None})
-        print(f'{article.stem}: {sum(x["status"] == "completed" for x in result["checks"].values())}/4 tools completed')
+        print(article.stem, "completed", sum(x["status"] == "completed" for x in result["checks"].values()), "/4; model_a", result["editorial_threshold"]["model_a_index_0_100"])
     (target / "index.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if any(not entry["checks_completed"] for entry in manifest):
         raise SystemExit("One or more tools failed; report is incomplete (no approval granted).")
