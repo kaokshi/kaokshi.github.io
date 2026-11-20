@@ -48,6 +48,23 @@ def read_posts(now):
             raise ValueError("Unknown channel in " + str(path))
         if post.get("status") != "approved":
             continue
+        # For a machine-approved release validate its original content digest and
+        # the locked 20-point triage limit. Legacy manually approved releases are
+        # still subject to their separate explicit authorization fields.
+        if post.get("release_mode") == "automatic_with_verified_evidence":
+            from editorial_auto_route import digest_article, ACTIVE_CHANNELS, RISK_THRESHOLD
+            record = post.get("auto_release_record") or {}
+            if (post.get("channel") not in ACTIVE_CHANNELS or
+                    record.get("article_sha256") != digest_article(post) or
+                    record.get("evidence_version") != "editorial-auto-route-v1" or
+                    not isinstance(record.get("editorial_risk_score"), (int, float)) or
+                    isinstance(record.get("editorial_risk_score"), bool) or
+                    not 0 <= record["editorial_risk_score"] <= RISK_THRESHOLD):
+                continue
+        elif post.get("auto_release_candidate") is True:
+            # An unprocessed candidate must never bypass the auto-release record
+            # through legacy approval flags.
+            continue
         # A separate, per-article release command is mandatory.
         if post.get("publication_authorized") is not True or post.get("release_hold") is not False:
             continue
