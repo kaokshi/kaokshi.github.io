@@ -26,7 +26,7 @@ jobs:
         run: |
           python -m pip install -r requirements-editorial.txt
           aiw-ru models install modernbert lightgbm
-      - name: Pinned ruBERT v4: same version as newsroom
+      - name: 'Pinned ruBERT v4: same version as newsroom'
         run: |
           git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
           git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
