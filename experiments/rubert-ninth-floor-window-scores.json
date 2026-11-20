@@ -23,5 +23,8 @@
     0.303797
   ],
   "window_count": 17,
-  "notice": "Scores transcribed from the completed first-party GitHub run; not a labeled calibration dataset."
+  "notice": "Scores transcribed from the completed first-party GitHub run; not a labeled calibration dataset.",
+  "word_count": 1103,
+  "model_window_words": 85,
+  "model_window_stride_words": 65
 }
