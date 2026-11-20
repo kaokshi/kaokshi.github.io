@@ -7,7 +7,6 @@ All article files and publication flags are read-only.
 """
 import argparse
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
 from html.parser import HTMLParser
 import json
 from pathlib import Path
@@ -16,7 +15,7 @@ import subprocess
 import sys
 from urllib.parse import quote
 
-from editorial_ai_check import ROOT, CONTENT, extract_text
+from editorial_ai_check import ROOT, CONTENT
 
 REFS = ROOT / "config" / "movie_reference_index.json"
 REPORTS = ROOT / "editorial-movie-reports"
