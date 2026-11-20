@@ -127,3 +127,76 @@ jobs:
           path: editorial-stage-results/
           if-no-files-found: warn
           retention-days: 14
+
+  route-changed-pr-articles:
+    if: github.event_name == 'pull_request'
+    needs: routing-regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Classify changed drafts and annotate issues in PR Checks
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import json,os,subprocess,sys
+          from pathlib import Path
+          files=subprocess.check_output(["git","diff","--name-only",os.environ["BASE_SHA"],
+              os.environ["HEAD_SHA"],"--","content/articles/"],text=True).splitlines()
+          rows=[]
+          for filename in files:
+              path=Path(filename)
+              if path.suffix!=".json" or not path.is_file() or path.parent!=Path("content/articles"):
+                  continue
+              slug=path.stem
+              run=subprocess.run([sys.executable,"src/editorial_stage_gate.py","--slug",slug],
+                                  capture_output=True,text=True)
+              if run.returncode:
+                  raise RuntimeError("Stage route failed for "+slug+": "+run.stderr[-500:])
+              rows.append(json.loads(Path("editorial-stage-results",slug+".json").read_text("utf-8")))
+          dest=Path("editorial-stage-results")
+          dest.mkdir(exist_ok=True)
+          (dest/"pr-manifest.json").write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding="utf-8")
+          summary=Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a",encoding="utf-8") as fh:
+              fh.write("## Автоматическая маршрутизация редакционных черновиков\\n\\n")
+              if not rows:
+                  fh.write("В PR нет изменённых статей; проверены только правила переходов.\\n")
+              for row in rows:
+                  slug=row["slug"]
+                  fh.write(f"### {slug}: \`{row['disposition']}\`\\n\\n")
+                  fh.write("**Следующий этап:** "+str(row["next_stage"])+"\\n\\n")
+                  for label,key in (("Исправить","revision_actions"),
+                                    ("Решение редактора","editor_review_actions"),
+                                    ("Дозапустить проверки","awaiting_checks")):
+                      fh.write("**"+label+"**\\n\\n")
+                      for item in row[key]:
+                          fh.write("- "+item.replace("\\n"," ")+"\\n")
+                      if not row[key]:
+                          fh.write("- Нет\\n")
+                      fh.write("\\n")
+                  fh.write("**Публикация и RSS запрещены.**\\n\\n")
+                  for issue in row["revision_actions"]:
+                      clean=issue.replace("%","%25").replace("\\r"," ").replace("\\n"," ")
+                      print(f"::warning file=content/articles/{slug}.json::{clean}")
+          print("PR_EDITORIAL_ROUTES",json.dumps([
+             {"slug":r["slug"],"disposition":r["disposition"]} for r in rows],ensure_ascii=False))
+          if any(r["disposition"] in ("needs_revision","awaiting_evidence","needs_editor_review")
+                 for r in rows):
+              raise SystemExit("This PR needs draft revisions, missing first-party checks or owner review.")
+          PY
+      - name: Keep all non-public routing decisions for author follow-up
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-routing-pr-feedback
+          path: editorial-stage-results/
+          if-no-files-found: warn
+          retention-days: 14
