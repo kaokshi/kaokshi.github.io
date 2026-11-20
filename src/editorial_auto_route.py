@@ -30,6 +30,11 @@ def digest_article(article):
     fields = {name: article.get(name) for name in (
         "channel", "slug", "title", "body_html", "image_files", "image_sources",
         "rights_basis", "claims", "source_docx")}
+    fields["image_content_sha256"] = {
+        name: (hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+               if isinstance(name, str) and (ROOT / name).is_file() else "MISSING")
+        for name in (article.get("image_files") or []) if isinstance(name, str)
+    }
     payload = json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -108,7 +113,7 @@ def decide(article, evidence):
     else:
         tests = quality.get("checks") or {}
         if (not isinstance(tests, dict) or not REQUIRED_QUALITY.issubset(tests)
-                or any(tests[p].get("status") != "completed" for p in REQUIRED_QUALITY)):
+                or any(not isinstance(tests[p], dict) or tests[p].get("status") != "completed" for p in REQUIRED_QUALITY)):
             blockers.append("quality_check_incomplete")
     facts = evidence.get("factual")
     if not valid_evidence(facts, dg):
@@ -122,7 +127,7 @@ def decide(article, evidence):
             checked = facts.get("verified_claim_ids") or []
             if (not claims or not isinstance(claims, list) or
                     any(not isinstance(x, dict) or not x.get("id") or not x.get("source_urls") for x in claims)
-                    or set(x["id"] for x in claims) != set(checked)):
+                    or any(not isinstance(x.get("source_urls"), list) for x in claims)\n                    or set(x["id"] for x in claims) != set(checked)):
                 blockers.append("science_claim_coverage_missing")
     if evidence.get("unresolved_critical_findings"):
         blockers.append("unresolved_critical_findings")
