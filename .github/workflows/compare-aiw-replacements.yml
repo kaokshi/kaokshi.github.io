@@ -1,0 +1,61 @@
+name: Compare replacement models (free CPU, read-only)
+on:
+  pull_request:
+    paths:
+      - 'src/compare_aiw_replacements.py'
+      - 'tests/test_compare_aiw_replacements.py'
+      - '.github/workflows/compare-aiw-replacements.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: compare-aiw-replacement-research
+  cancel-in-progress: false
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p test_compare_aiw_replacements.py -v
+  comparison:
+    needs: offline-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-editorial.txt
+      - name: Install existing free local tools
+        run: python -m pip install -r requirements-editorial.txt
+      - name: Install two candidate models and existing models on CPU
+        run: |
+          aiw-ru models install modernbert lightgbm transformer mini-frida
+      - name: Compare one replacement at a time on 11 previously tested articles
+        run: |
+          python src/compare_aiw_replacements.py \
+            --slug legends-01-prohodnaya-17 \
+            --slug science-08-sinie-ogni-idzena \
+            --slug cinema-01-truman-show-real-photos \
+            --slug legends-02-poslednyaya-elektrichka \
+            --slug legends-05-dvor-na-fotografii \
+            --slug science-03-tardigrady \
+            --slug science-06-brinikli \
+            --slug cinema-08-groundhogday-real-stills \
+            --slug cinema-10-grandbudapesthotel-real-stills \
+            --slug science-pilot-noctilucent-clouds-20261120 \
+            --slug legends-pilot-counting-stairs-20261120
+      - name: Archive only numeric reports, no article body
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: two-free-model-replacement-indices
+          path: aiw-replacement-reports/
+          if-no-files-found: warn
+          retention-days: 7
