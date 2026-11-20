@@ -27,7 +27,7 @@ def parse_sections(body):
                 or (heading.text or "").strip() or (heading[0].tail or "").strip()):
             raise ValueError("Use h2 with a bold heading")
         name = " ".join(re.findall(r"\w+", (heading[0].text or "").casefold()))
-        if not name or name in names or GENERIC.fullmatch(name) or name.startswith("призыв к "):
+        if not name or name in names or GENERIC.fullmatch(name) or re.match(r"(?:призыв к |подпи(?:сывай|шис|шите|ска на))", name):
             raise ValueError("Empty, repeated or generic heading")
         names.add(name)
         if any((node.tail or "").strip() for node in section):
@@ -66,7 +66,10 @@ def arrange(paragraphs, plan, provider, title):
     try:
         return format_sections(paragraphs, plan)
     except (KeyError, TypeError, ValueError):
-        retry = provider("section_plan", {"title": title, "paragraphs": paragraphs,
+        content = list(paragraphs)
+        while content and re.match(r"(?:cta\s*:\s*)?подпи(?:сывай|шис|шите)", content[-1], re.I):
+            content.pop()
+        retry = provider("section_plan", {"title": title, "paragraphs": content,
             "instruction": "Сгруппируй абзацы по смыслу. Верни sections с полями start (номер первого "
                            "абзаца от 1) и heading (конкретный живой подзаголовок). Начни с 1. "
                            "Сделай 2–3 раздела по несколько абзацев, не больше четырёх. Заголовок — короткая конкретная деталь из текста, без двоеточия, слов о структуре и призывов. Не придумывай факты. Оставь подписку в финальном разделе."})

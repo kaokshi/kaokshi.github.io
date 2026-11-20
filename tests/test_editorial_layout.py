@@ -21,6 +21,15 @@ PLAN = [{"start": 1, "heading": "Ночной ветер"}, {"start": 3, "headin
 
 
 class SectionTests(unittest.TestCase):
+    def test_subscription_line_is_never_a_section_heading(self):
+        cta = "Подпишитесь на наш канал"
+        def planner(task, request):
+            self.assertNotIn(cta, request["paragraphs"])
+            return {"sections": PLAN}
+        html = arrange(PROSE + [cta], [PLAN[0], dict(PLAN[1], heading=cta)], planner, "Погода")
+        self.assertEqual(parse_sections(html)[-1][-1].text, cta)
+        self.assertEqual(html.count(cta), 1)
+
     def test_repair_and_recheck(self):
         def provider(task, request):
             self.assertEqual(task, "section_plan")
