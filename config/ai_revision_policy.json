@@ -7,11 +7,10 @@
   },
   "current_channels": [
     "legends",
-    "science"
-  ],
-  "paused_channels": [
+    "science",
     "cinema"
   ],
+  "paused_channels": [],
   "only_detectors": [
     "modernbert",
     "lightgbm",
@@ -144,5 +143,12 @@
       "increasing": "prepare_chatgpt_handoff_with_evidence",
       "no_detector_only_rewrite": true
     }
-  }
+  },
+  "daily_draft_targets": {
+    "legends": 3,
+    "science": 3,
+    "cinema": 3,
+    "total": 9
+  },
+  "daily_draft_targets_status": "owner_requested_target_not_proven_live_capacity"
 }
