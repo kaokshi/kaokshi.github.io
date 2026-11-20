@@ -11,9 +11,15 @@ def serialize_match(m):
     length = getattr(m, "error_length", None)
     if length is None:
         length = getattr(m, "length", None)
+    if length is None:
+        length = getattr(m, "errorLength", None)
+    if length is None:
+        raw = getattr(m, "__dict__", {})
+        if isinstance(raw, dict):
+            length = raw.get("errorLength", raw.get("error_length", raw.get("length")))
     offset = getattr(m, "offset", None)
     if not isinstance(length, int) or length < 0 or not isinstance(offset, int) or offset < 0:
-        raise ValueError("LanguageTool Match offset/length is unavailable")
+        raise ValueError("LanguageTool Match offset/length is unavailable; attributes="+str(sorted(vars(m)))[:240])
     return {
         "rule_id": getattr(m, "rule_id", None),
         "message": str(getattr(m, "message", ""))[:200],
