@@ -161,7 +161,7 @@ def main():
             continue
         chosen = pairs[:N_TRAIN_PAIRS + N_HOLDOUT_PAIRS]
         rows = []
-        temp = out/"tmp"
+        temp = (out/"tmp").resolve()
         temp.mkdir(exist_ok=True)
         try:
             for i, (pairid, human, ai) in enumerate(chosen):
