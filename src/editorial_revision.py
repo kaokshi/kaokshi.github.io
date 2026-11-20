@@ -180,13 +180,28 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
             return
         version["index"] = ai_index
         version["model_a_review_triggered"] = ai_index > THRESHOLD
+        version["model_a_threshold_advisory_only"] = True
+        previous_index = versions[-2].get("index") if len(versions) > 1 else None
+        if isinstance(previous_index, (int, float)):
+            delta = ai_index - previous_index
+            version["model_a_delta_from_previous"] = delta
+            version["model_a_trend"] = ("increased" if delta > 1e-8
+                                         else "decreased" if delta < -1e-8 else "plateau")
+            if version["stage"] == "agent" and delta > 1e-8:
+                # The owner asked for ChatGPT help whenever a revision raises the index.
+                # This is a diagnostic escalation, not proof that the edit is bad.
+                case["recommended_text_sha256"] = versions[-2]["text_sha256"]
+                handoff(case, "chatgpt", ["model_a_increased_after_agent_revision",
+                                        "score_is_uncalibrated_advisory_only"])
+                save(case)
+                return
         reasons = list(report["findings"])
         if report["grammar"]["issues"]:
             reasons.append("grammar_review")
         if report["vale"]["issues"]:
             reasons.append("style_review")
         if ai_index > THRESHOLD:
-            reasons.append("model_a_editorial_review")
+            reasons.append("model_a_editorial_review_advisory")
         if len(versions) > 1:
             previous = versions[-2]
             if {"short_article", "long_article"}.intersection(previous["report"]["findings"]):
@@ -221,8 +236,14 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
             save(case)
             continue
         pending_edit = report.get("semantic_edit_status")
-        if can_edit and pending_edit in {"provider_error", "fact_check_pending"}:
-            case["decision"] = "semantic_review_pending" if pending_edit == "provider_error" else pending_edit
+        if can_edit and pending_edit == "provider_error":
+            # Local provider had a bounded retry already; escalate rather than stall.
+            handoff(case, "chatgpt", ["local_agent_provider_error",
+                                    report.get("semantic_edit_error", "unresolved_agent_problem")])
+            save(case)
+            return
+        if can_edit and pending_edit == "fact_check_pending":
+            case["decision"] = "fact_check_pending"
             save(case)
             return
         if semantic.get("issues"):
