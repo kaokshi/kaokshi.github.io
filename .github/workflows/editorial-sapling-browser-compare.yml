@@ -1,0 +1,33 @@
+name: One-off Sapling web-form external article check (no API)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - src/editorial_sapling_browser_compare.py
+      - .github/workflows/editorial-sapling-browser-compare.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sapling-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright browser automation
+        run: |
+          python -m pip install "playwright==1.56.0"
+          python -m playwright install --with-deps chromium
+      - name: Check only public Sapling web form using browser; never API
+        run: python src/editorial_sapling_browser_compare.py
+      - name: Archive comparison evidence; never publish
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sapling-browser-comparison-research
+          path: editorial-sapling-browser-compare/
+          if-no-files-found: warn
+          retention-days: 14
