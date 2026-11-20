@@ -108,6 +108,20 @@ class MovieFactCheckTests(unittest.TestCase):
         self.assertIsNone(result["items"][0]["suggested_rewrite"])
         self.assertGreaterEqual(result["counts"]["review_required"], 2)
 
+    def test_source_extractor_reports_evidence_without_fact_verdict(self):
+        import editorial_source_extract as src
+        rows = src.inspect(["https://example.org/test"],
+            fetch=lambda url: ("<html><body><main>Город Трумана " + "сцена " * 45 + "</main></body></html>", url),
+            extract=lambda html: "Труман живёт в городе. " * 12)
+        self.assertEqual(rows[0]["status"], "extracted")
+        self.assertEqual(rows[0]["is_authoritative_for_claim"], "not_evaluated")
+        self.assertLessEqual(len(rows[0]["snippet"]), 150)
+
+    def test_source_extractor_rejects_http(self):
+        import editorial_source_extract as src
+        rows = src.inspect(["http://example.org"], fetch=lambda url: ("", url), extract=lambda html: None)
+        self.assertEqual(rows[0]["status"], "unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()
