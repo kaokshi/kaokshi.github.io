@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/editorial-research-ensemble.yml'
+      - 'src/editorial_research_train.py'
   workflow_dispatch:
 permissions:
   contents: read
