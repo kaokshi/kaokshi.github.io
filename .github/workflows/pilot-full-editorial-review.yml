@@ -1,0 +1,153 @@
+name: PILOT - Full editorial review (no publication)
+on:
+  pull_request:
+    paths:
+      - 'content/articles/legends-11-devyaty-etazh-na-rechnoy.json'
+      - 'content/assets/legends/devyaty-etazh/**'
+      - 'experiments/pilot_full_review.py'
+      - '.github/workflows/pilot-full-editorial-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: full-editorial-pilot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  quality-and-style:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install free Russian language and image tools
+        run: python -m pip install -r requirements-quality.txt 'ruts' 'pyalex'
+      - name: Strict local audit, vector illustration XML and no-release routing
+        run: python experiments/pilot_full_review.py
+      - name: Readability advice by ruTS
+        run: python src/editorial_enhancements.py --slug legends-11-devyaty-etazh-na-rechnoy --output editorial-pilot-reports/readability
+      - name: Render vector art into temporary PNG for actual image comparison
+        continue-on-error: true
+        run: |
+          python -m pip install 'CairoSVG==2.8.2'
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          import cairosvg, imagehash, io, json
+          from itertools import combinations
+          paths=sorted(Path('content/assets/legends/devyaty-etazh').glob('*.svg'))
+          records=[]
+          for path in paths:
+              png=cairosvg.svg2png(url=str(path),output_width=420,output_height=270)
+              image=Image.open(io.BytesIO(png)).convert('RGB')
+              records.append((path.name,imagehash.phash(image)))
+          pairs=[{"images":[a[0],b[0]],"perceptual_distance":int(a[1]-b[1])}
+                 for a,b in combinations(records,2)]
+          result={"status":"completed","source_format":"original SVG","images_scanned":len(paths),
+                  "pairs_with_distance_lte_5":[x for x in pairs if x["perceptual_distance"]<=5],
+                  "visual_scene_verified":False,"image_rights_independently_verified":False}
+          out=Path('editorial-pilot-reports/imagehash.json')
+          out.write_text(json.dumps(result,ensure_ascii=False,indent=2))
+          print(json.dumps(result,ensure_ascii=False))
+          PY
+      - name: Vale Russian style lint
+        continue-on-error: true
+        run: |
+          python src/editorial_export_md.py
+          curl -fsSL --retry 2 -o /tmp/vale.tar.gz https://github.com/errata-ai/vale/releases/download/v3.13.0/vale_3.13.0_Linux_64-bit.tar.gz
+          mkdir -p /tmp/vale
+          tar -xf /tmp/vale.tar.gz -C /tmp/vale vale
+          /tmp/vale/vale --output=JSON editorial-quality-reports/vale-input/ > editorial-pilot-reports/vale.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("editorial-pilot-reports/vale.json")
+          x=json.loads(p.read_text()) if p.stat().st_size else {}
+          print("VALE_PILOT_RESULTS",json.dumps([{"file":k,"alerts":len(v)} for k,v in x.items() if "legends-11-devyaty" in k],ensure_ascii=False))
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Check actual Russian grammar with LanguageTool locally
+        continue-on-error: true
+        run: python src/editorial_language_tool.py --slug legends-11-devyaty-etazh-na-rechnoy --output editorial-pilot-reports/languagetool.json
+      - name: Test site/RSS builder WITHOUT publishing any new content
+        run: |
+          python src/build.py
+          python src/rss_verify.py
+          python - <<'PY'
+          from xml.etree import ElementTree as ET
+          from pathlib import Path
+          for slug in ("legends","science","cinema"):
+              feed=ET.parse("site/feeds/"+slug+".xml")
+              assert len(feed.getroot().findall("./channel/item"))==0,slug
+          assert not Path("site/legends/legends-11-devyaty-etazh-na-rechnoy/index.html").exists()
+          print("PUBLIC_RSS_ITEMS=0; PILOT_NOT_BUILT_AS_PUBLIC_PAGE=True")
+          PY
+      - name: Retain only private diagnostic artifacts of trial
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-editorial-quality
+          path: |
+            editorial-pilot-reports/
+            editorial-quality-reports/quality-report.json
+          retention-days: 14
+          if-no-files-found: warn
+  ai-detection:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install four open-source AI checking programs
+        run: |
+          python -m pip install -r requirements-editorial.txt
+          aiw-ru models install modernbert lightgbm
+      - name: Install pinned ruBERT v4 on CPU
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install --upgrade pip
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Download reproducible ruBERT weights
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download("k1y0mi/ru-ai-text-detector",repo_type="model",
+            revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+            allow_patterns=["v4_model/*","v4_calibrator.joblib","threshold_v4.json"],
+            local_dir=".rubert-upstream/models")
+          PY
+      - name: Run all 4 real text detectors (threshold may fail intentionally)
+        continue-on-error: true
+        run: python src/editorial_ai_check.py --slug legends-11-devyaty-etazh-na-rechnoy --output editorial-pilot-ai
+      - name: Explain completed detector scores and truthfully flag failures
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path("editorial-pilot-ai/legends-11-devyaty-etazh-na-rechnoy.json")
+          if not p.exists():
+              print("AI_DETECTORS_UNAVAILABLE_NO_REPORT")
+          else:
+              d=json.loads(p.read_text())
+              print("AI_REPORT",json.dumps({"slug":d["article_slug"],"completed":d["all_checks_completed"],
+                "primary":d["editorial_threshold"],
+                "comparison_status":{k:{"status":v.get("status"),
+                   "data":v.get("data")} for k,v in d["checks"].items()}},ensure_ascii=False)[:8000])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pilot-four-detector-results
+          path: editorial-pilot-ai/
+          retention-days: 14
+          if-no-files-found: warn
