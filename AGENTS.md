@@ -16,6 +16,10 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 - Follow custom editorial prompts in `src/editorial_semantic.py` to check an engaging opening, pacing, concrete details, unnecessary repetition, and natural Russian. Cite exact problematic snippets before proposing a substantive edit, respecting the 2+1 limits.
 - `ru-text` and `russian-editor-skill` are third-party instruction skills. The project currently references them as guides and implements *its own* narrow rules; it does not claim they were installed. Their optional external installation requires separate rights/instruction review. See `docs/EDITORIAL_READER_INTEREST.md`.
 
+## Two-channel model pilot
+
+- `src/editorial_two_channel_pilot.py` is the private Qwen two-channel orchestration tool. Run only with a real preconfigured loopback LLM and a private workspace outside the repository; `--status-only` verifies saved cases without calling a provider. Before claiming the editorial agent is ready, complete both genuine articles with fresh hashes, full source and quality checks, images with rights, and a verifiable owner handoff. Never present localhost transport tests as a Qwen production pilot. See `docs/EDITORIAL_TWO_CHANNEL_PILOT.md`.
+
 ## Self-learning feature (requested 20 November 2026)
 
 Self-learning is **feedback-driven improvement**, not uncontrolled online model training. Configuration: `config/agent_learning.json`.

@@ -15,6 +15,8 @@ on:
       - 'src/editorial_learning.py'
       - 'tests/test_editorial_pipeline.py'
       - 'tests/test_editorial_llm_http.py'
+      - 'src/editorial_two_channel_pilot.py'
+      - 'tests/test_editorial_two_channel_pilot.py'
       - 'tests/test_model_a_85_trend.py'
       - 'src/editorial_auto_route.py'
       - 'src/editorial_auto_release.py'
@@ -40,7 +42,24 @@ jobs:
           python-version: '3.12'
       - name: Regression suite for model A and agent
         run: |
-          python -m unittest             tests.test_editorial_agent_v1             tests.test_editorial_pipeline             tests.test_editorial_llm_http             tests.test_model_a_85_trend             tests.test_editorial_ai_check             tests.test_editorial_auto_route             tests.test_editorial_auto_release             tests.test_editorial_ai_revision_policy             tests.test_build -v
+          python -m unittest             tests.test_editorial_agent_v1             tests.test_editorial_pipeline             tests.test_editorial_llm_http             tests.test_editorial_two_channel_pilot             tests.test_model_a_85_trend             tests.test_editorial_ai_check             tests.test_editorial_auto_route             tests.test_editorial_auto_release             tests.test_editorial_ai_revision_policy             tests.test_build -v
+      - name: Smoke-test two-channel status-only CLI without a model
+        run: |
+          python src/editorial_two_channel_pilot.py \
+            --legends-topic "Тестовый ключ не публиковать" \
+            --science-topic "Тестовый научный ключ не публиковать" \
+            --workspace "$RUNNER_TEMP/zen-editorial-private" --status-only
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path(os.environ["RUNNER_TEMP"])/"zen-editorial-private"/"two-channel-pilot-status.json"
+          result=json.loads(p.read_text())
+          assert len(result["channels"])==2
+          assert all(x["status"]=="not_created" and not x["article_ready_for_owner"] for x in result["channels"])
+          assert not result["publication_authorized"] and not result["rss_authorized"]
+          assert result["delivery_status"]=="not_connected"
+          print("Status only: no invented articles, no model, no release")
+          PY
       - name: Verify publication flag is not changed
         run: |
           python - <<'PY'
