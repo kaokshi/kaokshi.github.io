@@ -96,9 +96,9 @@ def four_features(data):
     return {k: round(float(v), 5) for k, v in features.items()}
 
 
-def train_research(rows):
+def train_research(rows, n_train_pairs=N_TRAIN_PAIRS):
     """Logistic meta-classifier using publisher labels only, not production fit()."""
-    if len(rows) != 2 * N_TRAIN_PAIRS:
+    if len(rows) != 2 * n_train_pairs:
         raise ValueError("Insufficient paired training rows")
     if any(row["provenance_level"] != "publisher_claim_not_independently_verified" for row in rows):
         raise ValueError("Unexpected provenance status")
@@ -123,8 +123,8 @@ def predict(model, row):
     return sigmoid(sum(v*w for v, w in zip(x, model["coefficients"])))
 
 
-def score_research(model, holdout):
-    if len(holdout) != 2 * N_HOLDOUT_PAIRS:
+def score_research(model, holdout, n_holdout_pairs=N_HOLDOUT_PAIRS):
+    if len(holdout) != 2 * n_holdout_pairs:
         raise ValueError("Insufficient matched evaluation samples")
     human = [r for r in holdout if r["label"] == "human"]
     ai = [r for r in holdout if r["label"] == "ai"]
