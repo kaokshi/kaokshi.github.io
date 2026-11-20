@@ -11,14 +11,14 @@ A real file must be named `editorial-release-evidence/<article-slug>.json` and r
 - Article `auto_release_candidate: true` is only allowed on genuinely new prepared drafts.
   Do not retrofit historic articles to force a release.
 - **Aggregate editorial risk:** `0..100` provisional points. `<=20` passes numerical triage;
-  `>20` requests owner review. The score consists of **ruBERT (up to 15 points), disagreement between ModernBERT and LightGBM (0/5/10 caution points), stylistic warnings (up to 25), image warnings (up to 25), source warnings (up to 25)**. AI Accent is reported separately, not turned into a fake probability. All warning counts and two comparison scores must be present; a missing metric blocks automatic release.
-- **Hard gates:** all four AI reports completed; ruBERT maximum-window score `<=25%`,
+  `>20` requests owner review. The score now uses **editorial style warnings (up to 25), image warnings (up to 25), and source warnings (up to 25)** only; AI detector scores and disagreements are diagnostics and never converted into a pseudo-probability. The legacy 0–100 scale remains a provisional workflow index. AI Accent is reported separately, not turned into a fake probability. All warning counts and two comparison scores must be present; a missing metric blocks automatic release.
+- **Hard gates:** all four AI reports completed (no ruBERT score cutoff);
   at least 3,000 non-whitespace characters, at least seven available and unique images,
   explicit traceable image licenses, grammar/style/links/image/RSS checks completed,
   no critical unresolved issue, AND verified original-fiction facts or science claim coverage.
 - AI Accent Detector is a stylistic diagnostic, not a probability. ModernBERT and LightGBM
   share source training and cannot be averaged into a valid authorship probability.
-  The risk index is a **local editorial sorting heuristic**, not a scientific estimate.
+  The risk index is a **local editorial sorting heuristic**, not a scientific estimate. Automatic release requires a separately validated AI-review policy; while the policy has no independently supported threshold, auto-release remains disabled by the routing engine.
 - Unavailable/failed/inconsistent source reports => owner review, **never** automatic release.
 - Only a successful verified release transaction sets `publication_enabled:true` and
   deploys the site/RSS. Nothing is published on enabling the system or adding this README.
@@ -115,8 +115,18 @@ than any aggregate number.
 
 ## Обязательное правило: проверки только в GitHub (20.11.2026)
 
-**Единственный разрешённый контур проверки редакционных материалов** — инструменты и GitHub Actions, внедрённые в репозиторий `kaokshi/kaokshi.github.io`, с фактическими отчётами и ссылками на запуски. AI-детектирование выполнять **только четырьмя уже интегрированными инструментами** в `src/editorial_ai_check.py` / `.github/workflows/editorial-ai-checks.yml`: `ruBERT v4`, `ModernBERT`, `LightGBM`, `AI Accent Detector`. Основной диагностический предел ruBERT по максимальному окну — 25%; вторичные оценки не смешивать в произвольный процент достоверности.
+**Единственный разрешённый контур проверки редакционных материалов** — инструменты и GitHub Actions, внедрённые в репозиторий `kaokshi/kaokshi.github.io`, с фактическими отчётами и ссылками на запуски. AI-детектирование выполнять **только четырьмя уже интегрированными инструментами** в `src/editorial_ai_check.py` / `.github/workflows/editorial-ai-checks.yml`: `ruBERT v4`, `ModernBERT`, `LightGBM`, `AI Accent Detector`. **Порог 25% ruBERT отменён 20.11.2026**; все четыре оценки остаются диагностическими и не смешиваются в произвольный процент достоверности.
 
 **ZeroGPT полностью исключён** из тестов, новых/повторных проверок, мониторинга и редакционных задач. Также запрещено для проверки готовых текстов подключать иные внешние сайты, новые AI-детекторы, браузерные проверки на сайтах, плагины или API **без отдельной новой команды владельца**. Допускается только текущий набор редакционных инструментов, уже присутствующих в GitHub (грамматика, стиль, источники, изображения, факты, сборочные тесты), выполняемый через установленный workflow/код. Никакой подмены `unavailable` вымышленным результатом.
 
 Текущий тестовый материал «Девятый этаж, которого не было» остаётся в экспериментальном PR №3: **никаких изменений сайта и RSS**, `release_hold:true`, `publication_authorized:false`. Кино **на паузе, а не исключено** из будущего проекта; не создавать/публиковать кино до новой команды.
+
+
+## Новое решение 20.11.2026 — отказ от порога ruBERT и проверяемая схема переработки
+
+- **Никакого жёсткого процента ruBERT:** 26%, 60% или даже 99% сами по себе не являются поводом переписать текст. Все четыре встроенных GitHub-детектора должны завершаться и оставаться доступными редактору, но ни одна их шкала не является подтверждённой вероятностью ИИ-авторства.
+- Настройка: `config/ai_revision_policy.json`; алгоритм: `src/editorial_ai_revision_policy.py`. **Действующие пороги по жанрам отсутствуют** (`null`), а статус — `awaiting_independent_validation`.
+- Для будущего порога требуются достоверно размеченные, релевантные нашим жанрам источники, проверенное отсутствие совпадения с обучением, **отдельный замороженный контрольный набор не менее 120 человеческих и 120 ИИ-текстов** по жанру, верхняя 95%-ная граница ложных тревог не выше 5%, нижняя 95%-ная граница обнаружения ИИ не ниже 60%. Это минимальные критерии нашей политики, не обещание точности или распознавания Дзена.
+- При превышении **будущего прошедшего проверку порога** статья сможет отправляться на *адресную редакционную переработку*: сначала проверить конкретные содержательные недостатки, затем править по смыслу и повторно запускать весь конвейер. Переписывать только ради цифры запрещено.
+- До фактической калибровки AI-оценки предоставляются **для анализа, а не для автоматического переписывания**. Неполные отчёты, фактические ошибки, проблема лицензий и другие жёсткие требования по-прежнему ведут к проверке владельцем; автоматический выпуск не разрешён при отсутствующей валидации.
+- Никаких изменений статуса «Кадр за Кадром»: он остаётся на паузе и позже сможет получить отдельный жанровый порог. **RSS пока не наполнять.**
