@@ -106,6 +106,9 @@ def main():
         for i,slug in enumerate(slugs,start=1):
             path=OUTPUT/"DOCX"/TITLES[channel]/f"{i:02d}_{slug}.docx"
             manifest["articles"].append(make_one(channel,slug,path))
+    manifest["all_within_article_length"] = all(
+        length_finding(a["text_length_nonspace"]) is None for a in manifest["articles"]
+    )
     (OUTPUT/"MANIFEST.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     guide=(
       "ПАКЕТ ДЛЯ РУЧНОГО ЗАПУСКА ДВУХ КАНАЛОВ ЯНДЕКС ДЗЕН\n"
@@ -138,7 +141,7 @@ def main():
         assert len([p for p in z.namelist() if p.endswith(".docx")])==10
     print(json.dumps({"archive":str(final),"size":final.stat().st_size,
         "article_count":len(manifest["articles"]),
-        "all_within_article_length": all(not length_finding(a["text_length_nonspace"]) for a in manifest["articles"]),
+        "all_within_article_length": manifest["all_within_article_length"],
         "publication_authorized":False},ensure_ascii=False))
 
 if __name__=="__main__":

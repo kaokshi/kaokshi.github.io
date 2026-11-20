@@ -14,6 +14,7 @@ import unicodedata
 from editorial_ai_check import ROOT
 from editorial_agent_v1 import ACTIVE
 from editorial_length import count_characters, length_finding, MIN_CHARS, MAX_CHARS
+from editorial_local_llm import request_timeout
 from editorial_revision import save_case
 
 GUIDES = {
@@ -38,8 +39,9 @@ def command_provider(executable):
             raise Pending("provider_not_configured", "LLM executable was not configured")
         request = json.dumps({"task": task, **payload}, ensure_ascii=False)
         try:
+            timeout = 2 * request_timeout() + 20 if executable.name == "editorial_local_llm.py" else 445
             proc = subprocess.run([str(executable.expanduser().resolve())], input=request, capture_output=True,
-                                  text=True, encoding="utf-8", timeout=445, check=False)
+                                  text=True, encoding="utf-8", timeout=timeout, check=False)
             if proc.returncode:
                 reason = proc.stderr[:240].strip() if executable.name == "editorial_local_llm.py" else ""
                 raise Pending("provider_error", reason or f"Provider exit code {proc.returncode}")
@@ -78,8 +80,10 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
     if topic_key(topic) in {topic_key(title) for title in all_titles}:
         raise ValueError("Topic already exists in the editorial corpus")
     channel_name, genre_prompt = GUIDES[channel]
+    topic_words = set(topic_key(topic).split())
+    related = sorted(all_titles, key=lambda title: -len(topic_words & set(topic_key(title).split())))[:5]
     reply = provider("write", {
-        "channel": channel, "topic": topic, "existing_titles": all_titles,
+        "channel": channel, "topic": topic, "existing_titles": related,
         "documents": [{**doc, "text": doc["text"][:4500]} for doc in documents[:3]],
         "instruction": f"{genre_prompt} Дай заголовок, зацепку, развитие и естественный финал. "
                        f"Обязательный объём {MIN_CHARS}–{MAX_CHARS} символов без пробелов. "

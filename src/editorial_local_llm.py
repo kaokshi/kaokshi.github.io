@@ -39,11 +39,19 @@ SCHEMAS = {
 }
 
 MAX_RESPONSE_BYTES = 2_000_000
-TIME_BUDGET = 410
+
 
 
 class ProviderFailure(Exception):
     pass
+
+
+def request_timeout(env=None):
+    env = os.environ if env is None else env
+    value = int(env.get("ZEN_LLM_TIMEOUT", "360"))
+    if not 30 <= value <= 900:
+        raise ValueError("ZEN_LLM_TIMEOUT must be between 30 and 900 seconds")
+    return value
 
 
 def read_json_response(endpoint, path, payload, timeout):
@@ -156,10 +164,11 @@ def complete(request, *, env=None, send=read_json_response):
         path = "/v1/chat/completions"
         payload = {"model": model, "messages": messages, "stream": False, "temperature": temperature,
                    "max_tokens": tokens, "response_format": {"type": "json_schema", "schema": schema}}
-    deadline = monotonic() + TIME_BUDGET
+    timeout = request_timeout(env)
+    deadline = monotonic() + timeout * 2
     for attempt in range(2):
         try:
-            response = send(endpoint, path, payload, timeout=max(1, min(215, deadline - monotonic())))
+            response = send(endpoint, path, payload, timeout=max(1, min(timeout, deadline - monotonic())))
             if kind == "ollama":
                 content, finish = response["message"]["content"], response.get("done_reason")
             else:

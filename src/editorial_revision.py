@@ -7,6 +7,7 @@ from fcntl import LOCK_EX, flock
 from html import escape, unescape
 from html.parser import HTMLParser
 import json
+import os
 from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
@@ -259,6 +260,7 @@ def save_text(path, content):
         try:
             stream.write(content)
             stream.flush()
+            os.fsync(stream.fileno())
             temporary.replace(path)
         finally:
             temporary.unlink(missing_ok=True)
