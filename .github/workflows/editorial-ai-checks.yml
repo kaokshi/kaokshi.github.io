@@ -91,6 +91,20 @@ jobs:
           else
             python src/editorial_ai_check.py
           fi
+      - name: Test offline AI triage (no external site or API)
+        if: always()
+        run: python -m unittest discover -s tests -p test_editorial_ai_auto_triage.py
+      - name: Automatically analyze available model disagreement
+        if: always()
+        run: python src/editorial_ai_auto_triage.py --reports editorial-check-reports --output editorial-ai-triage
+      - name: Archive automated triage (diagnostic only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-ai-triage
+          path: editorial-ai-triage/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Print numeric results for the trial article
         if: always()
         run: |
