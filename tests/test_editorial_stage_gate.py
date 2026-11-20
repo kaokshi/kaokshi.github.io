@@ -50,8 +50,12 @@ class GateTests(unittest.TestCase):
             "article_sha256":digest,"article_slug":self.article["slug"],
             "all_checks_completed":True,
             "whole_document_index_percent":99.5,
-            "checks":{name:{"status":"completed","data":{"probability":.99}}
-                     for name in gate.REQUIRED_AI}
+            "checks":{
+                "rubert_v4":{"status":"completed","data":{"prediction_native":"human","score_percent":99}},
+                "modernbert":{"status":"completed","data":{"probability":.01}},
+                "lightgbm":{"status":"completed","data":{"probability":.02}},
+                "ai_accent_detector":{"status":"completed","data":{"ai_accent_score":.99}}
+            }
         }
         self.evidence={
             "status":"completed","report_ref":"https://github.com/example/actions/runs/1",
@@ -105,6 +109,27 @@ class GateTests(unittest.TestCase):
     def test_missing_model_never_creates_fake_pass(self):
         self.ai["checks"]["modernbert"]["status"]="error"
         self.assertEqual(self.decide()["disposition"],"awaiting_evidence")
+
+    def test_conflicting_model_families_require_editorial_rework(self):
+        self.ai["checks"]["modernbert"]["data"]["probability"]=.94
+        self.ai["checks"]["lightgbm"]["data"]["probability"]=.9
+        d=self.decide()
+        self.assertEqual(d["disposition"],"needs_revision")
+        self.assertTrue(any("Спорные результаты" in x for x in d["revision_actions"]))
+        self.assertFalse(d["publication_authorized"])
+
+    def test_conflict_within_aiw_family_goes_to_rework(self):
+        self.ai["checks"]["modernbert"]["data"]["probability"]=.96
+        self.ai["checks"]["lightgbm"]["data"]["probability"]=.03
+        d=self.decide()
+        self.assertEqual(d["disposition"],"needs_revision")
+        self.assertTrue(any("aiw_family_internal_disagreement" in x for x in d["revision_actions"]))
+
+    def test_missing_model_output_is_not_disagreement_or_pass(self):
+        del self.ai["checks"]["modernbert"]["data"]["probability"]
+        d=self.decide()
+        self.assertEqual(d["disposition"],"awaiting_evidence")
+        self.assertIn("ai_agreement_analysis_incomplete",d["awaiting_checks"])
 
     def test_paused_cinema_not_deleted(self):
         self.article["channel"]="cinema"
