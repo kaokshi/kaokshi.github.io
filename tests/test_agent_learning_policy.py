@@ -1,9 +1,13 @@
 """Safety tests for self-learning policy, no network/model training needed."""
 import json
 import unittest
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+import editorial_learning as learner
+from editorial_agent_v1 import article_digest
 
 class AgentLearningPolicyTests(unittest.TestCase):
     @classmethod
@@ -32,12 +36,54 @@ class AgentLearningPolicyTests(unittest.TestCase):
         self.assertFalse(self.learning["publication"]["cannot_change_publication_enabled"] is False)
         self.assertTrue(self.learning["publication"]["cannot_activate_rss"])
         self.assertTrue(self.learning["publication"]["cannot_unpause_cinema"])
-        self.assertIn("not_implemented", self.learning["implementation_status"])
+        self.assertEqual(self.learning["implementation_status"],
+                         "owner_reviewed_local_observations_and_proposals_implemented")
 
     def test_detector_scores_not_gold_labels(self):
         self.assertTrue(self.learning["memory_policy"]["never_assume_detector_score_is_ground_truth"])
         self.assertTrue(self.learning["memory_policy"]["prevent_train_holdout_leakage"])
         self.assertTrue(self.learning["memory_policy"]["no_secrets_or_personal_data"])
+
+class AgentLearningTests(unittest.TestCase):
+    def observations(self, slug, channel="science", outcome="unresolved"):
+        draft = {"slug": slug, "channel": channel, "body_html": "<p>Документ редакции.</p>"}
+        digest = article_digest(draft)
+        case = {"schema": "zen-editorial-revision-case-v1", "versions": [
+            {"article": draft, "text_sha256": digest, "stage": "original",
+             "report": {"text_sha256": digest, "automated_checks_completed": False,
+                        "ai": {"any_score": 99}}}]}
+        feedback = {"reviewer": "owner", "slug": slug, "channel": channel,
+                    "source_text_sha256": digest, "reviewed_text_sha256": digest,
+                    "findings": {"sources": outcome}}
+        return case, feedback
+
+    def test_reviewer_and_version_are_required(self):
+        case, feedback = self.observations("science-test")
+        for invalid in ({"reviewer": "agent"}, {"reviewed_text_sha256": "stale"},
+                        {"findings": {"ai_authorship": "resolved"}}):
+            with self.assertRaises(ValueError):
+                learner.reviewed_observations(case, {**feedback, **invalid})
+
+    def test_recurring_issues_create_advisory_proposals_per_genre(self):
+        rows = []
+        for slug, channel in (("science-first", "science"), ("science-second", "science"),
+                              ("legends-first", "legends")):
+            rows.extend(learner.reviewed_observations(*self.observations(slug, channel)))
+        self.assertEqual(learner.report(rows)["genres"]["science"]["proposals"], [])
+        result = learner.report(rows + rows[:1], on_request=True)
+        self.assertEqual(len(result["observations"]), 3)
+        self.assertEqual(result["genres"]["science"]["proposals"][0]["affected_articles"], 2)
+        self.assertEqual(result["genres"]["legends"]["proposals"], [])
+        self.assertFalse(result["observations"][0]["checks_completed"])
+        self.assertNotIn("any_score", str(result))
+
+    def test_batch_uses_twenty_distinct_articles(self):
+        rows = []
+        for i in range(20):
+            rows.extend(learner.reviewed_observations(*self.observations(f"science-{i}")))
+        self.assertEqual(learner.report(rows[:-1] + rows[:1])["genres"]["science"]["proposals"], [])
+        self.assertEqual(learner.report(rows)["genres"]["science"]["proposals"][0]["affected_articles"], 20)
+
 
 if __name__ == "__main__":
     unittest.main()

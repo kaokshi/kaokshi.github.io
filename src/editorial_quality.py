@@ -97,6 +97,10 @@ def article_urls(article):
 
 def inspect_article(path):
     article = json.loads(path.read_text(encoding="utf-8"))
+    return inspect_draft(article, fallback_slug=path.stem)
+
+
+def inspect_draft(article, *, fallback_slug=None):
     channel = article.get("channel")
     text = extract_text(article.get("body_html", ""))
     chars = len(re.sub(r"\s", "", text))
@@ -130,7 +134,7 @@ def inspect_article(path):
         if re.search(r"\b(основано на реальных событиях|подлинная история)\b", text.lower()):
             problems.append("fiction_claim_of_reality_review")
     return {
-        "slug": article.get("slug", path.stem),
+        "slug": article.get("slug", fallback_slug),
         "channel": channel,
         "characters_without_whitespace": chars,
         "images": {"count": len(imgs), "missing": missing, "sources_recorded": len(sources),
@@ -143,17 +147,26 @@ def inspect_article(path):
     }
 
 
-def similarity_report(entries):
+def similarity_report(entries, *, candidate=None):
     """Internal duplicate detection across all three channels; not web plagiarism."""
     documents = []
     for path in entries:
         a = json.loads(path.read_text(encoding="utf-8"))
+        if candidate is not None and a.get("slug", path.stem) == candidate.get("slug"):
+            continue
+        documents.append((a, path.stem))
+    if candidate is not None:
+        documents.append((candidate, None))
+    corpus = []
+    for a, fallback_slug in documents:
         text = extract_text(a.get("body_html", "")).lower()
         words = set(re.findall(r"[а-яё]{5,}", text))
-        documents.append((a.get("slug", path.stem), a.get("title", ""), words))
+        corpus.append((a.get("slug", fallback_slug), a.get("title", ""), words))
     similar = []
-    for i, (slug, title, words) in enumerate(documents):
-        for slug2, title2, words2 in documents[i + 1:]:
+    for i, (slug, title, words) in enumerate(corpus):
+        for slug2, title2, words2 in corpus[i + 1:]:
+            if candidate is not None and slug2 != candidate["slug"]:
+                continue
             if not words or not words2:
                 continue
             overlap = len(words & words2) / len(words | words2)
@@ -164,15 +177,21 @@ def similarity_report(entries):
     return similar
 
 
-def image_hash_audit(paths):
+def image_hash_audit(paths, *, candidate=None):
     """Exact hashes for all files; perceptual distance if Pillow is installed."""
     records = []
+    articles = []
     for path in paths:
         a = json.loads(path.read_text(encoding="utf-8"))
+        if candidate is None or a.get("slug", path.stem) != candidate.get("slug"):
+            articles.append((a, path.stem))
+    if candidate is not None:
+        articles.append((candidate, None))
+    for a, fallback_slug in articles:
         for filename in a.get("image_files", []):
             f = ROOT / filename
             if f.is_file():
-                records.append((a.get("slug", path.stem), filename, f))
+                records.append((a.get("slug", fallback_slug), filename, f))
     duplicates = []
     seen = {}
     for slug, name, path in records:
@@ -187,19 +206,23 @@ def image_hash_audit(paths):
     except ImportError:
         return {"sha256_duplicates": duplicates, "near_duplicate_status": "unavailable (Pillow/imagehash not installed)"}
     hashes = []
+    unreadable = []
     for slug, name, path in records:
         try:
             with Image.open(path) as img:
                 hashes.append((slug, name, imagehash.phash(img)))
         except (OSError, ValueError):
-            continue
+            unreadable.append({"slug": slug, "file": name})
     for i, (slug, name, h) in enumerate(hashes):
         for slug2, name2, h2 in hashes[i + 1:]:
+            if candidate is not None and candidate["slug"] not in (slug, slug2):
+                continue
             dist = h - h2
             if name != name2 and dist <= 5:
                 duplicates.append({"method": "perceptual_hash", "distance": dist,
                                    "articles": [slug, slug2], "images": [name, name2]})
-    return {"duplicates": duplicates, "near_duplicate_status": "completed", "scanned_images": len(hashes)}
+    return {"duplicates": duplicates, "near_duplicate_status": "completed", "scanned_images": len(hashes),
+            "unreadable": unreadable}
 
 
 def main():

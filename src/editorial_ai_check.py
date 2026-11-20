@@ -8,10 +8,12 @@ import argparse
 import hashlib
 import math
 from datetime import datetime, timezone
+from decimal import Decimal
 from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
+from statistics import mean
 import subprocess
 import tempfile
 
@@ -83,7 +85,7 @@ def normalized_aiw_result(argv, text_path):
             or isinstance(value, bool) or not isinstance(value, (int, float))
             or not math.isfinite(value) or not 0 <= value <= 1):
         return {"status": "error", "reason": "aiw_whole_document_probability_missing_or_invalid"}
-    data["score_percent"] = round(100 * value, 4)
+    data["score_percent"] = float(100 * Decimal(str(value)))
     return result
 
 def threshold_review(results):
@@ -98,7 +100,7 @@ def threshold_review(results):
                     and math.isfinite(value) and 0 <= value <= 100)
         diagnostics[name] = {
             "status": item.get("status", "unavailable"),
-            "index_0_100": round(value, 2) if complete else None,
+            "index_0_100": value if complete else None,
             "unit": "uncalibrated_model_diagnostic",
         }
     item = results.get("ai_accent_detector", {})
@@ -114,7 +116,7 @@ def threshold_review(results):
     }
     values = [diagnostics[name]["index_0_100"] for name in MODEL_A]
     complete = accent_ok and all(v is not None for v in values)
-    index = round(sum(values) / 3, 2) if complete else None
+    index = mean(values) if complete else None
     return {
         "status": "completed" if complete else "incomplete",
         "primary_model": "model_a",
@@ -132,6 +134,10 @@ def threshold_review(results):
 
 def evaluate(path):
     article = json.loads(path.read_text(encoding="utf-8"))
+    return evaluate_article(article, source_file=str(path.relative_to(ROOT)), fallback_slug=path.stem)
+
+
+def evaluate_article(article, *, source_file=None, fallback_slug=None):
     article_text = extract_text(article.get("body_html", ""))
     if not article_text:
         raise ValueError("Empty article text")
@@ -148,8 +154,8 @@ def evaluate(path):
     return {
         "schema": "editorial-ai-check-model-a-v2",
         "checked_at": datetime.now(timezone.utc).isoformat(),
-        "source_file": str(path.relative_to(ROOT)),
-        "article_slug": article.get("slug", path.stem),
+        "source_file": source_file,
+        "article_slug": article.get("slug", fallback_slug),
         "channel": article.get("channel"),
         "text_sha256": hashlib.sha256(article_text.encode("utf-8")).hexdigest(),
         "characters_without_spaces": len(re.sub(r"\s", "", article_text)),
