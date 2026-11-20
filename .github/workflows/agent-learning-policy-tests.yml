@@ -1,0 +1,22 @@
+name: Agent self-learning policy validation
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'config/agent_learning.json'
+      - 'tests/test_agent_learning_policy.py'
+      - '.github/workflows/agent-learning-policy-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Policy regression tests
+        run: python -m unittest tests.test_agent_learning_policy -v
