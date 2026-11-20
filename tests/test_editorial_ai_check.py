@@ -42,25 +42,25 @@ class EditorialAiChecksTest(unittest.TestCase):
             self.assertEqual(saved["status"], "draft")
             self.assertFalse(saved["publication_authorized"])
 
-    def test_rubert_only_threshold(self):
-        def reports(rubert, modern=0.95, light=0.95, accent=0.95):
-            return {
-                "rubert_v4": {"status": "completed", "data": {"probability": rubert}},
-                "modernbert": {"status": "completed", "data": {"probability": modern}},
-                "lightgbm": {"status": "completed", "data": {"probability": light}},
-                "ai_accent_detector": {"status": "completed", "data": {"ai_accent_score": accent}},
-            }
-        self.assertTrue(checker.threshold_review(reports(0.25))["passed"])
-        self.assertTrue(checker.threshold_review(reports(0.01, 1, 1, 1))["passed"])
-        self.assertFalse(checker.threshold_review(reports(0.25001, 0, 0, 0))["passed"])
-        self.assertEqual(checker.threshold_review(reports(0.05))["primary_model"], "rubert_v4")
-        self.assertEqual(checker.threshold_review(reports(0.25))["checks"]["rubert_v4"]["limit_percent"], 25)
-        self.assertEqual(checker.threshold_review(reports(0.05))["checks"]["rubert_v4"]["score_percent"], 5.0)
+    def test_no_unvalidated_ai_threshold(self):
+        results={
+            "rubert_v4":{"status":"completed","data":{"probability":.99,"score_percent":99}},
+            "modernbert":{"status":"completed","data":{"score_percent":99}},
+            "lightgbm":{"status":"completed","data":{"score_percent":99}},
+            "ai_accent_detector":{"status":"completed","data":{"ai_accent_score":.99}},
+        }
+        decision=checker.threshold_review(results)
+        self.assertEqual(decision["status"],"diagnostics_only")
+        self.assertIsNone(decision["passed"])
+        self.assertIsNone(decision["limit_percent"])
+        self.assertIsNone(decision["needs_rewrite_based_on_ai"])
+        self.assertEqual(decision["checks"]["rubert_v4"]["index_0_100"],99)
 
-    def test_missing_primary_score_does_not_pass(self):
-        self.assertFalse(checker.threshold_review({})["passed"])
-        self.assertFalse(checker.threshold_review({"rubert_v4": {"status": "completed", "data": {"probability": True}}})["passed"])
-        self.assertFalse(checker.threshold_review({"rubert_v4": {"status": "error"}})["passed"])
+    def test_missing_ai_scores_are_not_falsely_passed(self):
+        decision=checker.threshold_review({})
+        self.assertEqual(decision["status"],"diagnostics_only")
+        self.assertIsNone(decision["checks"]["rubert_v4"]["index_0_100"])
+        self.assertIsNone(decision["passed"])
 
     def test_rubert_windows_cover_long_text(self):
         from rubert_v4_runner import windows
