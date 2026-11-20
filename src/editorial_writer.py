@@ -23,6 +23,10 @@ GUIDES = {
                 "Покажи мотивацию и хронологию через действия. "
                 "Веди художественное повествование до развязки. Не вставляй научных справок, "
                 "ссылок на исследования и комментариев о том, как устроен сюжет."),
+    "cinema": ("Кадр за Кадром", "Подготовь оригинальный обзор или точный пересказ конкретного фильма. "
+                "Не выдумывай сцены, реплики, актёров, повороты сюжета и факты о выпуске. "
+                "Если достоверных сведений о фильме недостаточно, не маскируй догадки под факты; "
+                "такой текст требует проверки редактором и первоисточниками."),
     "science": ("За гранью очевидного", "Объясни явление понятным языком. "
                 "Используй прочитанные документы, точные факты сверяй с первоисточниками. "
                 "Отметь границы доказанного, избегай догадок, вымышленных ссылок и цитат."),
@@ -82,7 +86,7 @@ def private_path(path):
 
 def write_article(channel, topic, provider, existing_titles=(), *, documents=(), allow_length_repair=False):
     if channel not in ACTIVE or not topic_key(topic):
-        raise ValueError("Use a nonempty topic for legends or science")
+        raise ValueError("Use a nonempty topic for legends, science or cinema")
     all_titles = list(existing_titles)
     if topic_key(topic) in {topic_key(title) for title in all_titles}:
         raise ValueError("Topic already exists in the editorial corpus")
