@@ -1,5 +1,4 @@
 """Hard-gate and 20-point release routing regression tests; no live publication."""
-import json
 from pathlib import Path
 import sys
 import tempfile
