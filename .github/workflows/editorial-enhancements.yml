@@ -1,0 +1,35 @@
+name: Editorial enhancements - approved trials
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/editorial_enhancements.py'
+      - 'tests/test_editorial_enhancements.py'
+      - '.github/workflows/editorial-enhancements.yml'
+      - 'content/articles/**'
+permissions:
+  contents: read
+jobs:
+  editorial-assistants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install editorial helper libraries
+        run: python -m pip install 'ruts' 'pyalex'
+      - name: Validate editorial safety and inputs
+        run: python -m unittest tests.test_editorial_enhancements -v
+      - name: Run ruTS on three channels and OpenAlex on curated science topic
+        run: python src/editorial_enhancements.py
+      - name: Save diagnostic report only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-enhancements
+          path: editorial-enhancement-reports/
+          if-no-files-found: warn
+          retention-days: 14
