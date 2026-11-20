@@ -9,6 +9,10 @@ SECTION_SCHEMA = "zen-sections-v1"
 GENERIC = re.compile(r"(?:введение|вступление|заключение|основная часть|итоги|(?:блок|раздел|глава|часть)\s*[\divx]*)", re.I)
 
 
+def subscription_heading(name):
+    return re.match(r"(?:призыв к |подпи(?:сывай|шис|шите|ска\b))", name.casefold().strip())
+
+
 def parse_sections(body):
     try:
         root = ET.fromstring("<article>" + body + "</article>")
@@ -27,7 +31,7 @@ def parse_sections(body):
                 or (heading.text or "").strip() or (heading[0].tail or "").strip()):
             raise ValueError("Use h2 with a bold heading")
         name = " ".join(re.findall(r"\w+", (heading[0].text or "").casefold()))
-        if not name or name in names or GENERIC.fullmatch(name) or re.match(r"(?:призыв к |подпи(?:сывай|шис|шите|ска на))", name):
+        if not name or name in names or GENERIC.fullmatch(name) or subscription_heading(name):
             raise ValueError("Empty, repeated or generic heading")
         names.add(name)
         if any((node.tail or "").strip() for node in section):
@@ -73,7 +77,10 @@ def arrange(paragraphs, plan, provider, title):
             "instruction": "Сгруппируй абзацы по смыслу. Верни sections с полями start (номер первого "
                            "абзаца от 1) и heading (конкретный живой подзаголовок). Начни с 1. "
                            "Сделай 2–3 раздела по несколько абзацев, не больше четырёх. Заголовок — короткая конкретная деталь из текста, без двоеточия, слов о структуре и призывов. Не придумывай факты. Оставь подписку в финальном разделе."})
-        return format_sections(paragraphs, retry["sections"])
+        sections = retry["sections"]
+        if isinstance(sections, list) and len(sections) > 2 and subscription_heading(str(sections[-1].get("heading", ""))):
+            sections = sections[:-1]
+        return format_sections(paragraphs, sections)
 
 
 def docx_body(doc, article, assets):
@@ -115,6 +122,9 @@ def repair_sections(article, provider):
                 text = heading.text
                 heading.text = None
                 ET.SubElement(heading, "strong").text = text
+        if len(root) > 2 and subscription_heading(root[-1].findtext("h2/strong", "")):
+            root[-2].extend(list(root[-1])[1:])
+            root.remove(root[-1])
         repaired = "".join(ET.tostring(section, encoding="unicode") for section in root)
         parse_sections(repaired)
         return {**article, "layout_schema": SECTION_SCHEMA, "body_html": repaired}
