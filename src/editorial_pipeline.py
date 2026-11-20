@@ -280,6 +280,7 @@ def main():
             decision = execute(case, directory, provider, research, documents, reviews, response,
                                lambda draft, urls: check_draft(draft, grammar, source_urls=urls))
             from editorial_cover import cover_selection
+            from editorial_local_llm import ProviderFailure
             assembled_path = directory / "assembled.json"
             assembled_path.unlink(missing_ok=True)
             manifest_path = directory / "illustrations.json"
@@ -288,8 +289,13 @@ def main():
                 save_case(manifest_path, load(args.illustrations))
             save_case(selection_path, {"status": "awaiting_illustrations"})
             if manifest_path.exists():
-                assembled = cover_selection(load(directory / "draft.json"), load(manifest_path), args.asset_root,
-                                            checkpoint=lambda result: save_case(selection_path, result))
+                try:
+                    assembled = cover_selection(load(directory / "draft.json"), load(manifest_path), args.asset_root,
+                                                checkpoint=lambda result: save_case(selection_path, result))
+                except (OSError, KeyError, ValueError, TypeError, ProviderFailure) as exc:
+                    save_case(selection_path, {**load(selection_path), "status": "cover_selection_pending",
+                                               "reason": str(exc)})
+                    parser.exit(2, f"cover_selection_pending: {exc}\n")
                 save_case(assembled_path, assembled)
             print(json.dumps({"status": decision, "directory": str(directory)}))
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
