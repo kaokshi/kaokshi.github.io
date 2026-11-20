@@ -33,28 +33,8 @@ jobs:
         run: python -m pip install -r requirements-editorial.txt
       - name: Download published open models to runner cache
         run: |
-          aiw-ru models install modernbert lightgbm
-      - name: Install pinned ruBERT v4 in isolated environment
-        run: |
-          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
-          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
-          python -m venv .rubert-venv
-          .rubert-venv/bin/python -m pip install --upgrade pip
-          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
-          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
-      - name: Download pinned ruBERT v4 calibration and weights
-        run: |
-          .rubert-venv/bin/python - <<'PY'
-          from huggingface_hub import snapshot_download
-          snapshot_download(
-              "k1y0mi/ru-ai-text-detector",
-              repo_type="model",
-              revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
-              allow_patterns=["v4_model/*", "v4_calibrator.joblib", "threshold_v4.json"],
-              local_dir=".rubert-upstream/models",
-          )
-          PY
-      - name: Run primary ruBERT and three comparisons (only changed articles on push)
+          aiw-ru models install modernbert lightgbm transformer
+      - name: Run Model A with three classifiers plus AI Accent (only changed articles on push)
         env:
           ARTICLE_SLUG: ${{ inputs.slug }}
           EVENT_NAME: ${{ github.event_name }}
@@ -91,6 +71,31 @@ jobs:
           else
             python src/editorial_ai_check.py
           fi
+      - name: Route Model A diagnostics to editorial agent (read-only)
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, subprocess, sys
+          from pathlib import Path
+          for report in sorted(Path("editorial-check-reports").glob("*.json")):
+              if report.name == "index.json":
+                  continue
+              article = Path("content/articles") / report.name
+              if not article.is_file():
+                  print("Missing original draft:", article)
+                  continue
+              subprocess.run([sys.executable,"src/editorial_agent_v1.py",
+                  "--article",str(article),"--ai-report",str(report),
+                  "--output","editorial-agent-routing"],check=True)
+          PY
+      - name: Preserve automatic agent routing (no publication)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-agent-routing-v1
+          path: editorial-agent-routing/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Print numeric results for the trial article
         if: always()
         run: |

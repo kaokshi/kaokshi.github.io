@@ -18,7 +18,7 @@ ACTIVE_CHANNELS = frozenset({"legends", "science"})
 PAUSED_CHANNELS = frozenset({"cinema"})
 RISK_THRESHOLD = 20  # 0-100 editorial triage points; >20 -> human review.
 PRIMARY_AI_LIMIT = None  # No unvalidated AI-authorhip threshold; keep diagnostics only.
-REQUIRED_AI = frozenset({"rubert_v4", "modernbert", "lightgbm", "ai_accent_detector"})
+REQUIRED_AI = frozenset({"modernbert", "lightgbm", "transformer", "ai_accent_detector"})
 REQUIRED_QUALITY = frozenset({"language_tool", "vale", "links", "image_similarity", "rss_preview"})
 ALLOWED_RIGHTS = frozenset({"CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0", "PUBLIC_DOMAIN", "OWN_WORK", "LICENSED"})
 LEGEND_SAFETY = frozenset({"original_fiction_confirmed", "fiction_not_presented_as_fact"})
@@ -98,13 +98,20 @@ def decide(article, evidence):
                 not REQUIRED_AI.issubset(ai_checks) or
                 any(ai_checks[p].get("status") != "completed" for p in REQUIRED_AI)):
             blockers.append("ai_check_incomplete")
-    score = None
-    if isinstance(ai_checks, dict):
-        main = ai_checks.get("rubert_v4", {})
-        score = main.get("score_percent") if isinstance(main, dict) else None
-    if not finite_percent(score):
-        blockers.append("rubert_diagnostic_missing")
-    # Raw ruBERT values never hard-block or require rewriting.
+    # Model A score requires three actual, complete classifier values.
+    component_scores = []
+    for model in ("modernbert", "lightgbm", "transformer"):
+        item = ai_checks.get(model, {}) if isinstance(ai_checks, dict) else {}
+        value = item.get("score_percent") if isinstance(item, dict) else None
+        if not finite_percent(value):
+            blockers.append("model_a_component_missing")
+        else:
+            component_scores.append(value)
+    model_a_index = round(sum(component_scores) / 3, 2) if len(component_scores) == 3 else None
+    if model_a_index is not None and model_a_index > 80:
+        blockers.append("model_a_editorial_review_above_80")
+    if evidence.get("ai_editorial_escalation_unresolved") is True:
+        blockers.append("unresolved_ai_editorial_escalation")
     quality = evidence.get("quality")
     if not valid_evidence(quality, dg):
         blockers.append("quality_report_missing_or_stale")
@@ -157,7 +164,7 @@ def decide(article, evidence):
     else:
         disagreement_points = 0
     components = {
-        "rubert_editorial_signal": 0,  # diagnostic only, never AI veto
+        "model_a_review_signal": 0,  # handled as separate owner-selected review flag
         "model_disagreement_advisory": 0,  # not independent evidence of AI
         "style_warnings": min(25, style * 3),
         "image_warnings": min(25, image_warn * 8),
@@ -175,7 +182,8 @@ def decide(article, evidence):
         "schema": "editorial-auto-route-v1", "slug": slug,
         "channel": channel, "article_sha256": dg,
         "risk_score": risk, "risk_components": components, "risk_scale": "0-100", "review_if_above": RISK_THRESHOLD,
-        "rubert_limit_percent": None,
+        "model_a_index_0_100": model_a_index,
+        "model_a_editorial_review_if_above": 80,
         "ai_rewrite_required_by_detector": False,
         "ai_rewrite_threshold": None,
         "disposition": disposition,
@@ -183,7 +191,7 @@ def decide(article, evidence):
         "publication_authorized": False,
         "notes": [
             "A low risk score is NOT scientific fact-checking, legal rights verification, or proof of human authorship.",
-            "All four AI detectors are diagnostics only. No validated AI score triggers rewriting or unattended publication.",
+            "Model A >80 routes to editorial review; only verified substantive defects justify actual rewrites.",
             "This module routes articles; a separate verified release workflow must check the decision before deployment.",
         ],
     }

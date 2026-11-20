@@ -1,6 +1,6 @@
 {
   "schema": "editorial-ai-revision-policy-v1",
-  "status": "awaiting_independent_validation",
+  "status": "owner_selected_unvalidated_editorial_triage",
   "current_channels": [
     "legends",
     "science"
@@ -9,9 +9,9 @@
     "cinema"
   ],
   "only_detectors": [
-    "rubert_v4",
     "modernbert",
     "lightgbm",
+    "transformer",
     "ai_accent_detector"
   ],
   "thresholds": {
@@ -19,7 +19,7 @@
     "science": null,
     "cinema": null
   },
-  "decision_rule": "Latest owner-approved future sequence: AI editorial agent drafts and runs all configured checks; up to 2 substantive targeted agent corrections with full fresh checks; if unresolved, hand over immutable text+checks+history to ChatGPT editorial escalation for exactly 1 targeted correction and full fresh checks; if still unresolved, deliver article and remaining issues to owner. A high score alone is not proof of authorship or a mandate to rewrite. Until independent validation, threshold 30 is diagnostic only. No automatic publication.",
+  "decision_rule": "Owner 2026-11-20: local Model A index >80/100 flags editorial re-review. If concrete quality issues are found, editorial agents may make at most two genuinely changed and fully rechecked revisions; then escalate immutable text, history and evidence to ChatGPT for exactly one substantive revision; if still unresolved, send to owner. The >80 index is NOT 80% AI authorship and cannot alone prove defects; no automatic publication.",
   "validation_requirements": {
     "minimum_human_holdout": 120,
     "minimum_ai_holdout": 120,
@@ -53,14 +53,14 @@
     },
     "result": "Neither candidate meets the validation criteria; do not enable."
   },
-  "planned_ensemble_review_cutoff_0_to_100": 30,
-  "planned_ensemble_review_cutoff_status": "disabled_until_independently_validated",
+  "planned_ensemble_review_cutoff_0_to_100": 80,
+  "planned_ensemble_review_cutoff_status": "owner_selected_diagnostic_triage_not_independently_calibrated",
   "editorial_escalation": {
     "schema": "editorial-three-tier-escalation-v1",
     "agent_revision_limit": 2,
     "assistant_revision_limit": 1,
     "assistant_review_required_after_agent_exhaustion": true,
-    "assistant_handoff_transport": "pending_integration_with_existing_ChatGPT_tasks",
+    "assistant_handoff_transport": "not_yet_connected_to_chatgpt_work_or_automations",
     "reevaluate_all_checks_after_any_text_change": true,
     "require_immutable_article_sha256_and_evidence": true,
     "owner_receives_unresolved_after_assistant_exhaustion": true,
@@ -103,7 +103,7 @@
     "current_live_trigger": false,
     "starting_action": "one_small_substantive_quality_improvement_and_fresh_four_detector_checks",
     "comparison": "compare_each_detector_with_its_own_previous_result_only; no false averaged AI percentage",
-    "continue_only_if": "verified_text_quality_not_worse_and_at_least_one_comparable_detector_score_decreases_without_other_scores_worsening",
+    "continue_only_if": "verified quality improvements; do not optimize prose for a detector score alone",
     "stop_if": "no_comparable_score_improvement_or_any_relevant_score_worsens_or_any_quality_check_fails",
     "preserve_original_and_each_candidate_sha256": true,
     "repeat_all_editorial_checks_after_changes": true,
@@ -116,5 +116,19 @@
     "no_claim_of_bypassing_zen_detection": true,
     "may_not_delay_owner_handoff_or_required_review": true,
     "no_publication_before_launch": true
+  },
+  "model_a": {
+    "model_ids": [
+      "modernbert",
+      "lightgbm",
+      "transformer"
+    ],
+    "style_model": "ai_accent_detector",
+    "aggregate": "arithmetic_mean",
+    "owner_editorial_review_index_threshold": 80,
+    "trigger": "strictly_above_80",
+    "status": "owner_selected_unvalidated_editorial_routing",
+    "index_is_authorship_percent": false,
+    "require_concrete_editorial_issues_for_text_changes": true
   }
 }

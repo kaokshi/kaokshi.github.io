@@ -47,7 +47,7 @@ class RoutingTests(unittest.TestCase):
                  "report_ref": "https://github.com/kaokshi/kaokshi.github.io/actions/runs/123"}
         return {
             "ai": {**stamp, "checks": {p: {"status": "completed",
-                     "score_percent": rubert if p == "rubert_v4" else 81}
+                     "score_percent": rubert if p == "transformer" else 81}
                      for p in route.REQUIRED_AI}},
             "quality": {**stamp, "checks": {p: {"status": "completed"}
                          for p in route.REQUIRED_QUALITY}},
@@ -71,12 +71,11 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("aggregate_risk_above_20", result["blockers"])
         self.assertEqual(result["disposition"], "send_for_owner_review")
 
-    def test_high_rubert_does_not_trigger_unvalidated_ai_rewrite(self):
-        self.evidence["ai"]["checks"]["rubert_v4"]["score_percent"] = 99
+    def test_model_a_above_80_requires_editorial_review(self):
+        self.evidence["ai"]["checks"]["transformer"]["score_percent"] = 99
         result = route.decide(self.article, self.evidence)
-        self.assertNotIn("rubert_above_25", result["blockers"])
+        self.assertIn("model_a_editorial_review_above_80", result["blockers"])
         self.assertFalse(result["ai_rewrite_required_by_detector"])
-        self.assertIsNone(result["ai_rewrite_threshold"])
         self.assertIn("ai_auto_release_threshold_not_validated", result["blockers"])
 
     def test_missing_evidence_never_passes(self):
