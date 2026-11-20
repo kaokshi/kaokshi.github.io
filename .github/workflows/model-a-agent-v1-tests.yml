@@ -6,6 +6,9 @@ on:
       - 'src/editorial_agent_v1.py'
       - 'src/editorial_layout.py'
       - 'src/editorial_cover.py'
+      - 'src/editorial_media.py'
+      - 'src/editorial_preview.py'
+      - 'tests/test_editorial_media.py'
       - 'tests/test_editorial_layout.py'
       - 'src/editorial_writer.py'
       - 'src/editorial_length.py'
@@ -41,8 +44,8 @@ jobs:
           python-version: '3.12'
       - name: Test private article layout and Word rendering
         run: |
-          python -m pip install Pillow==11.3.0 python-docx==1.2.0
-          python -m unittest tests.test_editorial_layout -v
+          python -m pip install Pillow==11.3.0 python-docx==1.2.0 ImageHash==4.3.2
+          python -m unittest tests.test_editorial_layout tests.test_editorial_media -v
       - name: Regression suite for model A and agent
         run: |
           python -m unittest             tests.test_editorial_agent_v1             tests.test_editorial_pipeline             tests.test_editorial_ai_check             tests.test_editorial_auto_route             tests.test_editorial_auto_release             tests.test_editorial_ai_revision_policy             tests.test_build -v

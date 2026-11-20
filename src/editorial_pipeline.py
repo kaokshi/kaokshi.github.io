@@ -58,6 +58,10 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
 
         article = write_article(channel, topic, generate, titles, documents=tuple(documents),
                                 allow_length_repair=True)
+        settings = load(CONTENT.parents[1] / "config" / "site.json")
+        if (settings.get("publication_enabled") is True and settings.get("auto_release_enabled") is True
+                and channel in settings.get("auto_release_active_channels", [])):
+            article.update(auto_release_candidate=True, release_hold=False)
     else:
         article = existing
     validate_draft(article, channel)
@@ -186,7 +190,14 @@ def main():
     researchers.add_argument("--europe-pmc", action="store_true", help="Retrieve public research abstracts")
     parser.add_argument("--research-query", help="Public source discovery query for the topic")
     parser.add_argument("--source-documents", type=Path, help="JSON with retrieved documents")
-    parser.add_argument("--illustrations", type=Path, help="Manifest of 7–8 verified JPEG assets")
+    media = parser.add_mutually_exclusive_group()
+    media.add_argument("--produce-media", action="store_true", help="Plan and source seven editorial images")
+    parser.add_argument("--photo-query", help="Commons search terms for science")
+    parser.add_argument("--generator-rights", help="Verified licensing basis for the local image model")
+    media.add_argument("--media-plan", type=Path, help="Seven or eight Commons IDs or original scene prompts")
+    parser.add_argument("--cover-review", type=Path, help="Optional hash-bound visual review of this exact set")
+    parser.add_argument("--image-generator", default="http://127.0.0.1:7860")
+    media.add_argument("--illustrations", type=Path, help="Manifest of 7–8 verified JPEG assets")
     parser.add_argument("--asset-root", type=Path, default=CONTENT.parents[1])
     parser.add_argument("--review", type=Path, help="Operator review for specific text hashes")
     parser.add_argument("--assistant-response", type=Path)
@@ -285,18 +296,43 @@ def main():
             assembled_path.unlink(missing_ok=True)
             manifest_path = directory / "illustrations.json"
             selection_path = directory / "cover-selection.json"
+            if args.media_plan or args.produce_media:
+                from editorial_media import plan_images, produce
+                production_root = private_path(args.asset_root)
+                save_case(selection_path, {"status": "producing_illustrations"})
+                try:
+                    plan = load(args.media_plan) if args.media_plan else plan_images(load(directory / "draft.json"),
+                        provider, query=args.photo_query, rights_basis=args.generator_rights)
+                    save_case(directory / "media-plan.json", plan)
+                    images = produce(args.channel, plan, production_root, args.image_generator)
+                except (OSError, ValueError, KeyError, Pending) as exc:
+                    save_case(selection_path, {"status": "media_production_pending", "reason": str(exc)})
+                    parser.exit(2, f"media_production_pending: {exc}\n")
+                save_case(manifest_path, images)
             if args.illustrations:
                 save_case(manifest_path, load(args.illustrations))
             save_case(selection_path, {"status": "awaiting_illustrations"})
             if manifest_path.exists():
                 try:
                     assembled = cover_selection(load(directory / "draft.json"), load(manifest_path), args.asset_root,
-                                                checkpoint=lambda result: save_case(selection_path, result))
+                                                review=load(args.cover_review), checkpoint=lambda result: save_case(selection_path, result))
                 except (OSError, KeyError, ValueError, TypeError, ProviderFailure) as exc:
                     save_case(selection_path, {**load(selection_path), "status": "cover_selection_pending",
                                                "reason": str(exc)})
                     parser.exit(2, f"cover_selection_pending: {exc}\n")
-                save_case(assembled_path, assembled)
+                from editorial_preview import export_preview
+                with (root / ".media-lock").open("a") as media_lock:
+                    flock(media_lock, LOCK_EX)
+                    peers = [load(p) for p in root.glob("*/assembled.json") if p != assembled_path]
+                    report = check_draft(assembled, grammar, asset_root=args.asset_root, peers=peers,
+                                         source_urls=[doc["url"] for doc in (documents or [])])
+                    save_case(directory / "assembled-quality.json", report)
+                    audit = report["image_corpus_audit"]
+                    if (report["image_similarity"]["duplicates"] or audit.get("unreadable")
+                            or audit["near_duplicate_status"] != "completed"):
+                        parser.exit(2, "image_corpus_review_pending\n")
+                    export_preview(assembled, args.asset_root, directory)
+                    save_case(assembled_path, assembled)
             print(json.dumps({"status": decision, "directory": str(directory)}))
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         parser.error(str(exc))

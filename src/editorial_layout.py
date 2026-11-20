@@ -96,6 +96,11 @@ def docx_body(doc, article, assets):
                 from docx.shared import Inches
                 file = node.find("img").attrib["src"]
                 doc.add_picture(str(assets / ("content" + file)), width=Inches(5.8))
+                caption = node.find("figcaption")
+                if caption is not None:
+                    doc.add_paragraph(caption.text or "", style="Caption")
+                    for link in caption.findall("a"):
+                        doc.add_paragraph(link.attrib["href"], style="Caption")
             else:
                 doc.add_paragraph("".join(node.itertext()))
 

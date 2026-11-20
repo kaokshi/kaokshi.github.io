@@ -35,9 +35,9 @@ def grammar_report(text, language_tool):
         return {"status": "error", "reason": type(exc).__name__}
 
 
-def check_draft(article, language_tool, *, source_urls=()):
+def check_draft(article, language_tool, *, source_urls=(), asset_root=None, peers=()):
     text = extract_text(article["body_html"])
-    draft = inspect_draft(article)
+    draft = inspect_draft(article, asset_root=asset_root)
     if source_urls:
         draft["urls"] = sorted(set(draft["urls"]) | set(source_urls))
         draft["warnings"] = [w for w in draft["warnings"] if w != "science_sources_not_recorded"]
@@ -45,7 +45,8 @@ def check_draft(article, language_tool, *, source_urls=()):
     corpus = [p for p in CONTENT.glob("*.json")
               if p.name.startswith(("legends-", "science-"))]
     similar = similarity_report(corpus, candidate=article)
-    image_audit = image_hash_audit(corpus, candidate=article)
+    image_audit = image_hash_audit(sorted(CONTENT.glob("*.json")), candidate=article,
+                                  asset_root=asset_root, peers=peers)
     duplicates = [entry for key in ("duplicates", "sha256_duplicates")
                   for entry in image_audit.get(key, []) if article["slug"] in entry["articles"]]
     unreadable = [entry for entry in image_audit.get("unreadable", [])
@@ -83,6 +84,8 @@ def check_draft(article, language_tool, *, source_urls=()):
     findings = list(draft["warnings"])
     if similar:
         findings.append("similar_article")
+    if image_audit.get("unreadable"):
+        findings.append("image_corpus_incomplete")
     if duplicates:
         findings.append("duplicate_image")
     if links.get("exit_code") == 2:
@@ -100,6 +103,7 @@ def check_draft(article, language_tool, *, source_urls=()):
             "status": "completed" if image_check_complete else "incomplete",
             "duplicates": duplicates, "unreadable": unreadable,
         },
+        "image_corpus_audit": image_audit,
         "findings": findings,
         "manual_checks_pending": [
             "science_claims" if article["channel"] == "science" else "fiction_originality_and_logic",
