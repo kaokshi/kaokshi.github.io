@@ -1,5 +1,6 @@
 """Nine planned private drafts, including the newly active cinema channel."""
 import json
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -58,6 +59,39 @@ class NineDraftTests(unittest.TestCase):
         p["tasks"][-1]["topic"]=p["tasks"][0]["topic"]
         with self.assertRaisesRegex(ValueError,"Duplicate"):
             validate_plan(p)
+
+    def test_deadline_prevents_new_work_but_preserves_all_nine_tasks(self):
+        fixed=datetime(2026,11,21,7,50,tzinfo=timezone.utc)
+        with TemporaryDirectory() as td:
+            result=execute(plan(),Path(td),deadline=fixed+timedelta(minutes=10),
+                           health_check=lambda url,backend:{"status":"ready"},
+                           now=lambda:fixed)
+        self.assertEqual(result["requested"],9)
+        self.assertEqual(result["ready_for_owner"],0)
+        self.assertEqual(len(result["tasks"]),9)
+        self.assertTrue(all(row["execution"]["reason"]=="review_deadline_reached"
+                            for row in result["tasks"]))
+        self.assertFalse(result["publication_authorized"])
+
+    def test_deadline_allows_run_when_sufficient_time(self):
+        fixed=datetime(2026,11,21,7,0,tzinfo=timezone.utc)
+        calls=[]
+        def fake_runner(workspace, channel, topic, **kwargs):
+            calls.append((channel,topic))
+            return {"execution":{"exit_code":0,"pipeline_status":"exited"}}
+        with TemporaryDirectory() as td:
+            result=execute(plan(),Path(td),deadline=fixed+timedelta(hours=2),
+                           health_check=lambda url,backend:{"status":"ready"},
+                           runner=fake_runner,now=lambda:fixed)
+        self.assertEqual(len(calls),9)
+        self.assertEqual(result["ready_for_owner"],0)
+        self.assertEqual(result["completed_for_publication"],0)
+
+    def test_naive_deadline_rejected(self):
+        with TemporaryDirectory() as td:
+            with self.assertRaisesRegex(ValueError,"timezone"):
+                execute(plan(),Path(td),status_only=True,
+                        deadline=datetime(2026,11,21,11))
 
     def test_unavailable_model_never_creates_article(self):
         with TemporaryDirectory() as td:
