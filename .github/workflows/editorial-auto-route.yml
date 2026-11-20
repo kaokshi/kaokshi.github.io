@@ -1,0 +1,85 @@
+name: Editorial auto route - two active channels
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/articles/**'
+      - 'editorial-release-evidence/**'
+      - 'src/editorial_auto_route.py'
+      - 'src/editorial_auto_release.py'
+      - '.github/workflows/editorial-auto-route.yml'
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: "Optional new article slug (empty checks new candidates)"
+        type: string
+        required: false
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: editorial-auto-route-main
+  cancel-in-progress: false
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit-test fail-closed routing and release
+        run: python -m unittest tests.test_editorial_auto_route tests.test_editorial_auto_release -v
+      - name: Decide every new active-channel candidate, applying only fully evidenced releases
+        env:
+          REQUESTED_SLUG: ${{ inputs.slug }}
+        run: |
+          python - <<'PY'
+          import json, os, re, subprocess, sys
+          from pathlib import Path
+          requested=os.environ.get("REQUESTED_SLUG") or ""
+          if requested and not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,100}", requested):
+              raise SystemExit("Unsafe article slug")
+          paths=[Path("content/articles")/(requested+".json")] if requested else sorted(Path("content/articles").glob("*.json"))
+          for path in paths:
+              if not path.is_file():
+                  raise SystemExit("Unknown slug: "+str(path))
+              article=json.loads(path.read_text("utf-8"))
+              if article.get("channel") not in {"legends","science"}:
+                  continue
+              if article.get("status")!="draft" or article.get("auto_release_candidate") is not True:
+                  continue
+              subprocess.run([sys.executable,"src/editorial_auto_release.py","--slug",article["slug"],"--apply"],check=True)
+          PY
+      - name: Save all routing verdicts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-auto-routing-decisions
+          path: editorial-routing-reports/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Check if verified releases changed articles or global publication
+        id: changes
+        run: |
+          if git diff --quiet -- content/articles/ config/site.json; then
+            echo 'release=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'release=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit only automatically verified releases
+        if: steps.changes.outputs.release == 'true'
+        run: |
+          git config user.name "editorial-release-bot"
+          git config user.email "editorial-release-bot@users.noreply.github.com"
+          git add -- content/articles/ config/site.json
+          git commit -m "Release new fully verified legends/science article through risk gate"
+          git push origin HEAD:main
+      - name: Trigger existing guarded GitHub Pages and RSS publisher
+        if: steps.changes.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run publish.yml --ref main
