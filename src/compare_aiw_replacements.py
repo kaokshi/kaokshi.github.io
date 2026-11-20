@@ -25,10 +25,14 @@ def score_from_tool(result):
     if not isinstance(result, dict) or result.get("status") != "completed":
         return None
     payload = result.get("data", {})
-    val = payload.get("score_percent") if isinstance(payload, dict) else None
-    if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val) or not 0 <= val <= 100:
+    # aiw-ru classify --json (v2.5.2) returns 0..1 in `probability`,
+    # not `score_percent`. Never read a nested fragment probability as whole text.
+    if not isinstance(payload, dict) or payload.get("skipped") is True:
         return None
-    return float(val)
+    val = payload.get("probability")
+    if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val) or not 0 <= val <= 1:
+        return None
+    return round(float(val) * 100, 4)
 
 def merge_results(raw):
     values = {name: score_from_tool(raw.get(name)) for name in ALL_MODELS}
