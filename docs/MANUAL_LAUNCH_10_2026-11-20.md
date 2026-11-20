@@ -42,3 +42,17 @@
 - Никаких автоматических выпусков, пока нет подтверждения технической возможности и отдельного согласия владельца на изменение `publication_enabled:false`.
 
 Последние актуальные заметки проекта: [PROJECT_HANDOFF_CURRENT.md](PROJECT_HANDOFF_CURRENT.md).
+
+## Первоисточники для финальной сверки пяти научных статей
+
+Проверены существование и тематическая релевантность следующих материалов; **постатейный фактчекинг каждого утверждения ещё не закрыт**, это карта для проверки перед ручным выпуском. Права на фотографии с этих страниц **не означают автоматического разрешения на републикацию**.
+
+| Статья | Рекомендуемые проверочные материалы |
+|---|---|
+| Красные спрайты | NASA Spritacular: https://science.nasa.gov/citizen-science/spritacular/ ; NOAA National Severe Storms Laboratory: https://www.nssl.noaa.gov/education/svrwx101/lightning/types/ |
+| Светящееся море | NOAA Ocean Exploration: https://oceanexplorer.noaa.gov/ocean-fact/bioluminescence/ ; Smithsonian Ocean: https://ocean.si.edu/ocean-life/fish/bioluminescence |
+| Тихоходки | NASA Cell Science-04: https://science.nasa.gov/biological-physical/investigations/cell-science-04/ |
+| Тёмная материя | NASA Dark Matter: https://science.nasa.gov/dark-matter/ ; NASA Hubble dark matter and lensing: https://science.nasa.gov/mission/hubble/science/science-behind-the-discoveries/hubble-dark-matter/ |
+| Полярное сияние | NOAA Space Weather Prediction Center: https://www.spaceweather.gov/content/aurora-tutorial ; NASA Auroras: https://science.nasa.gov/sun/auroras/ |
+
+Проверять точность численных значений, причинно-следственные выводы, оговорки об исключениях, не переносить утверждения одного вида/эксперимента на всю группу без пояснения. Научные источники в DOCX пока отдельно не встроены — эта таблица является служебной редакторской справкой.
