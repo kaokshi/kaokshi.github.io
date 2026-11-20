@@ -68,5 +68,29 @@ class CalibrationTests(unittest.TestCase):
         self.assertFalse(r["eligible_to_change_release_gate"])
         self.assertFalse(result["release_gate_changed"])
 
+    def test_article_wide_score_uses_all_words_and_no_double_counting(self):
+        spans=[[0,3],[2,5]]
+        result=cal.document_coverage_score([.2,.8],spans,5)
+        # each word gets mean of predictions covering it: .2,.2,.5,.8,.8 -> .5
+        self.assertEqual(result["score_percent"],50.0)
+        self.assertEqual(result["words_evaluated"],5)
+        self.assertFalse(result["calibrated"])
+        self.assertIsNone(result["probability_ai_generated"])
+        self.assertFalse(result["release_gate_changed"])
+
+    def test_stable_0_to_100_score_for_all_zero_and_all_one(self):
+        spans=cal.legacy_window_spans(1103)
+        self.assertEqual(spans[0],[0,85])
+        self.assertEqual(spans[-1],[1018,1103])
+        self.assertEqual(len(spans),17)
+        self.assertEqual(cal.document_coverage_score([0.0]*len(spans),spans,1103)["score_percent"],0)
+        self.assertEqual(cal.document_coverage_score([1.0]*len(spans),spans,1103)["score_percent"],100)
+
+    def test_article_wide_score_rejects_uncovered_text(self):
+        with self.assertRaisesRegex(ValueError,"Unscored"):
+            cal.document_coverage_score([.1],[[0,2]],5)
+        with self.assertRaises(ValueError):
+            cal.document_coverage_score([.2,.3],[[0,5]],5)
+
 if __name__=="__main__":
     unittest.main()
