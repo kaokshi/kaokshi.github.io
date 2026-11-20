@@ -4,6 +4,8 @@ on:
     paths:
       - 'src/editorial_stage_gate.py'
       - 'tests/test_editorial_stage_gate.py'
+      - 'src/editorial_collect_receipts.py'
+      - 'tests/test_editorial_collect_receipts.py'
       - 'src/editorial_ai_check.py'
       - 'content/articles/**'
       - '.github/workflows/editorial-stage-gate.yml'
@@ -28,7 +30,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Test all safe transition paths
-        run: python -m unittest tests.test_editorial_stage_gate -v
+        run: python -m unittest tests.test_editorial_stage_gate tests.test_editorial_collect_receipts -v
       - name: Check that publication stays disabled
         run: |
           python - <<'PY'
@@ -200,3 +202,110 @@ jobs:
           path: editorial-stage-results/
           if-no-files-found: warn
           retention-days: 14
+
+  full-first-party-pilot:
+    if: github.event_name == 'pull_request'
+    needs: routing-regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install EXISTING GitHub editorial checks
+        run: |
+          python -m pip install -r requirements-quality.txt -r requirements-editorial.txt
+          aiw-ru models install modernbert lightgbm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install our unchanged pinned ruBERT v4
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Load existing ruBERT v4 pinned weights
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+            "k1y0mi/ru-ai-text-detector",
+            repo_type="model",
+            revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+            allow_patterns=["v4_model/*","v4_calibrator.joblib","threshold_v4.json"],
+            local_dir=".rubert-upstream/models")
+          PY
+      - name: Run real four first-party AI tools on original legends draft
+        run: python src/editorial_ai_check.py --slug legends-01-prohodnaya-17
+      - name: Run existing structured editorial style and image checks
+        run: python src/editorial_quality.py --slug legends-01-prohodnaya-17
+      - name: Run local LanguageTool for Russian
+        continue-on-error: true
+        run: |
+          python src/editorial_language_tool.py --slug legends-01-prohodnaya-17 --output editorial-quality-reports/languagetool-legends-01-prohodnaya-17.json
+      - name: Run existing Vale lint if installed
+        continue-on-error: true
+        run: |
+          python src/editorial_export_md.py
+          curl -fsSL --retry 2 -o /tmp/vale.tgz https://github.com/errata-ai/vale/releases/download/v3.13.0/vale_3.13.0_Linux_64-bit.tar.gz
+          tar -xf /tmp/vale.tgz -C /tmp vale
+          /tmp/vale --output=JSON editorial-quality-reports/vale-input/legends-01-prohodnaya-17.md > editorial-quality-reports/vale.json
+      - name: Build and validate RSS locally with publication disabled
+        run: |
+          python src/build.py
+          python src/rss_verify.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.rss_verify import validate
+          cfg=json.loads(Path('config/site.json').read_text('utf-8'))
+          assert cfg['publication_enabled'] is False
+          result=validate()
+          Path('editorial-quality-reports/rss-validation.json').write_text(
+            json.dumps(result,ensure_ascii=False,indent=2)+'\\n',encoding='utf-8')
+          assert all(v['valid'] for v in result.values())
+          print('RSS_LOCAL_DRY_RUN_ONLY', {k:v['item_count'] for k,v in result.items()})
+          PY
+      - name: Collect only completed real diagnostics in traceable receipt
+        env:
+          GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python src/editorial_collect_receipts.py --slug legends-01-prohodnaya-17
+      - name: Route real material to rework, editor or next stage
+        run: |
+          python src/editorial_stage_gate.py --slug legends-01-prohodnaya-17
+          python - <<'PY'
+          from pathlib import Path
+          import json,os
+          x=json.loads(Path('editorial-stage-results/legends-01-prohodnaya-17.json').read_text('utf-8'))
+          assert x['publication_authorized'] is False
+          assert x['rss_modified'] is False
+          summary=Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with summary.open('a',encoding='utf-8') as fh:
+              fh.write('## Реальный полный пилот: Проходная №17\\n\\n')
+              fh.write('Статус: **'+x['disposition']+'**\\n\\n')
+              fh.write('Дальнейший этап: '+str(x['next_stage'])+'\\n\\n')
+              for key in ('revision_actions','editor_review_actions','awaiting_checks'):
+                  fh.write('### '+key+'\\n\\n')
+                  for v in x[key]:
+                      fh.write('- '+v.replace('\\n',' ')+'\\n')
+              fh.write('\\nСайт и RSS не изменены, отчёты только для редакции.\\n')
+          print('FULL_FIRST_PARTY_STAGE',x['disposition'])
+          PY
+      - name: Upload real AI, quality and routing diagnostics as private artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-first-party-editorial-pilot
+          path: |
+            editorial-check-reports/
+            editorial-quality-reports/
+            editorial-stage-evidence/
+            editorial-stage-results/
+          retention-days: 14
+          if-no-files-found: warn
