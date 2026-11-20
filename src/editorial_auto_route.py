@@ -31,7 +31,7 @@ def digest_article(article):
     """Release digest includes content, images and provenance, not mutable flags."""
     fields = {name: article.get(name) for name in (
         "channel", "slug", "title", "body_html", "image_files", "image_sources",
-        "rights_basis", "claims", "source_docx")}
+        "rights_basis", "claims", "source_docx", "cover_selection")}
     fields["image_content_sha256"] = {
         name: (hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
                if isinstance(name, str) and (ROOT / name).is_file() else "MISSING")

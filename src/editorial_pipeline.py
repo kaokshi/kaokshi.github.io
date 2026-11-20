@@ -279,11 +279,17 @@ def main():
 
             decision = execute(case, directory, provider, research, documents, reviews, response,
                                lambda draft, urls: check_draft(draft, grammar, source_urls=urls))
+            from editorial_cover import cover_selection
             assembled_path = directory / "assembled.json"
             assembled_path.unlink(missing_ok=True)
+            manifest_path = directory / "illustrations.json"
+            selection_path = directory / "cover-selection.json"
             if args.illustrations:
-                from editorial_cover import cover_selection
-                assembled = cover_selection(load(directory / "draft.json"), load(args.illustrations), args.asset_root)
+                save_case(manifest_path, load(args.illustrations))
+            save_case(selection_path, {"status": "awaiting_illustrations"})
+            if manifest_path.exists():
+                assembled = cover_selection(load(directory / "draft.json"), load(manifest_path), args.asset_root,
+                                            checkpoint=lambda result: save_case(selection_path, result))
                 save_case(assembled_path, assembled)
             print(json.dumps({"status": decision, "directory": str(directory)}))
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:

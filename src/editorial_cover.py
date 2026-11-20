@@ -66,7 +66,7 @@ def vision(article, image):
     return json.loads(reply["message"]["content"])
 
 
-def cover_selection(article, manifest, root, assess=vision):
+def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None):
     from PIL import Image, ImageOps
     body = parse_sections(article["body_html"])
     remove_figures(body)
@@ -100,6 +100,8 @@ def cover_selection(article, manifest, root, assess=vision):
                         "original_position": i, "sha256": digest, "assessment": rating,
                         "eligible": eligible, "score": sum(rating[k] for k in CRITERIA)})
     candidates = [r for r in records if r["eligible"]]
+    if checkpoint:
+        checkpoint({"status": "assessed", "article_sha256": identity(article), "images": records})
     if not candidates:
         raise ValueError("No eligible cover in this set")
     cover = max(candidates, key=lambda r: (r["score"], r["assessment"]["topic"], r["id"]))
@@ -117,6 +119,8 @@ def cover_selection(article, manifest, root, assess=vision):
               "image_files": [r["file"] for r in ordered], "cover_selection": {
                   "article_sha256": identity(article), "images": ordered}}
     verify_cover(result, root)
+    if checkpoint:
+        checkpoint({"status": "selected", **result["cover_selection"]})
     return result
 
 
@@ -131,6 +135,11 @@ def verify_cover(article, root):
     figures = list(body.iter("figure"))
     if len(figures) != len(rows):
         raise ValueError("Cover and article illustrations differ")
+    candidates = [r for r in rows if r["eligible"]]
+    if not candidates or rows[0] != max(candidates, key=lambda r: (r["score"], r["assessment"]["topic"], r["id"])):
+        raise ValueError("First image must be the highest ranked eligible candidate")
+    if len({r["id"] for r in rows}) != len(rows):
+        raise ValueError("Duplicate illustration identifier")
     for i, (row, figure) in enumerate(zip(rows, figures)):
         if (row["position"] != i or row["is_cover"] is not (i == 0)
                 or figure.get("data-editorial-image") != row["id"]

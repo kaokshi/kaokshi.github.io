@@ -117,6 +117,9 @@ def complete(request, *, env=None, send=read_json_response):
     task = request["task"]
     resize = task == "revise" and request.get("mode") == "resize"
     schema = SCHEMAS[task]
+    if task == "section_plan":
+        limit = max(2, min(4, len(request["paragraphs"]) // 2))
+        schema = obj(sections={**SECTIONS, "minItems": 2, "maxItems": limit})
     if resize:
         if request["direction"] == "expand":
             schema = obj(paragraphs=array(STRING))

@@ -1,4 +1,8 @@
+import base64
 import hashlib
+import json
+import os
+from io import BytesIO
 import sys
 import tempfile
 import unittest
@@ -9,7 +13,7 @@ from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import build
-from editorial_cover import CRITERIA, cover_selection, verify_cover
+from editorial_cover import CRITERIA, cover_selection, verify_cover, vision
 from editorial_layout import arrange, docx_body, layout_findings, parse_sections, repair_sections
 
 PROSE = ["Ночью поднялся ветер.", "Ветер гнул берёзы.", "Утром вышло солнце.", "Снег растаял."]
@@ -35,6 +39,21 @@ class SectionTests(unittest.TestCase):
 
 
 class CoverTests(unittest.TestCase):
+    def test_vision_request_contains_article_full_view_and_crop(self):
+        from PIL import Image
+        article = {"channel": "cinema", "title": "Фильм о переправе",
+                   "body_html": arrange(PROSE, PLAN, None, "")}
+        def transport(endpoint, path, payload, timeout):
+            msg = payload["messages"][0]
+            self.assertEqual(path, "/api/chat")
+            self.assertIn(article["title"], msg["content"])
+            self.assertIn("кадр", msg["content"])
+            views = [Image.open(BytesIO(base64.b64decode(v))) for v in msg["images"]]
+            self.assertEqual([im.size for im in views], [(640, 800), (192, 108)])
+            return {"message": {"content": json.dumps(dict.fromkeys(CRITERIA, 5))}}
+        with patch.dict(os.environ, ZEN_VISION_MODEL="vision-test"), patch("editorial_cover.read_json_response", transport):
+            self.assertEqual(vision(article, Image.new("RGB", (640, 800)))["topic"], 5)
+
     def test_selection_assembly_exports_and_replacement(self):
         from PIL import Image
         from docx import Document
@@ -84,6 +103,25 @@ class CoverTests(unittest.TestCase):
                 docx_body(doc, prepared, root)
                 doc.save(root / "article.docx")
                 doc = Document(root / "article.docx")
+                heads = [p for p in doc.paragraphs if p.style.name == "Heading 2"]
+                self.assertEqual([p.text for p in heads], [r["heading"] for r in PLAN])
+                self.assertTrue(all(p.runs[0].bold for p in heads))
+                self.assertEqual(len(doc.inline_shapes), 7)
+            from editorial_export_docx_zip import export_article
+            from editorial_export_manual_10 import make_one
+            paragraphs = [p + " Снег блестел." * 85 for p in PROSE]
+            article = dict(article, channel="legends", slug="test-article", status="draft",
+                           release_hold=True, publication_authorized=False,
+                           body_html=arrange(paragraphs, PLAN, None, ""))
+            assembled = cover_selection(article, manifest, root, assess)
+            articles = root / "content/articles"
+            articles.mkdir()
+            (articles / "test-article.json").write_text(json.dumps(assembled))
+            for module, export in [("editorial_export_docx_zip", export_article), ("editorial_export_manual_10", make_one)]:
+                output = root / (module + ".docx")
+                with patch(module + ".ROOT", root):
+                    export("legends", "test-article", output)
+                doc = Document(output)
                 heads = [p for p in doc.paragraphs if p.style.name == "Heading 2"]
                 self.assertEqual([p.text for p in heads], [r["heading"] for r in PLAN])
                 self.assertTrue(all(p.runs[0].bold for p in heads))

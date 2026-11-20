@@ -23,11 +23,11 @@ def parse_sections(body):
                 or len(section) < 2 or section[0].tag != "h2"):
             raise ValueError("Each section must begin with its own heading")
         heading = section[0]
-        if (len(heading) != 1 or heading[0].tag != "strong" or len(heading[0])
+        if (section.attrib or heading.attrib or len(heading) != 1 or heading[0].attrib or heading[0].tag != "strong" or len(heading[0])
                 or (heading.text or "").strip() or (heading[0].tail or "").strip()):
             raise ValueError("Use h2 with a bold heading")
         name = " ".join(re.findall(r"\w+", (heading[0].text or "").casefold()))
-        if not name or name in names or GENERIC.fullmatch(name):
+        if not name or name in names or GENERIC.fullmatch(name) or name.startswith("призыв к "):
             raise ValueError("Empty, repeated or generic heading")
         names.add(name)
         if any((node.tail or "").strip() for node in section):
@@ -38,7 +38,7 @@ def parse_sections(body):
         if not prose or any(not "".join(p.itertext()).strip() for p in prose):
             raise ValueError("Section needs prose")
         paragraphs += len(prose)
-    if paragraphs <= len(root):
+    if len(root) > (paragraphs + 1) // 2:
         raise ValueError("Group related paragraphs into sections")
     return root
 
@@ -69,7 +69,7 @@ def arrange(paragraphs, plan, provider, title):
         retry = provider("section_plan", {"title": title, "paragraphs": paragraphs,
             "instruction": "Сгруппируй абзацы по смыслу. Верни sections с полями start (номер первого "
                            "абзаца от 1) и heading (конкретный живой подзаголовок). Начни с 1. "
-                           "Сделай минимум два раздела, объедини связанные абзацы, оставь призыв в финальном разделе."})
+                           "Сделай 2–3 раздела по несколько абзацев, не больше четырёх. Заголовок — короткая конкретная деталь из текста, без двоеточия, слов о структуре и призывов. Не придумывай факты. Оставь подписку в финальном разделе."})
         return format_sections(paragraphs, retry["sections"])
 
 
@@ -104,6 +104,18 @@ def repair_sections(article, provider):
         parse_sections(body)
         return article
     except ValueError:
+        pass
+    try:
+        root = ET.fromstring("<article>" + body + "</article>")
+        for heading in root.findall("./section/h2"):
+            if not len(heading) and (heading.text or "").strip():
+                text = heading.text
+                heading.text = None
+                ET.SubElement(heading, "strong").text = text
+        repaired = "".join(ET.tostring(section, encoding="unicode") for section in root)
+        parse_sections(repaired)
+        return {**article, "layout_schema": SECTION_SCHEMA, "body_html": repaired}
+    except (ET.ParseError, ValueError):
         pass
     from editorial_revision import PlainParagraphs
     from html import unescape

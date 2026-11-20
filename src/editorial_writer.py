@@ -105,7 +105,7 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
     if topic_key(title) in {topic_key(t) for t in all_titles}:
         raise ValueError("Generated title duplicates another article")
     cta_key = topic_key(cta)
-    blocks = [p.strip() for p in blocks if topic_key(p) != cta_key] + [cta.strip()]
+    blocks = [p.strip() for p in blocks if topic_key(re.sub(r"^\s*cta\s*:\s*", "", p, flags=re.I)) != cta_key] + [cta.strip()]
     if len(blocks) < 4:
         raise ValueError("Writer output needs at least three distinct prose paragraphs before the CTA")
     if len(set(map(topic_key, blocks))) != len(blocks):
