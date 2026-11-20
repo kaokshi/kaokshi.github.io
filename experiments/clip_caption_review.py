@@ -10,17 +10,9 @@ import json
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-ARTICLE=ROOT/"content/articles/cinema-01-truman-show-real-photos.json"
-DESCRIPTIONS = {
-    "01_seahaven_site.jpg": "a neat sunny American suburban town, houses and streets",
-    "02_mirror_site.jpg": "a man looking at himself in a bathroom mirror",
-    "03_viewers_site.jpg": "a group of people watching a television screen",
-    "04_meryl_truman_site.jpg": "a man and a woman standing together talking",
-    "05_cocoa_site.jpg": "a woman advertising a cocoa product in front of a camera",
-    "06_christof_site.jpg": "a television director inside a production control room",
-    "07_sea_site.jpg": "a man sailing alone on a small boat in the ocean",
-    "08_exit_site.jpg": "a man touching the blue wall at the edge of a simulated sky",
-}
+CONTENT=ROOT/"content/articles"
+INDEX=ROOT/"experiments/visual_prompt_index.json"
+
 NEGATIVE_DESCRIPTIONS = [
     "a close-up photograph of a cat sitting on a sofa",
     "a snowy mountain landscape with pine trees",
@@ -57,21 +49,32 @@ def interpret(matrix, filenames, positive_labels, negatives):
 
 def main():
     parser=argparse.ArgumentParser()
+    parser.add_argument("--slug",default="cinema-01-truman-show-real-photos")
     parser.add_argument("--output",default=str(ROOT/"editorial-remaining-tests/clip-caption-report.json"))
     args=parser.parse_args()
+    if not __import__("re").fullmatch(r"[a-z0-9][a-z0-9-]{1,100}",args.slug):
+        parser.error("Unsafe slug")
     from PIL import Image
     import torch
     import open_clip
-    article=json.loads(ARTICLE.read_text(encoding="utf-8"))
+    article_path=CONTENT/(args.slug+".json")
+    if not article_path.is_file():
+        parser.error("Unknown article")
+    article=json.loads(article_path.read_text(encoding="utf-8"))
+    index=json.loads(INDEX.read_text(encoding="utf-8"))
+    expected=index.get(args.slug)
+    if expected is None or expected.get("channel")!=article.get("channel"):
+        parser.error("No curated visual prompts for this article. Never invent captions.")
+    descriptions=expected["prompts"]
     files=article["image_files"]
-    if len(files)!=8:
-        raise ValueError("Pilot expected all eight stills; none should be silently skipped")
+    if len(files)<1:
+        raise ValueError("No images to review")
     positive=[]
     for name in files:
         base=Path(name).name
-        if base not in DESCRIPTIONS:
-            raise ValueError("Missing approved English description for "+base)
-        positive.append(DESCRIPTIONS[base])
+        if base not in descriptions:
+            raise ValueError("Missing curated English description for "+base)
+        positive.append(descriptions[base])
     all_text=positive+NEGATIVE_DESCRIPTIONS
     model,_,transform=open_clip.create_model_and_transforms(
         "ViT-B-32",pretrained="laion2b_s34b_b79k",device="cpu")
@@ -90,6 +93,7 @@ def main():
     matches=interpret(cosine,files,positive,NEGATIVE_DESCRIPTIONS)
     result={
         "schema":"editorial-clip-captions-v2","model":"ViT-B-32/laion2b_s34b_b79k",
+        "article_slug":args.slug,"channel":article.get("channel"),
         "evaluated_images":len(files),"prompts":len(all_text),
         "caption_ranked_first":sum(r["caption_is_top_ranked"] for r in matches),
         "needs_editor_review":sum(not r["caption_is_top_ranked"] for r in matches),
