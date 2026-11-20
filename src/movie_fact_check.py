@@ -149,12 +149,35 @@ def normalized_words(text):
     return set(re.findall(r"[а-яё]{4,}", text.lower()))
 
 
+def plot_only(extract):
+    """Isolate the film plot from encyclopedia metadata and critical reception."""
+    match = re.search(r"(?ms)^==\\s*(?:Сюжет|Plot)\\s*==\\s*(.*?)(?=^==\\s*[^=]|\\Z)", extract)
+    return match.group(1).strip() if match else ""
+
+
+def metadata_from_wikipedia(source, reference):
+    if source.get("status") != "completed" or not reference:
+        return {"status": "unavailable"}
+    opening = source["extract"].split("==")[0][:3500]
+    year = reference.get("original_year")
+    director_ru = reference.get("director_ru", "")
+    return {
+        "status": "evaluated",
+        "year_appears_in_encyclopedia_intro": bool(year and str(year) in opening),
+        "director_appears_in_encyclopedia_intro": bool(director_ru and director_ru.lower() in opening.lower()),
+        "note": "Text mentions only; not independent primary-source authentication."
+    }
+
+
 def comparison(article_sections, source):
     """Weak lexical evidence; never label absent plot detail as factually false."""
     if source.get("status") != "completed":
         return [{"section": row["section"], "status": "source_unavailable",
                  "source": source.get("url")} for row in article_sections]
-    whole = source["extract"]
+    whole = plot_only(source["extract"])
+    if not whole:
+        return [{"section": row["section"], "status": "plot_section_unavailable",
+                 "source": source.get("url")} for row in article_sections]
     # Wikipedia may contain English plot under other headings. Russian source
     # for Russian article is primary; all scores are review hints, not truth.
     chunks = [x.strip() for x in re.split(r"\n\s*\n+", whole) if len(x.strip()) > 70]
@@ -162,6 +185,11 @@ def comparison(article_sections, source):
         chunks = [whole]
     out = []
     for row in article_sections:
+        if re.search(r"(?i)^(моё мнение|почему|джим керри)", row["section"]):
+            out.append({"section": row["section"], "status": "commentary_not_suitable_for_plot_lookup",
+                        "source_url": source.get("url"),
+                        "notice": "Editorial commentary and acting analysis cannot be established from plot summary."})
+            continue
         text = row["text"]
         words = normalized_words(text)
         candidates = []
@@ -172,7 +200,7 @@ def comparison(article_sections, source):
         score, idx, matched = max(candidates, default=(0, -1, ""))
         out.append({
             "section": row["section"],
-            "status": "textual_overlap" if score >= .16 else "requires_editor_review",
+            "status": "plot_textual_overlap" if score >= .23 else "requires_editor_review",
             "lexical_overlap": round(score, 3),
             "source_url": source.get("url"),
             "source_extract_excerpt": matched[:240],
@@ -240,7 +268,7 @@ def analyze(path, use_imdb=False):
     detailed = comparison(article_sections, wiki)
     images = stills(article, html_images, ref)
     imdb_data = imdb.get("data") or {}
-    metadata = {"expected": ref, "imdb_lookup": imdb, "status": "needs_human_review"}
+    metadata = {"expected": ref, "imdb_lookup": imdb, "wikipedia_metadata": metadata_from_wikipedia(wiki, ref), "status": "needs_human_review"}
     if imdb.get("status") == "completed":
         year = imdb_data.get("year")
         metadata["year_matches_reference"] = (year == ref["original_year"]) if isinstance(year, int) else None
@@ -256,8 +284,8 @@ def analyze(path, use_imdb=False):
         "stills": images,
         "summary": {
             "sections_reviewed": len(detailed),
-            "sections_with_textual_overlap": sum(x["status"] == "textual_overlap" for x in detailed),
-            "sections_needing_review": sum(x["status"] != "textual_overlap" for x in detailed),
+            "sections_with_textual_overlap": sum(x["status"] == "plot_textual_overlap" for x in detailed),
+            "sections_needing_review": sum(x["status"] == "requires_editor_review" for x in detailed),\n            "commentary_sections_excluded": sum(x["status"] == "commentary_not_suitable_for_plot_lookup" for x in detailed),
             "images_indexed": len(images),
             "images_with_metadata_warnings": sum(bool(x["warnings"]) for x in images),
             "film_plot_verified": False,
@@ -292,7 +320,7 @@ def main():
     file.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"report": str(file), "slug": report["article_slug"],
                       "wikipedia": report["wikipedia"].get("status"),
-                      "imdb": report["reference_catalog"]["imdb_lookup"].get("status"),
+                      "imdb": report["reference_catalog"]["imdb_lookup"].get("status"),\n                      "imdb_reason": report["reference_catalog"]["imdb_lookup"].get("reason"),
                       **report["summary"]}, ensure_ascii=False))
     # Incomplete external lookups are displayed as unavailable, never fabricated.
 
