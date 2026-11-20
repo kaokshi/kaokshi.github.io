@@ -8,6 +8,8 @@ on:
       - 'tests/test_editorial_collect_receipts.py'
       - 'src/editorial_stage_preview.py'
       - 'tests/test_editorial_stage_preview.py'
+      - 'src/editorial_model_agreement.py'
+      - 'tests/test_editorial_model_agreement.py'
       - 'src/editorial_ai_check.py'
       - 'content/articles/**'
       - '.github/workflows/editorial-stage-gate.yml'
@@ -59,7 +61,7 @@ jobs:
           print('CHANGED_ARTICLES',slugs)
           PY
       - name: Test all safe transition paths
-        run: python -m unittest tests.test_editorial_stage_gate tests.test_editorial_collect_receipts tests.test_editorial_stage_preview -v
+        run: python -m unittest tests.test_editorial_stage_gate tests.test_editorial_collect_receipts tests.test_editorial_stage_preview tests.test_editorial_model_agreement -v
       - name: Check that publication stays disabled
         run: |
           python - <<'PY'
