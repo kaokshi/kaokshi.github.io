@@ -25,7 +25,9 @@ class AgentLearningPolicyTests(unittest.TestCase):
         self.assertTrue(self.learning["proposal_workflow"]["require_independent_holdout"])
 
     def test_immutable_owner_rules(self):
-        self.assertEqual(self.policy["model_a"]["owner_editorial_review_index_threshold"], 80)
+        self.assertEqual(self.policy["model_a"]["owner_editorial_review_index_threshold"], 85)
+        self.assertTrue(self.policy["model_a"]["index_is_authorship_percent"] is False)
+        self.assertIn("nonblocking", self.policy["model_a"]["status"])
         self.assertEqual(self.learning["proposal_workflow"]["max_agent_edits_per_article"], 2)
         self.assertEqual(self.learning["proposal_workflow"]["max_chatgpt_edits_per_article"], 1)
         self.assertTrue(self.learning["proposal_workflow"]["never_change_model_a_threshold_80_without_owner_approval"])
