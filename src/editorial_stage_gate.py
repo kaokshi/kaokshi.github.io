@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from editorial_ai_check import extract_text
 from editorial_auto_route import digest_article, valid_evidence
 from editorial_ai_revision_policy import decide_revision
+from editorial_model_agreement import audit as audit_ai_agreement
 
 ACTIVE = {"legends", "science"}
 REQUIRED_AI = ("rubert_v4", "modernbert", "lightgbm", "ai_accent_detector")
@@ -82,6 +83,20 @@ def stage_decision(article, evidence, ai_report=None, ai_policy=None):
                 ai["checks"][p].get("status")!="completed" for p in REQUIRED_AI)):
         waiting.append("ai_four_github_models_missing_or_stale")
     else:
+        agreement=audit_ai_agreement(ai)
+        if agreement["status"]!="completed":
+            waiting.append("ai_agreement_analysis_incomplete")
+        elif agreement["disputed"]:
+            # A disputed analysis is an actionable editorial rework queue:
+            # verify questionable wording and model evidence, revise ONLY
+            # content with a demonstrated defect. Do not optimize detector scores.
+            codes=", ".join(agreement["reason_codes"])
+            revision.append(
+                "Спорные результаты ИИ-проверок ("+codes+"): "
+                "провести адресный редакционный разбор текста, проверить естественность "
+                "повествования, повторы и конкретные замечания; исправить реальные "
+                "недостатки и повторить все проверки GitHub. Не переписывать ради процента."
+            )
         policy_result=decide_revision(channel,ai,policy=ai_policy)
         if policy_result["decision"]=="targeted_editorial_revision":
             review.append("Проверить отмеченные AI-моделями места и исправить только реальные недостатки.")
