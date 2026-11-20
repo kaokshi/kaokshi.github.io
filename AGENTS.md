@@ -26,7 +26,7 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 
 ## Rights-aware image candidate research
 
-- For factual images, use `src/editorial_commons_images.py` to discover Wikimedia Commons file-page candidates and **claimed**, not verified, license/attribution fields. Do not auto-add results to published articles; both subject relevance and license provenance must be independently inspected. Candidate records always default `license_verified=false` and `editor_approved=false`. See `docs/EDITORIAL_COMMONS_IMAGES.md`.
+- For factual images, use `src/editorial_commons_images.py` to discover Wikimedia Commons file-page candidates of **any** license type, including unknown or restricted images. Store claimed, not verified, license/attribution fields. Do not filter the research list by license category. Do not auto-add results to published articles; both subject relevance and license provenance must be independently inspected. Candidate records always default `license_verified=false` and `editor_approved=false`. See `docs/EDITORIAL_COMMONS_IMAGES.md`.
 
 ## Self-learning feature (requested 20 November 2026)
 
