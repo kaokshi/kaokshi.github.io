@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'src/editorial_export_docx_zip.py'
+      - 'content/articles/**'
       - '.github/workflows/editorial-docx-export.yml'
   workflow_dispatch:
 permissions:
