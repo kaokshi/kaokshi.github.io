@@ -1,0 +1,367 @@
+name: EXPERIMENT - editorial stages and revision routing
+on:
+  pull_request:
+    paths:
+      - 'src/editorial_stage_gate.py'
+      - 'tests/test_editorial_stage_gate.py'
+      - 'src/editorial_collect_receipts.py'
+      - 'tests/test_editorial_collect_receipts.py'
+      - 'src/editorial_stage_preview.py'
+      - 'tests/test_editorial_stage_preview.py'
+      - 'src/editorial_model_agreement.py'
+      - 'tests/test_editorial_model_agreement.py'
+      - 'src/editorial_ai_check.py'
+      - 'content/articles/**'
+      - '.github/workflows/editorial-stage-gate.yml'
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 'Existing draft slug for read-only stage verdict'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: editorial-stage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  routing-regressions:
+    outputs:
+      article_changed: ${{ steps.changed.outputs.article_changed }}
+      slug: ${{ steps.changed.outputs.slug }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Detect changed article for a full first-party review
+        if: github.event_name == 'pull_request'
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import os,subprocess
+          from pathlib import Path
+          changed=subprocess.check_output(['git','diff','--name-only',
+              os.environ['BASE_SHA'],os.environ['HEAD_SHA'],'--','content/articles/'],
+              text=True).splitlines()
+          slugs=sorted({Path(p).stem for p in changed if p.endswith('.json')
+              and Path(p).parent==Path('content/articles') and Path(p).is_file()})
+          if len(slugs)>1:
+              raise SystemExit('One editorial PR per article; split this PR to avoid missing checks')
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as fh:
+              print('article_changed='+('true' if slugs else 'false'),file=fh)
+              print('slug='+(slugs[0] if slugs else ''),file=fh)
+          print('CHANGED_ARTICLES',slugs)
+          PY
+      - name: Test all safe transition paths
+        run: python -m unittest tests.test_editorial_stage_gate tests.test_editorial_collect_receipts tests.test_editorial_stage_preview tests.test_editorial_model_agreement -v
+      - name: Check that publication stays disabled
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          settings=json.loads(Path('config/site.json').read_text(encoding='utf-8'))
+          assert settings['publication_enabled'] is False
+          policy=json.loads(Path('config/ai_revision_policy.json').read_text(encoding='utf-8'))
+          assert policy['status']=='awaiting_independent_validation'
+          assert policy['thresholds']['legends'] is None
+          assert policy['thresholds']['science'] is None
+          assert policy['thresholds']['cinema'] is None
+          print('STAGE_TESTS_READ_ONLY, NO_RSS_RELEASE')
+          PY
+      - name: Smoke test real legends draft without pretending absent reports passed
+        if: github.event_name == 'pull_request'
+        run: |
+          python src/editorial_stage_gate.py --slug legends-01-prohodnaya-17
+          python - <<'PY'
+          from pathlib import Path
+          import json,os
+          x=json.loads(Path('editorial-stage-results/legends-01-prohodnaya-17.json').read_text())
+          assert x['publication_authorized'] is False
+          assert x['rss_modified'] is False
+          assert x['disposition'] != 'ready_for_next_stage'
+          summary=Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with summary.open('a',encoding='utf-8') as fh:
+              fh.write('## Реальный черновик: Проходная №17\n\n')
+              fh.write('Редакционный маршрут: **'+x['disposition']+'**\n\n')
+              fh.write('Не хватает: '+', '.join(x['awaiting_checks'])+'\n\n')
+              fh.write('Это достоверный пробный маршрут, НЕ запись о прохождении тестов.\n')
+          print('REAL_DRAFT_ROUTE',x['disposition'],x['awaiting_checks'])
+          PY
+      - name: Keep smoke verdict as a check artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-stage-smoke
+          path: editorial-stage-results/
+          retention-days: 14
+  review-existing-draft:
+    if: github.event_name == 'workflow_dispatch'
+    needs: routing-regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate first-party stage verdict, never release
+        env:
+          ARTICLE_SLUG: ${{ inputs.slug }}
+        run: python src/editorial_stage_gate.py --slug "$ARTICLE_SLUG"
+      - name: Display routing in GitHub job summary and annotations
+        if: always()
+        env:
+          ARTICLE_SLUG: ${{ inputs.slug }}
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          slug=os.environ['ARTICLE_SLUG']
+          report=Path('editorial-stage-results')/(slug+'.json')
+          summary=Path(os.environ['GITHUB_STEP_SUMMARY'])
+          if not report.is_file():
+              summary.write_text('## Stage routing failed before report creation\n',encoding='utf-8')
+              raise SystemExit(1)
+          data=json.loads(report.read_text(encoding='utf-8'))
+          outcome=data['disposition']
+          labels={'paused':'Канал временно на паузе',
+                  'needs_revision':'Вернуть в работу с конкретными замечаниями',
+                  'awaiting_evidence':'Нужны реальные отчёты GitHub',
+                  'needs_editor_review':'Требуется редакторское решение',
+                  'ready_for_next_stage':'Следующий шаг — предпросмотр для владельца'}
+          lines=[f"## {slug}: {labels[outcome]}",f"Статус: \`{outcome}\`",
+                 f"Следующий этап: \`{data.get('next_stage')}\`",
+                 "### Что исправить"]
+          lines += ['- '+x.replace('\n',' ') for x in data['revision_actions']] or ['- Нет обязательных исправлений']
+          lines += ['### Что проверить редактору']
+          lines += ['- '+x.replace('\n',' ') for x in data['editor_review_actions']] or ['- Нет']
+          lines += ['### Чего не хватает']
+          lines += ['- '+x.replace('\n',' ') for x in data['awaiting_checks']] or ['- Ничего']
+          lines += ['**Никакой публикации и RSS не выполнялось.**']
+          summary.write_text('\n\n'.join(lines)+'\n',encoding='utf-8')
+          for issue in data['revision_actions'][:10]:
+              safe=issue.replace('\n',' ').replace('%','%25').replace('\r','').replace(':',' — ')
+              print(f"::warning file=content/articles/{slug}.json::{safe}")
+          print('EDITORIAL_STAGE_OUTCOME',outcome)
+          PY
+      - name: Save stage decisions separately from publication
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-stage-verdict
+          path: editorial-stage-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  route-changed-pr-articles:
+    if: always() && github.event_name == 'pull_request'
+    needs: [routing-regressions, full-first-party-pilot]
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download real outputs from preceding GitHub AI and quality checks
+        if: needs.full-first-party-pilot.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: full-first-party-editorial-pilot
+          path: .
+      - name: Classify changed drafts and annotate issues in PR Checks
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import json,os,subprocess,sys
+          from pathlib import Path
+          files=subprocess.check_output(["git","diff","--name-only",os.environ["BASE_SHA"],
+              os.environ["HEAD_SHA"],"--","content/articles/"],text=True).splitlines()
+          rows=[]
+          for filename in files:
+              path=Path(filename)
+              if path.suffix!=".json" or not path.is_file() or path.parent!=Path("content/articles"):
+                  continue
+              slug=path.stem
+              run=subprocess.run([sys.executable,"src/editorial_stage_gate.py","--slug",slug],
+                                  capture_output=True,text=True)
+              if run.returncode:
+                  raise RuntimeError("Stage route failed for "+slug+": "+run.stderr[-500:])
+              row=json.loads(Path("editorial-stage-results",slug+".json").read_text("utf-8"))
+              rows.append(row)
+              if row["disposition"]=="ready_for_next_stage":
+                  subprocess.run([sys.executable,"src/editorial_stage_preview.py",
+                      "--slug",slug],check=True)
+          dest=Path("editorial-stage-results")
+          dest.mkdir(exist_ok=True)
+          (dest/"pr-manifest.json").write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding="utf-8")
+          summary=Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a",encoding="utf-8") as fh:
+              fh.write("## Автоматическая маршрутизация редакционных черновиков\n\n")
+              if not rows:
+                  fh.write("В PR нет изменённых статей; проверены только правила переходов.\n")
+              for row in rows:
+                  slug=row["slug"]
+                  fh.write(f"### {slug}: \`{row['disposition']}\`\n\n")
+                  fh.write("**Следующий этап:** "+str(row["next_stage"])+"\n\n")
+                  for label,key in (("Исправить","revision_actions"),
+                                    ("Решение редактора","editor_review_actions"),
+                                    ("Дозапустить проверки","awaiting_checks")):
+                      fh.write("**"+label+"**\n\n")
+                      for item in row[key]:
+                          fh.write("- "+item.replace("\n"," ")+"\n")
+                      if not row[key]:
+                          fh.write("- Нет\n")
+                      fh.write("\n")
+                  fh.write("**Публикация и RSS запрещены.**\n\n")
+                  for issue in row["revision_actions"]:
+                      clean=issue.replace("%","%25").replace("\r"," ").replace("\n"," ")
+                      print(f"::warning file=content/articles/{slug}.json::{clean}")
+          print("PR_EDITORIAL_ROUTES",json.dumps([
+             {"slug":r["slug"],"disposition":r["disposition"]} for r in rows],ensure_ascii=False))
+          if any(r["disposition"] in ("needs_revision","awaiting_evidence","needs_editor_review")
+                 for r in rows):
+              raise SystemExit("This PR needs draft revisions, missing first-party checks or owner review.")
+          PY
+      - name: Keep all non-public routing decisions for author follow-up
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-routing-pr-feedback
+          path: editorial-stage-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  full-first-party-pilot:
+    if: github.event_name == 'workflow_dispatch' || needs.routing-regressions.outputs.article_changed == 'true'
+    needs: routing-regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      ARTICLE_SLUG: ${{ inputs.slug || needs.routing-regressions.outputs.slug }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install EXISTING GitHub editorial checks
+        run: |
+          python -m pip install -r requirements-quality.txt -r requirements-editorial.txt
+          aiw-ru models install modernbert lightgbm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install our unchanged pinned ruBERT v4
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Load existing ruBERT v4 pinned weights
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+            "k1y0mi/ru-ai-text-detector",
+            repo_type="model",
+            revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+            allow_patterns=["v4_model/*","v4_calibrator.joblib","threshold_v4.json"],
+            local_dir=".rubert-upstream/models")
+          PY
+      - name: Run real four first-party AI tools on original legends draft
+        run: python src/editorial_ai_check.py --slug "$ARTICLE_SLUG"
+      - name: Run existing structured editorial style and image checks
+        run: python src/editorial_quality.py --slug "$ARTICLE_SLUG"
+      - name: Run local LanguageTool for Russian
+        continue-on-error: true
+        run: |
+          python src/editorial_language_tool.py --slug "$ARTICLE_SLUG" --output "editorial-quality-reports/languagetool-${ARTICLE_SLUG}.json"
+      - name: Run existing Vale lint if installed
+        continue-on-error: true
+        run: |
+          python src/editorial_export_md.py
+          curl -fsSL --retry 2 -o /tmp/vale.tgz https://github.com/errata-ai/vale/releases/download/v3.13.0/vale_3.13.0_Linux_64-bit.tar.gz
+          tar -xf /tmp/vale.tgz -C /tmp vale
+          /tmp/vale --output=JSON "editorial-quality-reports/vale-input/${ARTICLE_SLUG}.md" > editorial-quality-reports/vale.json
+      - name: Build and validate RSS locally with publication disabled
+        run: |
+          python src/build.py
+          python src/rss_verify.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.rss_verify import validate
+          cfg=json.loads(Path('config/site.json').read_text('utf-8'))
+          assert cfg['publication_enabled'] is False
+          result=validate()
+          Path('editorial-quality-reports/rss-validation.json').write_text(
+            json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          assert all(v['valid'] for v in result.values())
+          print('RSS_LOCAL_DRY_RUN_ONLY', {k:v['item_count'] for k,v in result.items()})
+          PY
+      - name: Collect only completed real diagnostics in traceable receipt
+        env:
+          GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python src/editorial_collect_receipts.py --slug "$ARTICLE_SLUG"
+      - name: Route real material to rework, editor or next stage
+        run: |
+          python src/editorial_stage_gate.py --slug "$ARTICLE_SLUG"
+          python - <<'PY'
+          from pathlib import Path
+          import json,os
+          x=json.loads(Path('editorial-stage-results',os.environ['ARTICLE_SLUG']+'.json').read_text('utf-8'))
+          assert x['publication_authorized'] is False
+          assert x['rss_modified'] is False
+          summary=Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with summary.open('a',encoding='utf-8') as fh:
+              fh.write('## Реальный полный пилот: '+os.environ['ARTICLE_SLUG']+'\n\n')
+              fh.write('Статус: **'+x['disposition']+'**\n\n')
+              fh.write('Дальнейший этап: '+str(x['next_stage'])+'\n\n')
+              for key in ('revision_actions','editor_review_actions','awaiting_checks'):
+                  fh.write('### '+key+'\n\n')
+                  for v in x[key]:
+                      fh.write('- '+v.replace('\n',' ')+'\n')
+              fh.write('\nСайт и RSS не изменены, отчёты только для редакции.\n')
+          print('FULL_FIRST_PARTY_STAGE',x['disposition'])
+          PY
+      - name: Create safe owner-preview artifact only after fully passed checks
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json,os,subprocess,sys
+          slug=os.environ['ARTICLE_SLUG']
+          verdict=json.loads(Path('editorial-stage-results',slug+'.json').read_text('utf-8'))
+          if verdict["disposition"]=="ready_for_next_stage":
+              subprocess.run([sys.executable,'src/editorial_stage_preview.py','--slug',slug],check=True)
+              print('OWNER_PREVIEW_READY: GitHub artifact only, no publication')
+          else:
+              print('OWNER_PREVIEW_NOT_CREATED',verdict["disposition"])
+          PY
+      - name: Upload real AI, quality and routing diagnostics as private artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-first-party-editorial-pilot
+          path: |
+            editorial-check-reports/
+            editorial-quality-reports/
+            editorial-stage-evidence/
+            editorial-stage-results/
+          retention-days: 14
+          if-no-files-found: warn

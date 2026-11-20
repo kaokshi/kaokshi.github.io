@@ -123,8 +123,10 @@ def evaluate(path):
         results["ai_accent_detector"] = tool_result(
             ["ai-accent-detector", "--json", "--lang", "ru"], document
         )
+    from editorial_auto_route import digest_article
     return {
         "schema": "editorial-ai-check-v1",
+        "article_sha256": digest_article(article),
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "source_file": str(path.relative_to(ROOT)),
         "article_slug": article.get("slug", path.stem),
