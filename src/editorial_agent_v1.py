@@ -12,7 +12,7 @@ from pathlib import Path
 from editorial_ai_check import MODEL_A, REQUIRED_CHECKS, REVIEW_THRESHOLD, extract_text
 
 THRESHOLD = REVIEW_THRESHOLD
-ACTIVE = ("legends", "science")
+ACTIVE = ("legends", "science", "cinema")
 MAX_AGENT = 2
 MAX_ASSISTANT = 1
 
