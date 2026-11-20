@@ -85,7 +85,7 @@ def generate_pairs(n=20):
             human = review["review_human"]
             # Length-match without tricking training with systematically
             # shorter AI outputs. Any mismatch is explicitly reported.
-            human = human[:max(len(generated), 750)]
+            human = human[:len(generated)]
             pair = {
                 "pair_id": review["group_id"],
                 "movie_group_sha256": review["group_id"],
