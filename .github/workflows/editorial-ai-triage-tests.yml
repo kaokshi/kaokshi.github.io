@@ -1,0 +1,21 @@
+name: Offline AI triage tests (free, no publication)
+on:
+  pull_request:
+    paths:
+      - 'src/editorial_ai_auto_triage.py'
+      - 'tests/test_editorial_ai_auto_triage.py'
+      - '.github/workflows/editorial-ai-triage-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit tests (no model downloads, no API)
+        run: python -m unittest discover -s tests -p 'test_editorial_ai_auto_triage.py' -v
