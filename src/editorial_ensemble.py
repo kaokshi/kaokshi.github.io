@@ -147,38 +147,35 @@ def evaluate(model, holdout, threshold, training_rows):
             "note": "Report is experimental; human review of provenance and external training overlap remains required."}
 
 
-def route_revision(*, channel, score_percent, threshold, validated, attempt, substantive_issues, checks_completed=True):
-    """A maximum of two reviews/revisions; never authorize publication.
+def route_revision(*, channel, attempt, substantive_issues, checks_completed=True,
+                   score_percent=None, threshold=None, validated=False):
+    """Owner-approved editorial rule: actual defects, no AI cutoff.
 
-    An AI score can flag review ONLY after independent threshold validation.
-    Do not rewrite solely to lower classifier output.
+    An AI-only signal never triggers rewriting. Correct substantive issues
+    at most twice; after two attempts route to owner. Only routing decisions,
+    not text rewriting, notifications, publication or GitHub workflow execution.
     """
     if channel not in ACTIVE:
         return {"decision": "paused_channel", "release": False}
-    if not checks_completed:
-        return {"decision": "owner_review", "reason": "checks_incomplete", "release": False}
     if not isinstance(attempt, int) or isinstance(attempt, bool) or not 0 <= attempt <= 2:
         raise ValueError("attempt must be 0, 1 or 2")
-    if not isinstance(substantive_issues, list):
-        raise ValueError("substantive_issues must be a list")
-    if not validated or threshold is None:
-        return {"decision": "owner_review", "reason": "threshold_not_validated", "release": False}
-    if not all(isinstance(x, str) and x.strip() for x in substantive_issues):
-        raise ValueError("Invalid issues")
-    if (isinstance(score_percent, bool) or not isinstance(score_percent, (int, float))
-            or not math.isfinite(score_percent) or not 0 <= score_percent <= 100):
-        return {"decision": "owner_review", "reason": "score_missing", "release": False}
-    if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
-            or not math.isfinite(threshold) or not 0 <= threshold <= 100):
-        raise ValueError("Invalid threshold")
-    if score_percent <= threshold and not substantive_issues:
-        return {"decision": "no_ai_revision_flag", "release": False}
+    if not isinstance(substantive_issues, list) or not all(
+            isinstance(x, str) and x.strip() for x in substantive_issues):
+        raise ValueError("Issues must be a list of nonempty descriptions")
+    if checks_completed is not True:
+        return {"decision": "owner_review", "reason": "checks_incomplete",
+                "release": False}
+    # All model outputs and threshold experiments remain diagnostic.
+    # No value of score_percent, validated or threshold authorizes changes.
     if not substantive_issues:
-        return {"decision": "owner_review", "reason": "high_score_without_proven_defect", "release": False}
+        return {"decision": "quality_cleared_for_other_release_gates",
+                "reason": "no_substantive_defects", "release": False}
     if attempt >= 2:
-        return {"decision": "owner_review", "reason": "two_revisions_exhausted", "release": False}
+        return {"decision": "owner_review", "reason": "two_revisions_exhausted",
+                "issues": substantive_issues, "release": False}
     return {"decision": "targeted_revision", "attempt_next": attempt + 1,
-            "issues": substantive_issues, "rerun_all_checks": True, "release": False}
+            "issues": substantive_issues, "rerun_all_checks": True,
+            "release": False}
 
 
 def main():
