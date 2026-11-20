@@ -33,6 +33,13 @@ GUIDES = {
 }
 
 
+class WriterOutputError(ValueError):
+    """Specific code without logging generated prose."""
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
 class Pending(Exception):
     def __init__(self, status, reason):
         super().__init__(reason)
@@ -84,6 +91,25 @@ def private_path(path):
     return path
 
 
+def writer_shape_problem(reply, channel_name):
+    """Specific non-sensitive rejection code for an otherwise valid JSON object."""
+    if not isinstance(reply.get("title"), str) or not reply["title"].strip():
+        return "title_missing"
+    paragraphs = reply.get("paragraphs")
+    if not isinstance(paragraphs, list) or len(paragraphs) < 3:
+        return "paragraphs_missing_or_too_few"
+    if not all(isinstance(p, str) and p.strip() for p in paragraphs):
+        return "paragraph_empty_or_not_string"
+    cta = reply.get("cta")
+    if not isinstance(cta, str) or not cta.strip():
+        return "cta_missing"
+    if channel_name.casefold() not in cta.casefold():
+        return "cta_channel_name_missing"
+    if not re.search(r"подпи[сш]", cta, re.I):
+        return "cta_subscription_verb_missing"
+    return None
+
+
 def write_article(channel, topic, provider, existing_titles=(), *, documents=(), allow_length_repair=False):
     if channel not in ACTIVE or not topic_key(topic):
         raise ValueError("Use a nonempty topic for legends, science or cinema")
@@ -93,7 +119,7 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
     channel_name, genre_prompt = GUIDES[channel]
     topic_words = set(topic_key(topic).split())
     related = sorted(all_titles, key=lambda title: -len(topic_words & set(topic_key(title).split())))[:5]
-    reply = provider("write", {
+    request = {
         "channel": channel, "topic": topic, "existing_titles": related,
         "documents": [{**doc, "text": doc["text"][:4500]} for doc in documents[:3]],
         "instruction": f"{genre_prompt} Дай заголовок, зацепку, развитие и естественный финал. "
@@ -105,13 +131,23 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
                        f"Запиши оригинальный призыв подписаться на канал «{channel_name}» "
                        f"только в отдельное поле cta. Свяжи его с темой материала. "
                        f"Не дублируй абзацы. Ответ JSON с title, paragraphs и cta.",
-    })
-    title, blocks, cta = reply.get("title"), reply.get("paragraphs"), reply.get("cta")
-    if (not isinstance(title, str) or not title.strip() or not isinstance(blocks, list)
-            or len(blocks) < 3 or not all(isinstance(p, str) and p.strip() for p in blocks)
-            or not isinstance(cta, str) or channel_name.casefold() not in cta.casefold()
-            or not re.search(r"подпи[сш]", cta, re.I)):
-        raise ValueError("Writer output needs a title, article paragraphs and a channel-specific CTA")
+    }
+    for attempt in range(2):
+        reply = provider("write", request)
+        if not isinstance(reply, dict):
+            raise WriterOutputError("response_not_an_object")
+        problem = writer_shape_problem(reply, channel_name)
+        if problem is None:
+            break
+        if attempt:
+            raise WriterOutputError(problem)
+        request = {**request, "instruction": request["instruction"] +
+                   " Предыдущий ответ отклонён проверкой: " + problem +
+                   ". Напиши статью полностью заново с заголовком, минимум тремя "
+                   "содержательными абзацами и отдельным призывом подписаться. "
+                   "Сохрани ограничения по фактам и объёму."}
+    title, blocks, cta = reply["title"], reply["paragraphs"], reply["cta"]
+
     if topic_key(title) in {topic_key(t) for t in all_titles}:
         raise ValueError("Generated title duplicates another article")
     cta_key = topic_key(cta)
