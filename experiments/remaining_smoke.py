@@ -36,10 +36,15 @@ def run_clip():
 def run_playwright():
     """Test a complete editor review cycle, never the real Zen website."""
     from playwright.sync_api import sync_playwright
+    import shutil
+    installed_browser=(shutil.which("google-chrome") or shutil.which("chromium")
+                       or shutil.which("chromium-browser"))
+    if not installed_browser:
+        raise RuntimeError("No preinstalled Chromium/Chrome on GitHub runner")
     local=ROOT/"experiments/approval_preview.html"
     decisions=[]
     with sync_playwright() as p:
-        browser=p.chromium.launch(headless=True)
+        browser=p.chromium.launch(headless=True,executable_path=installed_browser)
         page=browser.new_page()
         page.goto(local.as_uri())
         # An incomplete approval request must not be accepted.
