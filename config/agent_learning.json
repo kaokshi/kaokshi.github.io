@@ -1,0 +1,51 @@
+{
+  "schema": "zen-editorial-agent-learning-v1",
+  "enabled": true,
+  "mode": "collect_observations_and_propose_changes",
+  "automated_weight_training_enabled": false,
+  "automated_prompt_changes_enabled": false,
+  "automated_release_changes_enabled": false,
+  "sources": {
+    "owner_article_feedback": true,
+    "revision_outcomes": true,
+    "factual_and_language_review": true,
+    "github_ci_results": true,
+    "verified_provenance_training_samples_only": true,
+    "zerogpt_manual_results": "descriptive_external_comparison_only_not_training_ground_truth",
+    "zen_performance_metrics": "only_after_official_launch_and_authorized_import"
+  },
+  "learning_objectives": [
+    "fewer_real_factual_errors",
+    "better_originality_and_language",
+    "fewer_unnecessary_revisions",
+    "more_reliable_image_rights_provenance",
+    "faster_preparation_without_quality_loss"
+  ],
+  "memory_policy": {
+    "store": "article_slug channel source_sha256 revised_sha256 verified_issue_category concrete_change result_report_ref reviewer_decision",
+    "raw_text_reuse": "only_repository_articles_and_licensed_content",
+    "no_secrets_or_personal_data": true,
+    "preserve_failures": true,
+    "never_assume_detector_score_is_ground_truth": true,
+    "prevent_train_holdout_leakage": true
+  },
+  "proposal_workflow": {
+    "collect_verified_cases": true,
+    "batch_review": "after_20_verified_cases_per_genre_or_owner_request",
+    "create_changes_only_in_separate_branch": true,
+    "require_human_approval_before_model_deployment": true,
+    "require_independent_holdout": true,
+    "require_regression_tests": true,
+    "rollback_on_quality_regression": true,
+    "never_change_model_a_threshold_80_without_owner_approval": true,
+    "max_agent_edits_per_article": 2,
+    "max_chatgpt_edits_per_article": 1
+  },
+  "publication": {
+    "cannot_change_publication_enabled": true,
+    "cannot_activate_rss": true,
+    "cannot_unpause_cinema": true,
+    "cannot_approve_articles_automatically": true
+  },
+  "implementation_status": "configuration_and_guidelines_only_learner_runtime_not_implemented"
+}
