@@ -95,11 +95,11 @@ def calibrated_index(raw, raw_threshold):
     return max(0.0, min(100.0, CUTOFF + float(raw) - raw_threshold))
 
 
-def frozen_digest(genre, model_sha, threshold, calibration_digests):
+def frozen_digest(genre, model_sha, threshold, calibration_observations):
     payload = json.dumps({
         "genre": genre, "model_sha256": model_sha,
         "raw_threshold": threshold, "display_cutoff": CUTOFF,
-        "calibration_text_sha256": sorted(calibration_digests),
+        "calibration_observations": sorted(\n            (row["text_sha256"], row["label"], row["raw_index_0_100"], row["source_id"], row["group_id"])\n            for row in calibration_observations\n        ),
         "mapping": "clipped_translation_v1"
     }, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -118,7 +118,7 @@ def audit(dataset, *, evaluate_final=False):
     cal = [row for row in rows if row["split"] == "calibration"]
     holdout = [row for row in rows if row["split"] == "final_holdout"]
     t = choose_raw_threshold(cal)
-    digest = frozen_digest(genre, model_sha, t, [row["text_sha256"] for row in cal])
+    digest = frozen_digest(genre, model_sha, t, cal)
     result = {
         "schema": "genre-calibration-audit-result-v1",
         "genre": genre, "model_sha256": model_sha,
