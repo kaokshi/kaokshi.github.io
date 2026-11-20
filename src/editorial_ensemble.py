@@ -148,34 +148,41 @@ def evaluate(model, holdout, threshold, training_rows):
 
 
 def route_revision(*, channel, attempt, substantive_issues, checks_completed=True,
-                   score_percent=None, threshold=None, validated=False):
-    """Owner-approved editorial rule: actual defects, no AI cutoff.
+                   score_percent=None, threshold=30, validated=False):
+    """Route for owner-selected >30 ensemble threshold, only after validation.
 
-    An AI-only signal never triggers rewriting. Correct substantive issues
-    at most twice; after two attempts route to owner. Only routing decisions,
-    not text rewriting, notifications, publication or GitHub workflow execution.
+    The threshold is a review-routing score, never percent AI authorship.
+    A >30 score requires editorial scrutiny; only meaningful problems justify
+    actual edits. Never publish, rewrite automatically or notify by this method.
     """
     if channel not in ACTIVE:
-        return {"decision": "paused_channel", "release": False}
-    if not isinstance(attempt, int) or isinstance(attempt, bool) or not 0 <= attempt <= 2:
+        return {"decision":"paused_channel","release":False}
+    if not isinstance(attempt,int) or isinstance(attempt,bool) or not 0<=attempt<=2:
         raise ValueError("attempt must be 0, 1 or 2")
-    if not isinstance(substantive_issues, list) or not all(
-            isinstance(x, str) and x.strip() for x in substantive_issues):
+    if not isinstance(substantive_issues,list) or not all(isinstance(x,str) and x.strip() for x in substantive_issues):
         raise ValueError("Issues must be a list of nonempty descriptions")
     if checks_completed is not True:
-        return {"decision": "owner_review", "reason": "checks_incomplete",
-                "release": False}
-    # All model outputs and threshold experiments remain diagnostic.
-    # No value of score_percent, validated or threshold authorizes changes.
+        return {"decision":"owner_review","reason":"checks_incomplete","release":False}
+    high=False
+    if validated is True:
+        if not isinstance(score_percent,(int,float)) or isinstance(score_percent,bool) or not math.isfinite(score_percent) or not 0<=score_percent<=100:
+            return {"decision":"owner_review","reason":"validated_score_missing","release":False}
+        if not isinstance(threshold,(int,float)) or isinstance(threshold,bool) or not math.isfinite(threshold) or threshold != 30:
+            raise ValueError("Approved threshold is exactly 30")
+        high=score_percent>threshold
+    # A raw model output must not masquerade as a verified review signal.
+    if high and not substantive_issues:
+        return {"decision":"editorial_review_required","reason":"validated_index_above_30",
+                "index":score_percent,"release":False}
     if not substantive_issues:
-        return {"decision": "quality_cleared_for_other_release_gates",
-                "reason": "no_substantive_defects", "release": False}
-    if attempt >= 2:
-        return {"decision": "owner_review", "reason": "two_revisions_exhausted",
-                "issues": substantive_issues, "release": False}
-    return {"decision": "targeted_revision", "attempt_next": attempt + 1,
-            "issues": substantive_issues, "rerun_all_checks": True,
-            "release": False}
+        return {"decision":"quality_cleared_for_other_release_gates",
+                "reason":"no_substantive_defects","release":False}
+    if attempt>=2:
+        return {"decision":"owner_review","reason":"two_revisions_exhausted",
+                "issues":substantive_issues,"index":score_percent if validated else None,"release":False}
+    return {"decision":"targeted_revision","attempt_next":attempt+1,
+            "issues":substantive_issues,"rerun_all_checks":True,
+            "index":score_percent if validated else None,"release":False}
 
 
 def main():
