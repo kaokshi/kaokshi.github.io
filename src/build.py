@@ -10,6 +10,7 @@ from email.utils import format_datetime
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
+from editorial_layout import layout_findings
 from editorial_length import count_characters, length_finding
 
 BASE = Path(__file__).resolve().parents[1]
@@ -108,6 +109,8 @@ def read_posts(now):
         if post.get("ai_editorial_escalation_unresolved") is True:
             continue
         if length_finding(count_characters(post.get("body_html", ""))):
+            continue
+        if layout_findings(post, BASE):
             continue
         images = post.get("image_files", [])
         if len(images) < 7 or any(not (BASE / f).is_file() for f in images):

@@ -15,6 +15,9 @@ import build
 
 class AutoReleaseTests(unittest.TestCase):
     def setUp(self):
+        # These cases isolate routing; the layout suite exercises the real cover gate.
+        self.enterContext(patch("editorial_auto_route.layout_findings", return_value=[]))
+        self.enterContext(patch("build.layout_findings", return_value=[]))
         self.temp=tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)

@@ -16,6 +16,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm, Pt
 from editorial_ai_check import extract_text
+from editorial_layout import docx_body
 from editorial_length import MIN_CHARS, MAX_CHARS, count_characters, length_finding
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -68,11 +69,14 @@ def make_one(channel,slug,place):
     normal.paragraph_format.space_after=Pt(8)
     normal.paragraph_format.line_spacing=1.18
     doc.add_heading(a["title"],0).alignment=WD_ALIGN_PARAGRAPH.CENTER
-    for i,paragraph in enumerate(paras):
-        if len(paragraph)<75 and i>0 and i<len(paras)-1 and not paragraph.endswith((".", "!", "?", "»")):
-            doc.add_heading(paragraph,level=2)
-        else:
-            doc.add_paragraph(paragraph)
+    if a.get("layout_schema") or "<section>" in a["body_html"]:
+        docx_body(doc, a, ROOT)
+    else:
+        for i,paragraph in enumerate(paras):
+            if len(paragraph)<75 and i>0 and i<len(paras)-1 and not paragraph.endswith((".", "!", "?", "»")):
+                doc.add_heading(paragraph,level=2)
+            else:
+                doc.add_paragraph(paragraph)
     footer=sec.footer.paragraphs[0]
     footer.text=TITLES[channel]+" | Редакционный черновик для ручной публикации, не утверждён"
     place.parent.mkdir(parents=True,exist_ok=True)

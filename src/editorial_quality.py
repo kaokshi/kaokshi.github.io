@@ -107,7 +107,8 @@ def inspect_draft(article, *, fallback_slug=None):
     imgs = article.get("image_files") or []
     sources = article.get("image_sources") or []
     photo_refs = [item.get("file") for item in sources if isinstance(item, dict)]
-    problems = []
+    from editorial_layout import layout_findings
+    problems = layout_findings(article, ROOT)
     if channel not in CHANNELS:
         problems.append("unknown_channel")
     issue = length_finding(chars)

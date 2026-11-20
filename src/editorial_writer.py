@@ -3,7 +3,7 @@
 
 import argparse
 from hashlib import sha256
-from html import escape
+from editorial_layout import SECTION_SCHEMA, arrange
 import json
 import os
 from pathlib import Path
@@ -94,7 +94,7 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
                        f"Подбери самостоятельный короткий заголовок. "
                        f"Запиши оригинальный призыв подписаться на канал «{channel_name}» "
                        f"только в отдельное поле cta. Свяжи его с темой материала. "
-                       f"Не дублируй абзацы. Ответ JSON с title, paragraphs и cta.",
+                       f"Не дублируй абзацы. Добавь sections: начало каждого смыслового блока (start от 1) и уникальный конкретный heading. Группируй связанные абзацы, оставь CTA в финальном блоке.",
     })
     title, blocks, cta = reply.get("title"), reply.get("paragraphs"), reply.get("cta")
     if (not isinstance(title, str) or not title.strip() or not isinstance(blocks, list)
@@ -105,13 +105,13 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
     if topic_key(title) in {topic_key(t) for t in all_titles}:
         raise ValueError("Generated title duplicates another article")
     cta_key = topic_key(cta)
-    blocks = [p.strip() for p in blocks if topic_key(p) != cta_key] + [cta.strip()]
+    blocks = [p.strip() for p in blocks if topic_key(re.sub(r"^\s*cta\s*:\s*", "", p, flags=re.I)) != cta_key] + [cta.strip()]
     if len(blocks) < 4:
         raise ValueError("Writer output needs at least three distinct prose paragraphs before the CTA")
     if len(set(map(topic_key, blocks))) != len(blocks):
         raise ValueError("Writer output has duplicate paragraphs")
     prose = " ".join(blocks)
-    body = "\n".join(f"<p>{escape(p, quote=False)}</p>" for p in blocks)
+    body = arrange(blocks, reply.get("sections"), provider, title)
     chars = count_characters(body)
     if len(re.findall(r"[а-яё]", prose, re.I)) < chars // 2:
         raise ValueError("Writer output must be predominantly Russian prose")
@@ -119,7 +119,7 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
         raise ValueError(f"Draft has {chars} characters outside the range {MIN_CHARS}–{MAX_CHARS}")
     slug = channel + "-draft-" + sha256(topic_key(topic).encode()).hexdigest()[:16]
     return {"slug": slug, "channel": channel, "title": title.strip(), "status": "draft",
-            "body_html": body,
+            "body_html": body, "layout_schema": SECTION_SCHEMA,
             "sources": [], "image_files": [], "editorial_reviewed": False,
             "publication_authorized": False, "release_hold": True}
 
