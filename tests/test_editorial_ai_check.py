@@ -32,7 +32,7 @@ class EditorialAiChecksTest(unittest.TestCase):
             path.write_text(json.dumps({"slug": "test", "channel": "science",
                                         "body_html": "<p>Тестовая статья.</p>",
                                         "status": "draft", "publication_authorized": False}, ensure_ascii=False), encoding="utf-8")
-            mocked = {"status": "completed", "data": {"example": True}}
+            mocked = {"status": "completed", "data": {"probability": 0.1, "skipped": False, "ai_accent_score": 0.1}}
             with patch.object(checker, "ROOT", Path(tmp)), patch.object(checker, "tool_result", return_value=mocked):
                 result = checker.evaluate(path)
             self.assertTrue(result["all_checks_completed"])
