@@ -26,7 +26,7 @@ def run(genre, models, out):
     if not model_file.is_file():
         raise RuntimeError("Training model artifact unavailable: " + str(model_file))
     model = json.loads(model_file.read_text(encoding="utf-8"))
-    if model.get("genre") != genre or model.get("status") != "research_only_unvalidated":
+    if model.get("genre") != genre or model.get("status") not in {"research_only_unvalidated", "research_only_publisher_labels_unverified"}:
         raise RuntimeError("Unexpected model metadata: " + genre)
     if model.get("publication_authorized") is not False:
         raise RuntimeError("Research model must not authorize publication")
