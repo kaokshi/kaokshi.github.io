@@ -71,10 +71,14 @@ def count_kinopoisk_summaries():
 def main():
     result={"schema":"movie-genre-corpus-audit-v1","date_utc":datetime.now(timezone.utc).isoformat(),
             "production_ready":False,"publication_authorized":False,"corpora":{},"errors":[]}
-    try:result["corpora"]["seckur_demo"]=count_movie_demo()
-    except Exception as e:result["errors"].append("Seckur demo: "+type(e).__name__+": "+str(e)[:350])
-    try:result["corpora"]["kinopoisk_summary"]=count_kinopoisk_summaries()
-    except Exception as e:result["errors"].append("Kinopoisk summary: "+type(e).__name__+": "+str(e)[:350])
+    try:
+        result["corpora"]["seckur_demo"]=count_movie_demo()
+    except Exception as e:
+        result["errors"].append("Seckur demo: "+type(e).__name__+": "+str(e)[:350])
+    try:
+        result["corpora"]["kinopoisk_summary"]=count_kinopoisk_summaries()
+    except Exception as e:
+        result["errors"].append("Kinopoisk summary: "+type(e).__name__+": "+str(e)[:350])
     result["minimum_independent_human_holdout"]=120
     result["minimum_independent_ai_holdout"]=120
     result["status"]="research_genre_corpus_audited" if result["corpora"] and not result["errors"] else "incomplete_dataset_audit"
@@ -86,4 +90,5 @@ def main():
     if result["errors"]:
         raise SystemExit("Missing or unreadable genre data; cinema model remains untrained")
 
-if __name__=="__main__":main()
+if __name__=="__main__":
+    main()
