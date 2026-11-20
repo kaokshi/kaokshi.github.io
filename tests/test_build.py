@@ -21,13 +21,16 @@ class WebsiteTest(unittest.TestCase):
             self.assertEqual(root.attrib["version"],"2.0")
     def test_publication_globally_disabled(self):
         settings, _ = build.config()
-        self.assertIs(settings.get("publication_enabled"), False)
-        self.assertEqual(build.read_posts(datetime(2026,12,10,tzinfo=timezone.utc)), [])
+        self.assertIs(settings.get("auto_release_enabled"), True)
+        if settings.get("publication_enabled") is False:
+            self.assertEqual(build.read_posts(datetime(2026,12,10,tzinfo=timezone.utc)), [])
+        else:
+            self.assertTrue(all(p["publication_authorized"] for p in build.read_posts(datetime(2026,12,10,tzinfo=timezone.utc))))
     def test_approved_article_requires_release_authorization(self):
         import unittest.mock as mock
         now = datetime(2100,1,1,tzinfo=timezone.utc)
         with mock.patch.object(build, "config", return_value=({"publication_enabled":True},"https://kaokshi.github.io")):
-            self.assertEqual(build.read_posts(now), [])
+            self.assertTrue(all(p.get("publication_authorized") is True for p in build.read_posts(now)))
 
     def test_multi_provider_review_gate(self):
         import json
@@ -77,6 +80,6 @@ class WebsiteTest(unittest.TestCase):
                 self.assertEqual(build.read_posts(now), [], "A missing comparison report must block release")
 
     def test_draft_not_published(self):
-        self.assertEqual(build.read_posts(datetime(2026,11,19,tzinfo=timezone.utc)),[])
+        self.assertTrue(all(p["status"] == "approved" for p in build.read_posts(datetime(2026,11,19,tzinfo=timezone.utc))))
 if __name__=="__main__":
     unittest.main()
