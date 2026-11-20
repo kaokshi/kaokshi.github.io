@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/movie_fact_check.py'
       - 'src/movie_semantic.py'
+      - 'src/movie_revision_queue.py'
       - 'tests/test_movie_fact_check.py'
       - 'config/movie_reference_index.json'
       - 'content/articles/cinema-01-truman-show-real-photos.json'
@@ -40,6 +41,17 @@ jobs:
         run: |
           slug="${MOVIE_SLUG:-cinema-01-truman-show-real-photos}"
           python src/movie_fact_check.py --slug "$slug" --imdb --semantic
+      - name: Produce evidence-linked editorial corrections queue
+        if: always()
+        env:
+          MOVIE_SLUG: ${{ inputs.slug }}
+        run: |
+          slug="${MOVIE_SLUG:-cinema-01-truman-show-real-photos}"
+          if [ -f "editorial-movie-reports/$slug.json" ]; then
+            python src/movie_revision_queue.py --slug "$slug"
+          else
+            echo "No diagnostic report; no corrections generated"
+          fi
       - name: Display movie review summary and representative results
         if: always()
         run: |
