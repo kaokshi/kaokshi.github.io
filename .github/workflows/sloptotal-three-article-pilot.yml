@@ -1,0 +1,77 @@
+name: SlopTotal 3-article pilot (self-hosted, free, read-only)
+on:
+  pull_request:
+    paths:
+      - 'src/sloptotal_local_benchmark.py'
+      - 'tests/test_sloptotal_local_benchmark.py'
+      - '.github/workflows/sloptotal-three-article-pilot.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sloptotal-cpu-three-article-pilot
+  cancel-in-progress: false
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p test_sloptotal_local_benchmark.py -v
+  three-article-comparison:
+    needs: offline-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check storage and launch locally hosted SlopTotal (no remote API)
+        env:
+          SLOPTOTAL_PROFILE: lite
+        run: |
+          set -euo pipefail
+          df -h /
+          free -h
+          docker pull ghcr.io/pablocaeg/sloptotal:latest
+          docker run -d --name sloptotal-pilot --memory 12g --cpus 3 \
+            -e SLOPTOTAL_PROFILE=lite \
+            -e SLOPTOTAL_DEVICE=cpu \
+            -e SLOPTOTAL_RETENTION_DAYS=1 \
+            -p 127.0.0.1:8000:8000 \
+            ghcr.io/pablocaeg/sloptotal:latest
+          python - <<'PY'
+          import time
+          from urllib.request import urlopen
+          deadline = time.monotonic() + 900
+          while time.monotonic() < deadline:
+              try:
+                  with urlopen('http://127.0.0.1:8000/api/engines', timeout=5) as r:
+                      if r.status == 200:
+                          print('SlopTotal local service is accepting requests')
+                          break
+              except Exception:
+                  time.sleep(8)
+          else:
+              raise SystemExit('Local SlopTotal service not ready within 15 minutes')
+          PY
+      - name: Run exact full-article comparison for three existing drafts
+        run: python src/sloptotal_local_benchmark.py
+      - name: Preserve scores, text digest and diagnostic status (never publish)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sloptotal-three-article-diagnostics
+          path: sloptotal-experiment-reports/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Show container health on failure
+        if: failure()
+        run: |
+          docker ps -a
+          docker logs --tail 80 sloptotal-pilot || true
+          df -h /
