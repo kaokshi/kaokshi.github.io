@@ -1,0 +1,61 @@
+name: Movie Fact Check (no full movie, read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/movie_fact_check.py'
+      - 'tests/test_movie_fact_check.py'
+      - 'config/movie_reference_index.json'
+      - 'content/articles/cinema-01-truman-show-real-photos.json'
+      - '.github/workflows/movie-fact-check.yml'
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 'Movie article slug; blank means Truman pilot'
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  evidence-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install optional evidence lookup libraries (no video)
+        run: python -m pip install "requests==2.32.5" "cinemagoer"
+      - name: Verify local safety and mapping tests
+        run: python -m unittest tests.test_movie_fact_check -v
+      - name: Compare film plot and still references with external sources
+        env:
+          MOVIE_SLUG: ${{ inputs.slug }}
+        run: |
+          slug="${MOVIE_SLUG:-cinema-01-truman-show-real-photos}"
+          python src/movie_fact_check.py --slug "$slug" --imdb
+      - name: Display movie review summary and representative results
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          for path in Path("editorial-movie-reports").glob("*.json"):
+              d=json.loads(path.read_text(encoding="utf-8"))
+              print("MOVIE_FACT_REPORT", d["article_slug"])
+              print("SOURCES",json.dumps({"wikipedia":d["wikipedia"],"imdb":d["reference_catalog"]["imdb_lookup"].get("status")},ensure_ascii=False))
+              print("SUMMARY",json.dumps(d["summary"],ensure_ascii=False))
+              for item in d["article_sections"]:
+                  print("SECTION",json.dumps({k:item.get(k) for k in ("section","status","lexical_overlap","source_url")},ensure_ascii=False))
+              for item in d["stills"]:
+                  print("STILL",json.dumps({k:item.get(k) for k in ("index","source_url","structural_status","warnings","visual_scene_match")},ensure_ascii=False))
+          PY
+      - name: Keep diagnostic report outside published website
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: movie-fact-check-pilot
+          path: editorial-movie-reports/
+          if-no-files-found: warn
+          retention-days: 14
