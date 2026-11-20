@@ -132,39 +132,54 @@ def decide(article, evidence):
                 blockers.append("science_claim_coverage_missing")
     if evidence.get("unresolved_critical_findings"):
         blockers.append("unresolved_critical_findings")
-    # Scores are intentionally different *workflow categories*, not averaged AI model probabilities:
-    # 0–20 ruBERT share, 0–30 style issues, 0–25 image warnings, 0–25 source warnings.
-    # An absent test always blocks auto-release even if computed numeric risk is low.
-    style = evidence.get("style_warning_count", 0)
-    image_warn = evidence.get("image_warning_count", 0)
-    source_warn = evidence.get("source_warning_count", 0)
+    # The composite index is a conservative workflow triage heuristic,
+    # NOT a probabilistic blend of incompatible authorship detectors.
+    # Maximum components: ruBERT 15 + disagreement 10 + style 25 +
+    # image 25 + source 25 = 100 points.
+    style = evidence.get("style_warning_count")
+    image_warn = evidence.get("image_warning_count")
+    source_warn = evidence.get("source_warning_count")
     valid_counts = all(isinstance(x, int) and not isinstance(x, bool) and x >= 0
                        for x in (style, image_warn, source_warn))
     if not valid_counts:
-        blockers.append("invalid_warning_counts")
+        blockers.append("warning_counts_missing_or_invalid")
         style = image_warn = source_warn = 0
-    if finite_percent(score):
-        risk = round(
-            min(20, 20 * score / PRIMARY_AI_LIMIT) +
-            min(30, style * 3) +
-            min(25, image_warn * 8) +
-            min(25, source_warn * 8), 2)
+    comparison = {}
+    for name in ("modernbert", "lightgbm"):
+        check = ai_checks.get(name, {}) if isinstance(ai_checks, dict) else {}
+        val = check.get("score_percent") if isinstance(check, dict) else None
+        if not finite_percent(val):
+            blockers.append("comparison_score_missing")
+        else:
+            comparison[name] = val
+    if len(comparison) == 2:
+        difference = abs(comparison["modernbert"] - comparison["lightgbm"])
+        disagreement_points = 10 if difference >= 50 else 5 if difference >= 25 else 0
     else:
-        risk = None
+        disagreement_points = 0
+    components = {
+        "rubert_editorial_signal": round(min(15, 15 * score / PRIMARY_AI_LIMIT), 2) if finite_percent(score) else None,
+        "model_disagreement_advisory": disagreement_points,
+        "style_warnings": min(25, style * 3),
+        "image_warnings": min(25, image_warn * 8),
+        "source_warnings": min(25, source_warn * 8),
+    }
+    risk = (round(sum(components.values()), 2)
+            if all(isinstance(v, (int, float)) for v in components.values()) else None)
     if risk is not None and risk > RISK_THRESHOLD:
         blockers.append("aggregate_risk_above_20")
     disposition = "automatic_release_candidate" if not blockers else "send_for_owner_review"
     return {
         "schema": "editorial-auto-route-v1", "slug": slug,
         "channel": channel, "article_sha256": dg,
-        "risk_score": risk, "risk_scale": "0-100", "review_if_above": RISK_THRESHOLD,
+        "risk_score": risk, "risk_components": components, "risk_scale": "0-100", "review_if_above": RISK_THRESHOLD,
         "rubert_limit_percent": PRIMARY_AI_LIMIT,
         "disposition": disposition,
         "blockers": sorted(set(blockers)),
         "publication_authorized": False,
         "notes": [
             "A low risk score is NOT scientific fact-checking, legal rights verification, or proof of human authorship.",
-            "ModernBERT/LightGBM/AI Accent are comparison-only and never averaged into authorship probability.",
+            "ModernBERT and LightGBM score divergence is only a review-warning signal, not a calibrated truth probability. AI Accent remains a separate stylistic diagnostic.",
             "This module routes articles; a separate verified release workflow must check the decision before deployment.",
         ],
     }
