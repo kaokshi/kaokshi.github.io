@@ -1,4 +1,4 @@
-"""Zero-network tests: whitelist Commons license claims and reject bad sources."""
+"""Zero-network tests: retrieve any license category without granting rights."""
 from io import BytesIO
 import json
 from pathlib import Path
@@ -33,7 +33,7 @@ def opener(req, timeout):
 class CommonsTests(unittest.TestCase):
     def test_real_api_response_structure_and_no_false_rights(self):
         result=search("red sprites lightning",opener=opener)
-        self.assertEqual(result["count"],1)
+        self.assertEqual(result["count"],2)
         item=result["candidates"][0]
         self.assertEqual(item["license_claimed"],"CC-BY-4.0")
         self.assertEqual(item["artist"],"Anna Artist")
@@ -43,7 +43,11 @@ class CommonsTests(unittest.TestCase):
         self.assertFalse(result["publication_authorized"])
 
     def test_rejects_proprietary_and_untrusted_media(self):
-        self.assertIsNone(candidate(sample("All rights reserved")))
+        restricted = candidate(sample("All rights reserved"))
+        self.assertIsNotNone(restricted)
+        self.assertIsNone(restricted["license_claimed"])
+        self.assertEqual(restricted["license_status"], "unknown_or_restricted")
+        self.assertFalse(restricted["license_verified"])
         self.assertIsNone(candidate(sample(url="https://evil.example/test.jpg")))
         bad=sample()
         bad["title"]="File:Test.svg"
