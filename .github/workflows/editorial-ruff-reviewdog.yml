@@ -75,3 +75,9 @@ jobs:
         run: |
           python -m compileall -q src tests
           ruff check --select E9,F63,F7,F82 src tests
+      - name: Run safety regression tests for changed Python modules
+        run: |
+          python -m unittest discover -s tests -p 'test_editorial_auto_route.py' -v
+          python -m unittest discover -s tests -p 'test_editorial_ensemble.py' -v
+          python -m unittest discover -s tests -p 'test_editorial_research_train.py' -v
+          python -m unittest discover -s tests -p 'test_editorial_research_v2.py' -v
