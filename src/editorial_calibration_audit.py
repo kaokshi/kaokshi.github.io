@@ -99,7 +99,10 @@ def frozen_digest(genre, model_sha, threshold, calibration_observations):
     payload = json.dumps({
         "genre": genre, "model_sha256": model_sha,
         "raw_threshold": threshold, "display_cutoff": CUTOFF,
-        "calibration_observations": sorted(\n            (row["text_sha256"], row["label"], row["raw_index_0_100"], row["source_id"], row["group_id"])\n            for row in calibration_observations\n        ),
+        "calibration_observations": sorted(
+            (row["text_sha256"], row["label"], row["raw_index_0_100"], row["source_id"], row["group_id"])
+            for row in calibration_observations
+        ),
         "mapping": "clipped_translation_v1"
     }, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
