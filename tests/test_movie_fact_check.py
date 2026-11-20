@@ -79,11 +79,11 @@ class MovieFactCheckTests(unittest.TestCase):
                         vectors.append([0.0, 1.0])
                 return np.array(vectors)
         source = {"status": "completed",
-                  "extract": "== Сюжет ==\\nТруман выходит к океану и отправляется в плавание, пытаясь найти выход из искусственного города. Он управляет лодкой, находясь под наблюдением телезрителей.",
+                  "extract": "== Сюжет ==\nТруман выходит к океану и отправляется в плавание, пытаясь найти выход из искусственного города. Он управляет лодкой, находясь под наблюдением телезрителей.",
                   "url": "https://ru.wikipedia.org/wiki/Шоу_Трумана"}
         sections = [{"section": "Финал", "text": "Труман выбирается в море, несмотря на трудности. Вскоре он понимает, что все это было снято в искусственном мире."}]
         result = semantic.semantic_candidates(sections, source, model=Dummy())
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["status"], "completed", str(result))
         self.assertEqual(len(result["matches"]), 1)
         self.assertFalse(result["matches"][0]["fact_verified"])
         self.assertTrue(result["matches"][0]["candidate_matches"])
