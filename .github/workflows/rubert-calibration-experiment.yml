@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'src/rubert_calibration.py'
+      - 'src/rubert_v4_runner.py'
       - 'tests/test_rubert_calibration.py'
       - 'experiments/rubert-ninth-floor-window-scores.json'
       - '.github/workflows/rubert-calibration-experiment.yml'
@@ -37,6 +38,8 @@ jobs:
           report=json.loads(Path('editorial-calibration-reports/ninth-floor.json').read_text())
           assert report['release_gate_changed'] is False
           assert report['ai_generation_probability'] is None
+          assert report['whole_document']['all_words_covered'] is True
+          print('WHOLE_DOCUMENT_RUBERT_INDEX', report['whole_document']['score_percent'])
           print("RESEARCH_ONLY: release threshold unchanged, no site/RSS deployment")
           PY
       - name: Save read-only statistics
