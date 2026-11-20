@@ -5,7 +5,7 @@ on:
     paths:
       - 'src/editorial_research_v2.py'
       - 'src/editorial_cinema_pairs_augmented.py'
-      - 'src/editorial_cinema_pairs_augmented.py'
+      - 'src/editorial_cinema_train_isolated.py'
       - '.github/workflows/editorial-research-v2.yml'
   workflow_dispatch:
 permissions:
@@ -60,11 +60,30 @@ jobs:
               local_dir=".rubert-upstream/models",
           )
           PY
-      - name: Train larger genre ensemble and inspect independent holdout
+      - name: Generate private film corpus in isolated generator environment
+        if: matrix.genre == 'cinema'
+        env:
+          OMP_NUM_THREADS: '2'
+          OPENBLAS_NUM_THREADS: '2'
+        run: |
+          mkdir -p "$RUNNER_TEMP/zen-cinema"
+          .generator-venv/bin/python src/editorial_cinema_train_isolated.py generate --private-pairs "$RUNNER_TEMP/zen-cinema/pairs.json"
+      - name: Run larger genre ensembles for legends and science
+        if: matrix.genre != 'cinema'
         env:
           OMP_NUM_THREADS: '2'
           OPENBLAS_NUM_THREADS: '2'
         run: python src/editorial_research_v2.py --genre "${{ matrix.genre }}" --out editorial-training-v2
+      - name: Run cinema four-detector training WITHOUT generator library conflicts
+        if: matrix.genre == 'cinema'
+        env:
+          OMP_NUM_THREADS: '2'
+          OPENBLAS_NUM_THREADS: '2'
+        run: |
+          python src/editorial_cinema_train_isolated.py train --private-pairs "$RUNNER_TEMP/zen-cinema/pairs.json" --out editorial-training-v2
+      - name: Erase ephemeral text artifacts in all outcomes
+        if: always()
+        run: rm -f "$RUNNER_TEMP/zen-cinema/pairs.json"
       - name: Preserve research-only model and metrics
         if: always()
         uses: actions/upload-artifact@v4
