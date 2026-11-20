@@ -1,0 +1,56 @@
+{
+  "schema": "editorial-ai-revision-policy-v1",
+  "status": "awaiting_independent_validation",
+  "current_channels": [
+    "legends",
+    "science"
+  ],
+  "paused_channels": [
+    "cinema"
+  ],
+  "only_detectors": [
+    "rubert_v4",
+    "modernbert",
+    "lightgbm",
+    "ai_accent_detector"
+  ],
+  "thresholds": {
+    "legends": null,
+    "science": null,
+    "cinema": null
+  },
+  "decision_rule": "No AI score alone triggers mandatory rewriting until tested on independently labeled, relevant holdout corpus. Then a genre-specific threshold may trigger targeted editorial revision, followed by all four fresh AI checks.",
+  "validation_requirements": {
+    "minimum_human_holdout": 120,
+    "minimum_ai_holdout": 120,
+    "maximum_human_false_alarm_rate": 0.05,
+    "confidence_level": 0.95,
+    "require_upper_confidence_bound_below_target": true,
+    "minimum_ai_detection_rate": 0.6,
+    "require_lower_confidence_bound_above_target": true,
+    "independently_verified_provenance": true,
+    "no_overlap_with_calibration_or_model_training": true,
+    "frozen_threshold_before_holdout": true
+  },
+  "ai_numeric_score_0_to_100": "uncalibrated_editorial_signal_not_probability",
+  "rubert_hard_limit": null,
+  "publication_authorized": false,
+  "latest_experimental_evidence": {
+    "holdout": "https://github.com/kaokshi/kaokshi.github.io/actions/runs/44692825104",
+    "essay_threshold_95": {
+      "false_alarms": 0,
+      "human_n": 60,
+      "ai_detected": 13,
+      "ai_n": 60,
+      "upper_fpr_95": 0.0602
+    },
+    "scientific_threshold_85": {
+      "false_alarms": 4,
+      "human_n": 60,
+      "ai_detected": 38,
+      "ai_n": 60,
+      "upper_fpr_95": 0.1593
+    },
+    "result": "Neither candidate meets the validation criteria; do not enable."
+  }
+}
