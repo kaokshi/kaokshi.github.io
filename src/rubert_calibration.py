@@ -47,6 +47,71 @@ def summarize_windows(values):
     }
 
 
+
+def document_coverage_score(window_values, spans, total_words):
+    """One article-wide index: average each word's covering window scores.
+
+    Overlap is split among windows, so repeated context cannot contribute
+    multiple times. This is a *heuristic index* (0-100), not P(AI|text).
+    """
+    if not isinstance(total_words, int) or isinstance(total_words, bool) or total_words < 1:
+        raise ValueError("Invalid document word count")
+    summarize_windows(window_values)
+    if not isinstance(spans, list) or len(spans) != len(window_values):
+        raise ValueError("Window score/span mismatch")
+    events_sum = [0.0] * (total_words + 1)
+    events_count = [0] * (total_words + 1)
+    for value, span in zip(window_values, spans):
+        if (not isinstance(span, (list, tuple)) or len(span) != 2 or
+            any(not isinstance(n, int) or isinstance(n, bool) for n in span)):
+            raise ValueError("Invalid window span")
+        start, end = span
+        if not 0 <= start < end <= total_words:
+            raise ValueError("Window outside document")
+        events_sum[start] += value
+        events_sum[end] -= value
+        events_count[start] += 1
+        events_count[end] -= 1
+    total = 0.0
+    running_sum = 0.0
+    running_count = 0
+    for i in range(total_words):
+        running_sum += events_sum[i]
+        running_count += events_count[i]
+        if running_count < 1:
+            raise ValueError("Unscored document words")
+        total += running_sum / running_count
+    score = max(0.0, min(100.0, 100.0 * total / total_words))
+    return {
+        "score_percent": round(score, 2),
+        "scale": "0-100",
+        "direction": "Higher means a stronger model-generated-text signal",
+        "unit": "uncalibrated_whole_document_index",
+        "formula": "Mean per-word average of overlapping-window ruBERT scores",
+        "words_evaluated": total_words,
+        "windows_evaluated": len(window_values),
+        "all_words_covered": True,
+        "probability_ai_generated": None,
+        "calibrated": False,
+        "release_gate_changed": False,
+        "warning": (
+            "This is a single score for the complete article, NOT a verified "
+            "probability of AI authorship; publication moderation cannot be predicted."
+        ),
+    }
+
+def legacy_window_spans(total_words, window_words=85, stride=65):
+    """Reproduce pinned runner's window boundaries for older archived reports."""
+    if not isinstance(total_words,int) or total_words < 1:
+        raise ValueError("Invalid document length")
+    if total_words <= window_words:
+        return [[0,total_words]]
+    starts=list(range(0,total_words-window_words+1,stride))
+    if starts[-1] != total_words-window_words:
+        starts.append(total_words-window_words)
+    return [[start,start+window_words] for start in starts]
+
+
 def _rates(samples, metric, threshold):
     human=[row for row in samples if row["label"]=="human"]
     ai=[row for row in samples if row["label"]=="ai"]
@@ -150,8 +215,14 @@ def main():
             values=doc["checks"]["rubert_v4"]["data"]["window_probabilities"]
         else:
             values=doc["window_probabilities"]
-        result={"schema":"rubert-shadow-single-article-v1",
+        words=doc.get("word_count")
+        spans=doc.get("window_spans")
+        if words is not None and spans is None:
+            spans=legacy_window_spans(words,doc.get("model_window_words",85),doc.get("model_window_stride_words",65))
+        global_score=document_coverage_score(values,spans,words) if spans is not None else None
+        result={"schema":"rubert-shadow-single-article-v2",
                 "statistics":summarize_windows(values),
+                "whole_document":global_score,
                 "release_gate_changed":False,
                 "ai_generation_probability":None}
     else:
