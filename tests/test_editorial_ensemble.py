@@ -1,6 +1,5 @@
 """Synthetic-only unit tests of experimental ensemble: NEVER production validation."""
 import hashlib
-import json
 import sys
 import unittest
 from pathlib import Path
