@@ -86,9 +86,9 @@ jobs:
             done < <(git diff --name-only "$PREVIOUS_SHA" "$GITHUB_SHA" -- 'content/articles/*.json')
           fi
           if [ "${#args[@]}" -eq 0 ]; then
-            args+=(--slug legends-01-prohodnaya-17)
-            args+=(--slug science-01-krasnye-spraity)
-            args+=(--slug cinema-01-truman-show-real-photos)
+            for slug in legends-pilot-midnight-bus-20261120 legends-pilot-photo-studio-20261120 science-pilot-noctilucent-clouds-20261120 science-pilot-hair-ice-20261120 cinema-pilot-inception-20261120 cinema-pilot-shutter-island-20261120; do
+              args+=(--slug "$slug")
+            done
           fi
           failures=0
           for ((i=0; i<${#args[@]}; i+=2)); do
@@ -101,6 +101,34 @@ jobs:
             echo "LanguageTool incomplete for $failures article(s); read per-article reports"
             exit 1
           fi
+      - name: Print findings for six frozen pilot articles
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path=Path('editorial-quality-reports/quality-report.json')
+          if not path.is_file():
+              print('PILOT_QUALITY_REPORT_MISSING')
+              raise SystemExit(0)
+          report=json.loads(path.read_text(encoding='utf-8'))
+          for row in report.get('results',[]):
+              slug=row.get('slug','')
+              if '-pilot-' not in slug or not slug.endswith('-20261120'):
+                  continue
+              grammar=Path('editorial-quality-reports') / ('languagetool-'+slug+'.json')
+              grammar_result=json.loads(grammar.read_text(encoding='utf-8')) if grammar.exists() else {'status':'missing'}
+              print('PILOT_QA_RESULT',json.dumps({
+                  'slug':slug,
+                  'characters':row.get('characters_without_whitespace'),
+                  'warnings':row.get('warnings'),
+                  'images':row.get('images'),
+                  'style':row.get('style'),
+                  'grammar':grammar_result,
+                  'rights_checked':report.get('image_rights_verified_by_this_check'),
+                  'facts_checked':report.get('science_facts_verified') if row.get('channel')=='science' else report.get('film_facts_verified') if row.get('channel')=='cinema' else None
+              },ensure_ascii=False))
+          PY
       - name: Verify three RSS feeds without publishing
         run: |
           python src/build.py
