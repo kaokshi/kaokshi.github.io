@@ -127,7 +127,8 @@ def decide(article, evidence):
             checked = facts.get("verified_claim_ids") or []
             if (not claims or not isinstance(claims, list) or
                     any(not isinstance(x, dict) or not x.get("id") or not x.get("source_urls") for x in claims)
-                    or any(not isinstance(x.get("source_urls"), list) for x in claims)\n                    or set(x["id"] for x in claims) != set(checked)):
+                    or any(not isinstance(x.get("source_urls"), list) for x in claims)
+                    or set(x["id"] for x in claims) != set(checked)):
                 blockers.append("science_claim_coverage_missing")
     if evidence.get("unresolved_critical_findings"):
         blockers.append("unresolved_critical_findings")
