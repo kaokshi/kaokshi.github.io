@@ -113,7 +113,7 @@ jobs:
       - name: Verify localhost UI responds
         run: |
           ok=0
-          for i in $(seq 1 40); do
+          for _ in $(seq 1 40); do
             if curl -fsS --max-time 3 http://127.0.0.1:5678/ -o /tmp/n8n-ui.html; then
               ok=1; break
             fi
@@ -137,7 +137,7 @@ jobs:
       - name: Verify localhost UI responds
         run: |
           ok=0
-          for i in $(seq 1 40); do
+          for _ in $(seq 1 40); do
             if curl -fsS --max-time 3 http://127.0.0.1:5000/ -o /tmp/change-ui.html; then
               ok=1; break
             fi
