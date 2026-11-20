@@ -19,7 +19,7 @@ SLUGS=[
 CANDIDATE_CLICHES=["стоит отметить","в современном мире","таким образом",
                   "погрузимся в","важно понимать"]
 
-def diagnostics(paragraphs, slug, min_words=36):
+def diagnostics(paragraphs, slug, min_words=24):
     notes=[]
     for line,para in enumerate(paragraphs,1):
         # No artificial complaints: flag only an actual long sentence/phrase.
