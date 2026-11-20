@@ -47,16 +47,13 @@ class AutoReleaseTests(unittest.TestCase):
                                   "fiction_not_presented_as_fact":True},
                        "style_warning_count":0,"image_warning_count":0,"source_warning_count":0}
 
-    def test_automatic_release_is_separate_from_user_approval(self):
+    def test_release_refused_until_ai_threshold_validated(self):
         result=release.prepare_release(self.article,self.evidence,
                     {"auto_release_enabled":True,"publication_enabled":False})
-        self.assertEqual(result["decision"]["disposition"],"automatic_release_candidate")
-        self.assertTrue(result["article"]["publication_authorized"])
-        self.assertTrue(result["settings"]["publication_enabled"])
-        self.assertEqual(result["article"]["release_mode"],"automatic_with_verified_evidence")
-        self.assertEqual(result["article"]["auto_release_record"]["article_sha256"],
-                         router.digest_article(result["article"]))
-        self.assertEqual(self.article["status"],"draft")
+        self.assertEqual(result["decision"]["disposition"],"send_for_owner_review")
+        self.assertIn("ai_auto_release_threshold_not_validated",result["decision"]["blockers"])
+        self.assertIsNone(result["article"])
+        self.assertIsNone(result["settings"])
 
     def test_disabled_feature_leaves_everything_unchanged(self):
         result=release.prepare_release(self.article,self.evidence,
@@ -71,20 +68,12 @@ class AutoReleaseTests(unittest.TestCase):
         self.assertIsNone(result["article"])
         self.assertFalse(result["decision"]["publication_authorized"])
 
-    def test_article_mutation_stops_rss_output_even_after_decision(self):
-        prepared=release.prepare_release(self.article,self.evidence,{"auto_release_enabled":True})
-        post=prepared["article"]
-        folder=self.root/"content/articles"
-        folder.mkdir(parents=True,exist_ok=True)
-        fp=folder/"legends-new-auto-test.json"
-        fp.write_text(json.dumps(post,ensure_ascii=False),encoding="utf-8")
-        with patch.object(build,"ARTICLES",folder),patch.object(build,"BASE",self.root),patch.object(build,"config",
-                  return_value=({"publication_enabled":True},"https://kaokshi.github.io")):
-            result=build.read_posts(datetime(2026,11,21,tzinfo=timezone.utc))
-            self.assertEqual(len(result),1)
-            post["body_html"]+="<p>Подменённый текст.</p>"
-            fp.write_text(json.dumps(post,ensure_ascii=False),encoding="utf-8")
-            self.assertEqual(build.read_posts(datetime(2026,11,21,tzinfo=timezone.utc)),[])
+    def test_release_cannot_enable_rss_without_calibration(self):
+        result=release.prepare_release(self.article,self.evidence,{"auto_release_enabled":True})
+        self.assertIsNone(result["article"])
+        self.assertIsNone(result["settings"])
+        self.assertFalse(result["decision"]["publication_authorized"])
+
 
 if __name__=="__main__":
     unittest.main()
