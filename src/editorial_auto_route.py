@@ -17,7 +17,7 @@ from editorial_ai_check import ROOT, CONTENT, extract_text
 ACTIVE_CHANNELS = frozenset({"legends", "science"})
 PAUSED_CHANNELS = frozenset({"cinema"})
 RISK_THRESHOLD = 20  # 0-100 editorial triage points; >20 -> human review.
-PRIMARY_AI_LIMIT = 25.0
+PRIMARY_AI_LIMIT = None  # No unvalidated AI-authorhip threshold; keep diagnostics only.
 REQUIRED_AI = frozenset({"rubert_v4", "modernbert", "lightgbm", "ai_accent_detector"})
 REQUIRED_QUALITY = frozenset({"language_tool", "vale", "links", "image_similarity", "rss_preview"})
 ALLOWED_RIGHTS = frozenset({"CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0", "PUBLIC_DOMAIN", "OWN_WORK", "LICENSED"})
@@ -103,9 +103,8 @@ def decide(article, evidence):
         main = ai_checks.get("rubert_v4", {})
         score = main.get("score_percent") if isinstance(main, dict) else None
     if not finite_percent(score):
-        blockers.append("rubert_missing")
-    elif score > PRIMARY_AI_LIMIT:
-        blockers.append("rubert_above_25")
+        blockers.append("rubert_diagnostic_missing")
+    # Raw ruBERT values never hard-block or require rewriting.
     quality = evidence.get("quality")
     if not valid_evidence(quality, dg):
         blockers.append("quality_report_missing_or_stale")
@@ -134,8 +133,8 @@ def decide(article, evidence):
         blockers.append("unresolved_critical_findings")
     # The composite index is a conservative workflow triage heuristic,
     # NOT a probabilistic blend of incompatible authorship detectors.
-    # Maximum components: ruBERT 15 + disagreement 10 + style 25 +
-    # image 25 + source 25 = 100 points.
+    # AI detector scores have no independently validated rewrite thresholds.
+    # Editorial quality warnings are kept separately; never mix them into AI probability.
     style = evidence.get("style_warning_count")
     image_warn = evidence.get("image_warning_count")
     source_warn = evidence.get("source_warning_count")
@@ -158,12 +157,15 @@ def decide(article, evidence):
     else:
         disagreement_points = 0
     components = {
-        "rubert_editorial_signal": round(min(15, 15 * score / PRIMARY_AI_LIMIT), 2) if finite_percent(score) else None,
-        "model_disagreement_advisory": disagreement_points,
+        "rubert_editorial_signal": 0,  # diagnostic only, never AI veto
+        "model_disagreement_advisory": 0,  # not independent evidence of AI
         "style_warnings": min(25, style * 3),
         "image_warnings": min(25, image_warn * 8),
         "source_warnings": min(25, source_warn * 8),
     }
+    # No calibrated AI threshold exists yet; a score-only decision cannot
+    # authorize unattended publication, even when all quality counts are zero.
+    blockers.append("ai_auto_release_threshold_not_validated")
     risk = (round(sum(components.values()), 2)
             if all(isinstance(v, (int, float)) for v in components.values()) else None)
     if risk is not None and risk > RISK_THRESHOLD:
@@ -173,13 +175,15 @@ def decide(article, evidence):
         "schema": "editorial-auto-route-v1", "slug": slug,
         "channel": channel, "article_sha256": dg,
         "risk_score": risk, "risk_components": components, "risk_scale": "0-100", "review_if_above": RISK_THRESHOLD,
-        "rubert_limit_percent": PRIMARY_AI_LIMIT,
+        "rubert_limit_percent": None,
+        "ai_rewrite_required_by_detector": False,
+        "ai_rewrite_threshold": None,
         "disposition": disposition,
         "blockers": sorted(set(blockers)),
         "publication_authorized": False,
         "notes": [
             "A low risk score is NOT scientific fact-checking, legal rights verification, or proof of human authorship.",
-            "ModernBERT and LightGBM score divergence is only a review-warning signal, not a calibrated truth probability. AI Accent remains a separate stylistic diagnostic.",
+            "All four AI detectors are diagnostics only. No validated AI score triggers rewriting or unattended publication.",
             "This module routes articles; a separate verified release workflow must check the decision before deployment.",
         ],
     }
