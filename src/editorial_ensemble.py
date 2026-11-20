@@ -12,7 +12,8 @@ import math
 from pathlib import Path
 
 FEATURES = ("rubert_v4", "modernbert", "lightgbm", "ai_accent_detector")
-ACTIVE = {"legends", "science"}
+SUPPORTED_GENRES = {"legends", "science", "cinema"}
+ACTIVE = {"legends", "science"}  # Cinema model can train; cinema release/revision routing remains paused.
 MIN_TRAIN_PER_CLASS = 20  # prototype training only, NOT validation criteria
 EPS = 1e-12
 
@@ -36,7 +37,7 @@ def checked_rows(rows):
     seen = set()
     result = []
     for row in rows:
-        if not isinstance(row, dict) or row.get("label") not in ("human", "ai") or row.get("channel") not in ACTIVE:
+        if not isinstance(row, dict) or row.get("label") not in ("human", "ai") or row.get("channel") not in SUPPORTED_GENRES:
             raise ValueError("Unlabelled or unsupported training example")
         if row.get("provenance_verified") is not True or row.get("four_detectors_completed") is not True:
             raise ValueError("Each sample needs VERIFIED provenance and four completed model runs")
@@ -192,7 +193,7 @@ def main():
     data=checked_rows(dataset)
     output=Path(args.out);output.mkdir(parents=True,exist_ok=True)
     report={}
-    for channel in sorted(ACTIVE):
+    for channel in sorted(SUPPORTED_GENRES):
         train=[r for r in data if r["channel"]==channel and r.get("split")=="train"]
         holdout=[r for r in data if r["channel"]==channel and r.get("split")=="holdout"]
         model=fit(train)
