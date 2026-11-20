@@ -151,7 +151,7 @@ def normalized_words(text):
 
 def plot_only(extract):
     """Isolate the film plot from encyclopedia metadata and critical reception."""
-    match = re.search(r"(?ms)^==\\s*(?:Сюжет|Plot)\\s*==\\s*(.*?)(?=^==\\s*[^=]|\\Z)", extract)
+    match = re.search(r"(?ms)^==\s*(?:Сюжет|Plot)\s*==\s*(.*?)(?=^==\s*[^=]|\Z)", extract)
     return match.group(1).strip() if match else ""
 
 
@@ -285,7 +285,8 @@ def analyze(path, use_imdb=False):
         "summary": {
             "sections_reviewed": len(detailed),
             "sections_with_textual_overlap": sum(x["status"] == "plot_textual_overlap" for x in detailed),
-            "sections_needing_review": sum(x["status"] == "requires_editor_review" for x in detailed),\n            "commentary_sections_excluded": sum(x["status"] == "commentary_not_suitable_for_plot_lookup" for x in detailed),
+            "sections_needing_review": sum(x["status"] == "requires_editor_review" for x in detailed),
+            "commentary_sections_excluded": sum(x["status"] == "commentary_not_suitable_for_plot_lookup" for x in detailed),
             "images_indexed": len(images),
             "images_with_metadata_warnings": sum(bool(x["warnings"]) for x in images),
             "film_plot_verified": False,
@@ -320,7 +321,8 @@ def main():
     file.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"report": str(file), "slug": report["article_slug"],
                       "wikipedia": report["wikipedia"].get("status"),
-                      "imdb": report["reference_catalog"]["imdb_lookup"].get("status"),\n                      "imdb_reason": report["reference_catalog"]["imdb_lookup"].get("reason"),
+                      "imdb": report["reference_catalog"]["imdb_lookup"].get("status"),
+                      "imdb_reason": report["reference_catalog"]["imdb_lookup"].get("reason"),
                       **report["summary"]}, ensure_ascii=False))
     # Incomplete external lookups are displayed as unavailable, never fabricated.
 
