@@ -35,9 +35,12 @@ def grammar_report(text, language_tool):
         return {"status": "error", "reason": type(exc).__name__}
 
 
-def check_draft(article, language_tool):
+def check_draft(article, language_tool, *, source_urls=()):
     text = extract_text(article["body_html"])
     draft = inspect_draft(article)
+    if source_urls:
+        draft["urls"] = sorted(set(draft["urls"]) | set(source_urls))
+        draft["warnings"] = [w for w in draft["warnings"] if w != "science_sources_not_recorded"]
     # Compare only with other drafts from the active channels.
     corpus = [p for p in CONTENT.glob("*.json")
               if p.name.startswith(("legends-", "science-"))]
