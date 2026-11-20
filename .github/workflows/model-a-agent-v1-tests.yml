@@ -1,0 +1,42 @@
+name: Model A and editorial agent v1 tests
+on:
+  pull_request:
+    paths:
+      - 'src/editorial_ai_check.py'
+      - 'src/editorial_agent_v1.py'
+      - 'src/editorial_auto_route.py'
+      - 'src/editorial_auto_release.py'
+      - 'src/build.py'
+      - 'tests/test_editorial_agent_v1.py'
+      - 'tests/test_editorial_ai_check.py'
+      - 'tests/test_editorial_auto_route.py'
+      - 'tests/test_editorial_auto_release.py'
+      - 'tests/test_build.py'
+      - 'config/ai_revision_policy.json'
+      - '.github/workflows/model-a-agent-v1-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Regression suite for model A and agent
+        run: |
+          python -m unittest             tests.test_editorial_agent_v1             tests.test_editorial_ai_check             tests.test_editorial_auto_route             tests.test_editorial_auto_release             tests.test_editorial_ai_revision_policy             tests.test_build -v
+      - name: Verify publication flag is not changed
+        run: |
+          python - <<'PY'
+          import json
+          a=json.load(open("config/site.json"))
+          b=json.load(open("config/ai_revision_policy.json"))
+          assert a["publication_enabled"] is False
+          assert b["publication_authorized"] is False
+          assert b["paused_channels"]==["cinema"]
+          print("Safe: no automatic publishing or cinema reactivation")
+          PY
