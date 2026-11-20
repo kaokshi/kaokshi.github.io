@@ -122,12 +122,12 @@ def stage_decision(article, evidence, ai_report=None, ai_policy=None):
                 review.append("Подтвердить оригинальность и художественный характер рассказа.")
 
     # A previous revision may invalidate every attached receipt; always verify digest.
-    if waiting:
-        disposition="awaiting_evidence"
-        next_stage="complete_github_checks"
-    elif revision:
+    if revision:
         disposition="needs_revision"
         next_stage="revise_draft_and_rerun_checks"
+    elif waiting:
+        disposition="awaiting_evidence"
+        next_stage="complete_github_checks"
     elif review:
         disposition="needs_editor_review"
         next_stage="editor_checks"
