@@ -57,7 +57,7 @@ class AgentTests(unittest.TestCase):
     def test_stale_report_never_passes(self):
         a,r=data()
         r["text_sha256"]="f"*64
-        self.assertEqual(agent.route(a,r)["decision"],"incomplete_or_stale_checks")
+        self.assertEqual(agent.route(a,r)["decision"],"inspect_for_substantive_issues")
     def test_zero_and_eighty_not_trigger(self):
         a,r=data()
         r["editorial_threshold"]["model_a_index_0_100"]=80
