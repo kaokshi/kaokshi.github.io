@@ -44,7 +44,8 @@ class AutoReleaseTests(unittest.TestCase):
                        "quality":{**base,"checks":{p:{"status":"completed"}
                                   for p in router.REQUIRED_QUALITY}},
                        "factual":{**base,"original_fiction_confirmed":True,
-                                  "fiction_not_presented_as_fact":True}}
+                                  "fiction_not_presented_as_fact":True},
+                       "style_warning_count":0,"image_warning_count":0,"source_warning_count":0}
 
     def test_automatic_release_is_separate_from_user_approval(self):
         result=release.prepare_release(self.article,self.evidence,
