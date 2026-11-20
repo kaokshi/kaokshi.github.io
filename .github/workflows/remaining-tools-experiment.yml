@@ -29,7 +29,7 @@ jobs:
           path: editorial-remaining-tests/*.json
           if-no-files-found: warn
   playwright:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -64,7 +64,7 @@ jobs:
           reviewdog_version: v0.20.3
       - name: Run reviewdog with local reporter only
         run: |
-          reviewdog -f=errorformat -efm='%f:%l:%c:%m' -reporter=local -fail-level=none < editorial-remaining-tests/diagnostics.txt > editorial-remaining-tests/reviewdog.txt
+          reviewdog -efm='%f:%l:%c:%m' -reporter=local -fail-level=none < editorial-remaining-tests/diagnostics.txt > editorial-remaining-tests/reviewdog.txt
           cat editorial-remaining-tests/reviewdog.txt
       - uses: actions/upload-artifact@v4
         if: always()
