@@ -8,7 +8,6 @@ import hashlib
 import json
 import subprocess
 import sys
-from pathlib import Path
 from editorial_ai_check import evaluate
 from editorial_export_manual_10 import BATCH, ROOT
 
