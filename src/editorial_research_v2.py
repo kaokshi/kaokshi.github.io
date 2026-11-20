@@ -22,7 +22,7 @@ from editorial_research_train import (
 )
 
 SEED=20261120
-COUNTS={"legends":(70,50), "science":(70,50), "cinema":(6,4)}
+COUNTS={"legends":(70,50), "science":(70,50), "cinema":(18,12)}
 PROVENANCE="publisher_claim_not_independently_verified"
 CORPUS_MOVIE_AI="seckur-tech/RuTextLLMDetect"
 CORPUS_MOVIE_HUMAN="MihaoModea/kinopoisk"
@@ -62,7 +62,7 @@ def film_pairs():
     return list(dedup.values())
 
 
-def film_independent_human(max_count=60):
+def film_independent_human(max_count=60, exclude_groups=frozenset()):
     """External movie review stress test; NO automatic human label verification."""
     from datasets import load_dataset
     data=load_dataset(CORPUS_MOVIE_HUMAN,split="train")
@@ -72,7 +72,7 @@ def film_independent_human(max_count=60):
         t=item.get("content")
         movie=str(item.get("movie_name") or "").strip()
         date=item.get("date")
-        if not movie or movie in groups or not isinstance(t,str):
+        if not movie or movie in groups or not isinstance(t,str) or hashlib.sha256(movie.encode()).hexdigest() in exclude_groups:
             continue
         # Published user reviews predate contemporary LLMs; not absolute
         # authorship proof, but much stronger than recent unlabeled posts.
@@ -127,7 +127,15 @@ def evaluate_pilots(genre, model):
 def run(genre,out):
     ntrain,nhold=COUNTS[genre]
     if genre=="cinema":
+        from editorial_cinema_pairs_augmented import generate_pairs
         pairs=film_pairs()
+        additional=generate_pairs(n=20)
+        existing_groups={p[0] for p in pairs}
+        for extra in additional:
+            if extra["pair_id"] in existing_groups:
+                raise RuntimeError("Cinema group collision between corpora")
+            existing_groups.add(extra["pair_id"])
+            pairs.append((extra["pair_id"],extra["human"],extra["ai"]))
     else:
         first,second=SOURCE_FILES[genre]
         pairs=extract_pairs(download_json(first),download_json(second))
@@ -168,7 +176,7 @@ def run(genre,out):
     stress=None
     if genre=="cinema":
         # External human material: used ONLY in holdout, never to fit the classifier.
-        source=film_independent_human()
+        source=film_independent_human(exclude_groups={p[0] for p in pairs})
         source_trainhash={r["text_sha256"] for r in train}
         stress_rows=[]
         for key,t in source:
@@ -184,8 +192,17 @@ def run(genre,out):
         "schema":"four-detector-genre-training-v2",
         "genre":genre,
         "status":"research_trained_unvalidated",
-        "paired_source":"seckur-tech/RuTextLLMDetect public cinema demo" if genre=="cinema" else SOURCE_REPO,
+        "paired_source":"10 public demo paired movie reviews plus 20 new generated dated-movie pairs" if genre=="cinema" else SOURCE_REPO,
         "pair_count_available":len(pairs),
+        "cinema_pair_provenance": {
+            "public_cinema_demo_pairs": 10,
+            "self_generated_known_model_pairs": 20,
+            "generator": "ai-forever/rugpt3small_based_on_gpt2",
+            "human_source": "MihaoModea/kinopoisk pre-2013 reviews",
+            "human_label_independently_verified": False,
+            "machine_label_from_instrumented_generator": True,
+            "film_review_not_long_recap": True,
+        } if genre=="cinema" else None,
         "n_train":len(train),"n_holdout":len(holdout),
         "train_pair_groups":len(groups["train"]),"holdout_pair_groups":len(groups["holdout"]),
         "metrics":stats,
