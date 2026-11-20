@@ -77,13 +77,13 @@ class CheckerTests(unittest.TestCase):
         self.assertEqual(x["model_a_index_0_100"],80)
         self.assertFalse(x["exceeds_owner_review_threshold"])
         self.assertEqual(x["checks"]["ai_accent_detector"]["index_0_100"],12)
-    def test_above_80_is_not_rounded_back_to_threshold(self):
+    def test_above_85_is_not_rounded_back_to_threshold(self):
         results = {name: {"status": "completed", "data": {"score_percent": score}}
-                   for name, score in zip(ai.MODEL_A, (70, 80, 90.0001))}
+                   for name, score in zip(ai.MODEL_A, (80, 85, 90.0001))}
         results["ai_accent_detector"] = {"status": "completed", "data": {"ai_accent_score": 0.11}}
         review = ai.threshold_review(results)
         self.assertTrue(review["exceeds_owner_review_threshold"])
-        self.assertGreater(review["model_a_index_0_100"], 80)
+        self.assertGreater(review["model_a_index_0_100"], 85)
 
     def test_failed_model_cannot_average(self):
         results={}
@@ -193,7 +193,7 @@ class RevisionTests(unittest.TestCase):
         revision.run_case(self.case, self.report, lambda _: None)
         self.assertEqual(len(self.case["versions"]), 1)
         self.assertEqual(self.case["decision"], "owner_review_pending")
-        self.assertIn("model_a_editorial_review", self.case["handoff"]["reasons"])
+        self.assertIn("model_a_editorial_review_advisory", self.case["handoff"]["reasons"])
 
     def test_cli_skips_paused_channel_without_creating_case(self):
         with tempfile.TemporaryDirectory() as temp:
