@@ -195,6 +195,13 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
                                         "score_is_uncalibrated_advisory_only"])
                 save(case)
                 return
+            if version["stage"] == "agent" and abs(delta) <= 1e-8:
+                # A plateau ends score-trend revisions. ChatGPT receives the
+                # current text for quality review; the score alone proves nothing.
+                handoff(case, "chatgpt", ["model_a_plateau_after_agent_revision",
+                                         "score_trend_stopped"])
+                save(case)
+                return
         reasons = list(report["findings"])
         if report["grammar"]["issues"]:
             reasons.append("grammar_review")
