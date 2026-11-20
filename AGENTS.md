@@ -24,6 +24,10 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 
 - Generate owner/ChatGPT handoff material only via `src/editorial_owner_packet.py` to a private path outside GitHub; verify per-version SHA-256 and record `transport_status=not_connected`. The packet does not send itself. Do not upload article text, case histories, credentials, or image assets to public Actions logs or artifacts. See `docs/EDITORIAL_OWNER_PACKET.md`.
 
+## Rights-aware image candidate research
+
+- For factual images, use `src/editorial_commons_images.py` to discover Wikimedia Commons file-page candidates and **claimed**, not verified, license/attribution fields. Do not auto-add results to published articles; both subject relevance and license provenance must be independently inspected. Candidate records always default `license_verified=false` and `editor_approved=false`. See `docs/EDITORIAL_COMMONS_IMAGES.md`.
+
 ## Self-learning feature (requested 20 November 2026)
 
 Self-learning is **feedback-driven improvement**, not uncontrolled online model training. Configuration: `config/agent_learning.json`.
