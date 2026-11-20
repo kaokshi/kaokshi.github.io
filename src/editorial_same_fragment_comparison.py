@@ -39,9 +39,9 @@ def main():
         raise RuntimeError("Input differs from proven Sapling web-form text! "+digest)
     model_path=Path(a.models)/filename
     model=json.loads(model_path.read_text("utf-8"))
-    if model.get("genre")!=a.genre or model.get("status")!="research_only_unvalidated":
+    if model.get("genre")!=a.genre or model.get("status") not in {"research_only_unvalidated","research_only_publisher_labels_unverified"}:
         raise RuntimeError("Invalid research model")
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
         sample=Path(tmp)/"article.json"
         sample.write_text(json.dumps({
             "slug":slug,"channel":a.genre,"body_html":html.escape(fragment)
