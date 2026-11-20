@@ -57,7 +57,7 @@ class AgentTests(unittest.TestCase):
     def test_stale_report_never_passes(self):
         a,r=data()
         r["text_sha256"]="f"*64
-        self.assertEqual(agent.route(a,r)["decision"],"inspect_for_substantive_issues")
+        self.assertEqual(agent.route(a,r)["decision"],"incomplete_or_stale_checks")
     def test_zero_and_eighty_not_trigger(self):
         a,r=data()
         r["editorial_threshold"]["model_a_index_0_100"]=80
@@ -65,7 +65,7 @@ class AgentTests(unittest.TestCase):
     def test_cinema_active_for_review(self):
         a,r=data()
         a["channel"]="cinema"
-        self.assertEqual(agent.route(a,r)["decision"],"incomplete_or_stale_checks")
+        self.assertEqual(agent.route(a,r)["decision"],"inspect_for_substantive_issues")
 
 class CheckerTests(unittest.TestCase):
     def test_model_a_mean_exact_80(self):
