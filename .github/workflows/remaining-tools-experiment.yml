@@ -1,0 +1,100 @@
+name: EXPERIMENT - remaining editorial tools (no publication)
+on:
+  pull_request:
+    paths:
+      - 'experiments/remaining_smoke.py'
+      - '.github/workflows/remaining-tools-experiment.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  clip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU-only CLIP requirements
+        run: |
+          python -m pip install 'torch==2.4.1' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'open_clip_torch==2.32.0' 'Pillow'
+      - name: Compare three movie images to description prompts without video
+        run: python experiments/remaining_smoke.py CLIP
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clip-smoke
+          path: editorial-remaining-tests/*.json
+          if-no-files-found: warn
+  playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser test runtime
+        run: |
+          python -m pip install 'playwright==1.55.0'
+          python -m playwright install --with-deps chromium
+      - name: Check automated interaction on local non-public test form
+        run: python experiments/remaining_smoke.py Playwright
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-smoke
+          path: editorial-remaining-tests/*.json
+          if-no-files-found: warn
+  reviewdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create sample line diagnostics
+        run: |
+          mkdir -p editorial-remaining-tests
+          printf 'editorial-remaining-tests/example.md:1:5:Предложение слишком длинное (демонстрационная запись)\n' > editorial-remaining-tests/diagnostics.txt
+          printf 'Тест редакторской подсказки\n' > editorial-remaining-tests/example.md
+      - name: Verify reviewdog parsing without posting PR comments
+        uses: reviewdog/action-setup@v1
+        with:
+          reviewdog_version: v0.20.3
+      - name: Run reviewdog with local reporter only
+        run: |
+          reviewdog -f=errorformat -efm='%f:%l:%c:%m' -reporter=local -fail-level=none < editorial-remaining-tests/diagnostics.txt > editorial-remaining-tests/reviewdog.txt
+          cat editorial-remaining-tests/reviewdog.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reviewdog-smoke
+          path: editorial-remaining-tests/
+          if-no-files-found: warn
+  service-feasibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe service dependencies only, no server startup or credentials
+        run: |
+          mkdir -p editorial-remaining-tests
+          python - <<'PY'
+          import json, pathlib
+          result={"services":{
+            "n8n":{"status":"architecture_assessment_only","persistent_host_required":True,
+                   "test":"Will not enable unapproved external workflows or start persistent cloud services."},
+            "changedetection.io":{"status":"architecture_assessment_only","persistent_host_required":True,
+                   "test":"Cannot guarantee continuous monitoring in a short-lived GitHub Actions job."},
+            "peter-evans/create-pull-request":{"status":"permission_assessment_only","write_access_required":True,
+                   "test":"Use the human-created draft PR as proof of workflow review, not as proof that this Action ran."}},
+            "publication_authorized":False}
+          pathlib.Path("editorial-remaining-tests/services.json").write_text(json.dumps(result,indent=2))
+          print(json.dumps(result))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: service-feasibility
+          path: editorial-remaining-tests/services.json
