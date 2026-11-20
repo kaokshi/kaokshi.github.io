@@ -277,20 +277,20 @@ jobs:
             local_dir=".rubert-upstream/models")
           PY
       - name: Run real four first-party AI tools on original legends draft
-        run: python src/editorial_ai_check.py --slug ${ARTICLE_SLUG}
+        run: python src/editorial_ai_check.py --slug "$ARTICLE_SLUG"
       - name: Run existing structured editorial style and image checks
-        run: python src/editorial_quality.py --slug ${ARTICLE_SLUG}
+        run: python src/editorial_quality.py --slug "$ARTICLE_SLUG"
       - name: Run local LanguageTool for Russian
         continue-on-error: true
         run: |
-          python src/editorial_language_tool.py --slug ${ARTICLE_SLUG} --output editorial-quality-reports/languagetool-${ARTICLE_SLUG}.json
+          python src/editorial_language_tool.py --slug "$ARTICLE_SLUG" --output "editorial-quality-reports/languagetool-${ARTICLE_SLUG}.json"
       - name: Run existing Vale lint if installed
         continue-on-error: true
         run: |
           python src/editorial_export_md.py
           curl -fsSL --retry 2 -o /tmp/vale.tgz https://github.com/errata-ai/vale/releases/download/v3.13.0/vale_3.13.0_Linux_64-bit.tar.gz
           tar -xf /tmp/vale.tgz -C /tmp vale
-          /tmp/vale --output=JSON editorial-quality-reports/vale-input/${ARTICLE_SLUG}.md > editorial-quality-reports/vale.json
+          /tmp/vale --output=JSON "editorial-quality-reports/vale-input/${ARTICLE_SLUG}.md" > editorial-quality-reports/vale.json
       - name: Build and validate RSS locally with publication disabled
         run: |
           python src/build.py
@@ -310,10 +310,10 @@ jobs:
       - name: Collect only completed real diagnostics in traceable receipt
         env:
           GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: python src/editorial_collect_receipts.py --slug ${ARTICLE_SLUG}
+        run: python src/editorial_collect_receipts.py --slug "$ARTICLE_SLUG"
       - name: Route real material to rework, editor or next stage
         run: |
-          python src/editorial_stage_gate.py --slug ${ARTICLE_SLUG}
+          python src/editorial_stage_gate.py --slug "$ARTICLE_SLUG"
           python - <<'PY'
           from pathlib import Path
           import json,os
