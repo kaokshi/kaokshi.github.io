@@ -19,15 +19,15 @@ class Tests(unittest.TestCase):
         }
 
     def test_current_policy_never_rewrites_solely_from_model_percent(self):
-        for ch in ("legends","science"):
+        for ch in ("legends","science","cinema"):
             result=module.decide_revision(ch,self.report,self.policy)
             self.assertEqual(result["decision"],"diagnostic_only")
             self.assertFalse(result["revision_required"])
             self.assertIsNone(result["threshold"])
 
-    def test_paused_channel_not_excluded_from_future_policy(self):
-        self.assertEqual(module.decide_revision("cinema",self.report,self.policy)["decision"],"not_active")
-        self.assertIn("cinema",self.policy["paused_channels"])
+    def test_cinema_enabled_for_diagnostic_checks_only(self):
+        self.assertEqual(module.decide_revision("cinema",self.report,self.policy)["decision"],"diagnostic_only")
+        self.assertEqual(self.policy["paused_channels"],[])
 
     def test_incomplete_tools_do_not_get_fake_ai_rewrite_verdict(self):
         a=copy.deepcopy(self.report)
