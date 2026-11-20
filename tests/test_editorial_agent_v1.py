@@ -62,10 +62,10 @@ class AgentTests(unittest.TestCase):
         a,r=data()
         r["editorial_threshold"]["model_a_index_0_100"]=80
         self.assertEqual(agent.route(a,r)["decision"],"other_editorial_checks_required")
-    def test_paused_cinema(self):
+    def test_cinema_active_for_review(self):
         a,r=data()
         a["channel"]="cinema"
-        self.assertEqual(agent.route(a,r)["decision"],"paused_channel")
+        self.assertEqual(agent.route(a,r)["decision"],"incomplete_or_stale_checks")
 
 class CheckerTests(unittest.TestCase):
     def test_model_a_mean_exact_80(self):
@@ -195,10 +195,10 @@ class RevisionTests(unittest.TestCase):
         self.assertEqual(self.case["decision"], "owner_review_pending")
         self.assertIn("model_a_editorial_review_advisory", self.case["handoff"]["reasons"])
 
-    def test_cli_skips_paused_channel_without_creating_case(self):
+    def test_cli_skips_unknown_channel_without_creating_case(self):
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp) / "cinema.json"
-            source.write_text(json.dumps({**self.draft, "channel": "cinema"}), encoding="utf-8")
+            source.write_text(json.dumps({**self.draft, "channel": "unlisted"}), encoding="utf-8")
             output = Path(temp) / "case"
             with patch.object(sys, "argv", ["revision", "--article", str(source), "--case-dir", str(output)]):
                 revision.main()
