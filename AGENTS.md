@@ -10,6 +10,12 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 - The current diagnostic Model A is `modernbert + lightgbm + transformer`; the reported index is the arithmetic mean of three 0–100 classifier scores. `ai_accent_detector` remains a separate style score. The **owner-recommended nonbinding review flag** is strictly >85 on this **uncalibrated index**, NOT 80% of AI authorship. Never claim detector scores prove origin or optimize prose to evade classifiers.
 - Up to two genuine editorial-agent revisions, followed by at most one ChatGPT revision. After a revision, a rising Model A index prepares a ChatGPT handoff; a plateau stops further score-trend editing. Decreases only justify continuing when concrete editorial defects remain. Bounded local failures also escalate to ChatGPT. The ChatGPT transport is not connected. Every attempt needs an actual text change, immutable SHA-256, a documented substantive issue, and complete fresh checks. If unresolved, escalate to the owner. Do not falsely claim ChatGPT handoff or user delivery: these transports are not yet fully integrated.
 
+## Russian text quality and reader interest
+
+- Use `src/editorial_reader_interest.py` on the exact SHA-256 text version. With optional `ruts` installed, this provides real readability and lexical diversity metrics; missing dependency is `not_installed`, never a fake numeric score. Advisory findings in `reader_interest` do NOT block releases, count as confirmed defects, or trigger detector-driven rewriting.
+- Follow custom editorial prompts in `src/editorial_semantic.py` to check an engaging opening, pacing, concrete details, unnecessary repetition, and natural Russian. Cite exact problematic snippets before proposing a substantive edit, respecting the 2+1 limits.
+- `ru-text` and `russian-editor-skill` are third-party instruction skills. The project currently references them as guides and implements *its own* narrow rules; it does not claim they were installed. Their optional external installation requires separate rights/instruction review. See `docs/EDITORIAL_READER_INTEREST.md`.
+
 ## Self-learning feature (requested 20 November 2026)
 
 Self-learning is **feedback-driven improvement**, not uncontrolled online model training. Configuration: `config/agent_learning.json`.
