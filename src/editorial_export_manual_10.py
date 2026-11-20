@@ -38,9 +38,9 @@ BATCH={
 TITLES={"legends":"Легенды тёмных улиц","science":"За гранью очевидного"}
 
 def clean_paragraphs(raw):
-    pieces=re.findall(r"<p(?:\\s[^>]*)?>(.*?)</p>",raw,flags=re.IGNORECASE|re.DOTALL)
+    pieces=re.findall(r"<p(?:\s[^>]*)?>(.*?)</p>",raw,flags=re.IGNORECASE|re.DOTALL)
     if not pieces:
-        return [p.strip() for p in re.split(r"\\n+",extract_text(raw)) if p.strip()]
+        return [p.strip() for p in re.split(r"\n+",extract_text(raw)) if p.strip()]
     return [extract_text(part) for part in pieces if extract_text(part).strip()]
 
 def make_one(channel,slug,place):
@@ -52,8 +52,8 @@ def make_one(channel,slug,place):
     if a.get("status")!="draft":
         raise ValueError("Expected owner-review draft")
     paras=clean_paragraphs(a.get("body_html",""))
-    body="\\n".join(paras)
-    n=len(re.sub(r"\\s","",body))
+    body="\n".join(paras)
+    n=len(re.sub(r"\s","",body))
     if n<3000:
         raise ValueError(f"{slug} too short: {n}")
     doc=Document()
@@ -78,7 +78,7 @@ def make_one(channel,slug,place):
     place.parent.mkdir(parents=True,exist_ok=True)
     doc.save(place)
     loaded=Document(place)
-    content="\\n".join(p.text for p in loaded.paragraphs)
+    content="\n".join(p.text for p in loaded.paragraphs)
     for para in paras:
         if para not in content:
             raise ValueError("Word conversion dropped text: "+slug)
@@ -106,27 +106,27 @@ def main():
         for i,slug in enumerate(slugs,start=1):
             path=OUTPUT/"DOCX"/TITLES[channel]/f"{i:02d}_{slug}.docx"
             manifest["articles"].append(make_one(channel,slug,path))
-    (OUTPUT/"MANIFEST.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+"\\n",encoding="utf-8")
+    (OUTPUT/"MANIFEST.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     guide=(
-      "ПАКЕТ ДЛЯ РУЧНОГО ЗАПУСКА ДВУХ КАНАЛОВ ЯНДЕКС ДЗЕН\\n"
-      "Десять существующих редакционных черновиков: пять мистических + пять научных.\\n"
-      "Все тексты полные (от 3000 символов без пробелов), документы Word с проверкой сохранения абзацев.\\n\\n"
-      "Перед публикацией каждой статьи обязательно:\\n"
-      "1. Прочитать и одобрить текст, проверить непротиворечивость и заголовок.\\n"
-      "2. Для научпопа проверить числовые и научные утверждения по первичным источникам.\\n"
-      "3. Самостоятельно подобрать и проверить права на изображения; в текущих DOCX фотографии НЕ приложены.\\n"
-      "4. Убедиться, что выбран правильный канал, оформление и ссылка на подписку.\\n"
-      "5. Опубликовать вручную в Дзене; записать URL и дату в журнал запуска.\\n"
-      "6. Не включать автоматический выпуск или RSS в GitHub.\\n\\n"
-      "МИНИ-ЖУРНАЛ: manual-publication-log.csv предназначен для заполнения владельцем.\\n"
-      "Показатели ИИ-детекторов здесь не придуманы: финальные показатели только из отдельных успешных проверок тех же SHA.\\n"
+      "ПАКЕТ ДЛЯ РУЧНОГО ЗАПУСКА ДВУХ КАНАЛОВ ЯНДЕКС ДЗЕН\n"
+      "Десять существующих редакционных черновиков: пять мистических + пять научных.\n"
+      "Все тексты полные (от 3000 символов без пробелов), документы Word с проверкой сохранения абзацев.\n\n"
+      "Перед публикацией каждой статьи обязательно:\n"
+      "1. Прочитать и одобрить текст, проверить непротиворечивость и заголовок.\n"
+      "2. Для научпопа проверить числовые и научные утверждения по первичным источникам.\n"
+      "3. Самостоятельно подобрать и проверить права на изображения; в текущих DOCX фотографии НЕ приложены.\n"
+      "4. Убедиться, что выбран правильный канал, оформление и ссылка на подписку.\n"
+      "5. Опубликовать вручную в Дзене; записать URL и дату в журнал запуска.\n"
+      "6. Не включать автоматический выпуск или RSS в GitHub.\n\n"
+      "МИНИ-ЖУРНАЛ: manual-publication-log.csv предназначен для заполнения владельцем.\n"
+      "Показатели ИИ-детекторов здесь не придуманы: финальные показатели только из отдельных успешных проверок тех же SHA.\n"
     )
     (OUTPUT/"README.txt").write_text(guide,encoding="utf-8")
     rows=["channel,slug,date_published_msk,zen_article_url,owner_approved,images_rights_checked,science_facts_checked,notes"]
     for ch,slugs in BATCH.items():
         for slug in slugs:
             rows.append(f"{ch},{slug},,,,,,")
-    (OUTPUT/"manual-publication-log.csv").write_text("\\n".join(rows)+"\\n",encoding="utf-8")
+    (OUTPUT/"manual-publication-log.csv").write_text("\n".join(rows)+"\n",encoding="utf-8")
     final=OUTPUT/"zen_10_manual_launch_review_DOCX.zip"
     with zipfile.ZipFile(final,"w",compression=zipfile.ZIP_DEFLATED,compresslevel=7) as archive:
         for p in sorted((OUTPUT/"DOCX").rglob("*.docx")):
