@@ -95,16 +95,15 @@ def read_posts(now):
             and isinstance(ch.get("provider"), str)
             and ch.get("status") == "completed"
         }
-        required = {"rubert_v4", "modernbert", "lightgbm", "ai_accent_detector"}
+        required = {"modernbert", "lightgbm", "transformer", "ai_accent_detector"}
         if not required.issubset(by_provider):
             continue
         if any(not isinstance(by_provider[k].get("report_ref"), str)
                or not by_provider[k]["report_ref"].strip() for k in required):
             continue
-        rubert_score = by_provider["rubert_v4"].get("score_percent")
-        if (isinstance(rubert_score, bool)
-                or not isinstance(rubert_score, (int, float))
-                or not 0 <= rubert_score <= 25):
+        # Model A >80 flags editorial review; no legacy ruBERT <=25 release cutoff.
+        # Publication is still separately forbidden before an explicit project launch.
+        if post.get("ai_editorial_escalation_unresolved") is True:
             continue
         if len(re.sub(r"\s", "", strip_tags(post.get("body_html", "")))) < 3000:
             continue
