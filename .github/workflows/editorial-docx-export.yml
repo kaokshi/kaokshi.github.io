@@ -1,0 +1,50 @@
+name: Export six editorial DOCX articles ZIP (no publishing)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/editorial_export_docx_zip.py'
+      - '.github/workflows/editorial-docx-export.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python Word writer
+        run: python -m pip install python-docx==1.2.0
+      - name: Generate and inspect ZIP of six Word documents
+        run: |
+          python src/editorial_export_docx_zip.py
+          python - <<'PY'
+          import zipfile, json
+          from pathlib import Path
+          from docx import Document
+          root=Path('editorial-word-export')
+          path=root/'six_articles_editorial_drafts_DOCX.zip'
+          with zipfile.ZipFile(path) as z:
+              assert z.testzip() is None
+              names=[n for n in z.namelist() if n.endswith('.docx')]
+              assert len(names)==6
+          for name in names:
+              doc=Document(root/name)
+              assert len(doc.paragraphs)>=8
+              print('WORD_VALID',name,'paragraphs',len(doc.paragraphs))
+          manifest=json.loads((root/'MANIFEST.json').read_text('utf-8'))
+          assert len(manifest['articles'])==6
+          assert manifest['status']=='EDITORIAL_DRAFTS_NOT_PUBLICATION_READY'
+          print('ZIP_VALID',path.stat().st_size,'bytes')
+          PY
+      - name: Upload owner-review ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Six-Articles-DOCX-ZIP
+          path: editorial-word-export/six_articles_editorial_drafts_DOCX.zip
+          retention-days: 30
+          if-no-files-found: error
