@@ -36,6 +36,15 @@ jobs:
           from pathlib import Path
           report=json.loads((Path(os.environ['RUNNER_TEMP'])/'ruff-rdjson.json').read_text())
           print("RUFF_DIAGNOSTICS",len(report.get('diagnostics',[])))
+          for diagnostic in report.get('diagnostics',[]):
+              loc=diagnostic.get('location') or {}
+              print("RUFF_FINDING", json.dumps({
+                  "path":diagnostic.get("code",{}).get("url") if isinstance(diagnostic.get("code"),dict) else None,
+                  "message":diagnostic.get("message"),
+                  "rule":diagnostic.get("code",{}).get("value") if isinstance(diagnostic.get("code"),dict) else str(diagnostic.get("code")),
+                  "source":diagnostic.get("source",{}).get("name") if isinstance(diagnostic.get("source"),dict) else None,
+                  "location":loc
+              },ensure_ascii=False))
           PY
       - name: Install reviewdog
         if: github.event_name == 'pull_request'
