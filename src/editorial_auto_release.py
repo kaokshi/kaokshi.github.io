@@ -43,12 +43,9 @@ def prepare_release(article, evidence, settings):
             "released_at": datetime.now(timezone.utc).isoformat(),
         },
         "ai_checks": [
-            {"provider": provider,
-             "status": "completed",
-             "report_ref": evidence["ai"]["report_ref"],
-             **({"score_percent": evidence["ai"]["checks"][provider]["score_percent"]}
-                if provider == "rubert_v4" else {})}
-            for provider in ("rubert_v4", "modernbert", "lightgbm", "ai_accent_detector")
+            {"provider": provider, "status": "completed",
+             "report_ref": evidence["ai"]["report_ref"]}
+            for provider in ("modernbert", "lightgbm", "transformer", "ai_accent_detector")
         ],
     })
     # If publication is currently off, turn it on in the same verified release
