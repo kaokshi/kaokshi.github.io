@@ -96,5 +96,25 @@
     "confirmed_editorial_problems_trigger_two_agent_then_one_chatgpt_revision": true,
     "keep_unvalidated_thresholds_disabled": true,
     "no_publication_before_explicit_launch": true
+  },
+  "optional_detector_trend_experiment": {
+    "schema": "editorial-detector-trend-experiment-v1",
+    "enabled_after_genre_training": true,
+    "current_live_trigger": false,
+    "starting_action": "one_small_substantive_quality_improvement_and_fresh_four_detector_checks",
+    "comparison": "compare_each_detector_with_its_own_previous_result_only; no false averaged AI percentage",
+    "continue_only_if": "verified_text_quality_not_worse_and_at_least_one_comparable_detector_score_decreases_without_other_scores_worsening",
+    "stop_if": "no_comparable_score_improvement_or_any_relevant_score_worsens_or_any_quality_check_fails",
+    "preserve_original_and_each_candidate_sha256": true,
+    "repeat_all_editorial_checks_after_changes": true,
+    "count_changes_against_agent_revision_limit": true,
+    "agent_revision_limit": 2,
+    "assistant_revision_limit": 1,
+    "never_exceed_existing_escalation_limits": true,
+    "no_unbounded_edit_loop": true,
+    "model_score_not_proof_of_authorship": true,
+    "no_claim_of_bypassing_zen_detection": true,
+    "may_not_delay_owner_handoff_or_required_review": true,
+    "no_publication_before_launch": true
   }
 }
