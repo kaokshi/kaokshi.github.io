@@ -44,7 +44,8 @@ jobs:
       - name: Install browser test runtime
         run: |
           python -m pip install 'playwright==1.55.0'
-          python -m playwright install --with-deps chromium
+          command -v google-chrome
+          google-chrome --version
       - name: Check automated interaction on local non-public test form
         run: python experiments/remaining_smoke.py Playwright
       - uses: actions/upload-artifact@v4
