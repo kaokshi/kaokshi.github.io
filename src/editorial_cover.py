@@ -66,6 +66,14 @@ def vision(article, image):
     return json.loads(reply["message"]["content"])
 
 
+def eligible_cover(rating, size):
+    if (not matches_schema(rating, ASSESSMENT) or not rating["reason"].strip()
+            or any(not 0 <= rating[k] <= 5 for k in CRITERIA)):
+        raise ValueError("Invalid visual assessment")
+    return (min(size) >= 600 and not rating["defect"].strip()
+            and min(rating[k] for k in ("topic", "genre", "thumbnail", "crop", "sharpness")) >= 4)
+
+
 def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None):
     from PIL import Image, ImageOps
     body = parse_sections(article["body_html"])
@@ -91,14 +99,10 @@ def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None):
         if any(r["id"] == ident or r["sha256"] == digest for r in records):
             raise ValueError("Duplicate illustration")
         rating = assess(article, image)
-        if (not matches_schema(rating, ASSESSMENT) or not rating["reason"].strip()
-                or any(not 0 <= rating[k] <= 5 for k in CRITERIA)):
-            raise ValueError("Invalid visual assessment")
-        eligible = (min(image.size) >= 600 and not rating["defect"].strip()
-                    and min(rating[k] for k in ("topic", "genre", "thumbnail", "crop", "sharpness")) >= 4)
+        eligible = eligible_cover(rating, image.size)
         records.append({"id": ident, "file": name, "source": source, "rights_verified": True,
                         "original_position": i, "sha256": digest, "assessment": rating,
-                        "eligible": eligible, "score": sum(rating[k] for k in CRITERIA)})
+                        "size": list(image.size), "eligible": eligible, "score": sum(rating[k] for k in CRITERIA)})
     candidates = [r for r in records if r["eligible"]]
     if checkpoint:
         checkpoint({"status": "assessed", "article_sha256": identity(article), "images": records})
@@ -142,6 +146,8 @@ def verify_cover(article, root):
         raise ValueError("Duplicate illustration identifier")
     for i, (row, figure) in enumerate(zip(rows, figures)):
         if (row["position"] != i or row["is_cover"] is not (i == 0)
+                or row["eligible"] is not eligible_cover(row["assessment"], row["size"])
+                or row["score"] != sum(row["assessment"][k] for k in CRITERIA)
                 or figure.get("data-editorial-image") != row["id"]
                 or row.get("rights_verified") is not True or not row.get("source")
                 or len(figure) != 1 or figure[0].tag != "img"
@@ -159,5 +165,8 @@ if __name__ == "__main__":
     for arg in ("article", "manifest", "asset-root", "output"):
         parser.add_argument("--" + arg, type=Path, required=True)
     args = parser.parse_args()
+    dest = private_path(args.output)
+    if dest in (args.article.resolve(), args.manifest.resolve()):
+        parser.error("Choose a separate output for the assembled draft")
     assembled = cover_selection(json.loads(args.article.read_text()), json.loads(args.manifest.read_text()), args.asset_root)
-    save_case(private_path(args.output), assembled)
+    save_case(dest, assembled)
