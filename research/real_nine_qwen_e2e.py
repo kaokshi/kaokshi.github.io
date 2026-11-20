@@ -17,6 +17,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 from editorial_nine_draft_queue import execute, validate_plan, CHANNELS
 from editorial_writer import private_path
+from editorial_encrypted_review import save_encrypted_review
 
 # Existing films, genre-specific mysteries, scientific topics searchable in Europe PMC.
 TASKS=[
@@ -82,6 +83,21 @@ def main():
     except (OSError,ValueError,KeyError,TypeError) as exc:
         meta.update(status="framework_error",error_type=type(exc).__name__,
                     rows=[],generated=0,valid_length=0,complete_automated_checks=0)
+    recipient=os.environ.get("ZEN_REVIEW_PUBLIC_KEY_HEX","").strip()
+    if recipient and meta.get("rows"):
+        try:
+            # Encrypted artifact only: no unencrypted article ZIP or logs uploaded.
+            protected=Path(os.environ["RUNNER_TEMP"])/"zen-real-nine-owner-review.enc"
+            receipt=save_encrypted_review(root,results["tasks"],protected,recipient)
+            meta["owner_review_archive"]=receipt
+        except (OSError,ValueError,TypeError,KeyError) as exc:
+            meta["owner_review_archive"]={"status":"encryption_failed",
+                                          "reason":type(exc).__name__,
+                                          "transport":"not_connected"}
+    else:
+        meta["owner_review_archive"]={"status":"not_created",
+             "reason":"recipient_key_not_configured_or_no_article_rows",
+             "transport":"not_connected"}
     meta["duration_seconds"]=round(monotonic()-start,2)
     path=Path(os.environ["RUNNER_TEMP"])/"zen-real-nine-public-metadata.json"
     path.write_text(json.dumps(meta,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
