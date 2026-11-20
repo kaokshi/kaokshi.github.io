@@ -71,6 +71,31 @@ jobs:
           else
             python src/editorial_ai_check.py
           fi
+      - name: Route Model A diagnostics to editorial agent (read-only)
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, subprocess, sys
+          from pathlib import Path
+          for report in sorted(Path("editorial-check-reports").glob("*.json")):
+              if report.name == "index.json":
+                  continue
+              article = Path("content/articles") / report.name
+              if not article.is_file():
+                  print("Missing original draft:", article)
+                  continue
+              subprocess.run([sys.executable,"src/editorial_agent_v1.py",
+                  "--article",str(article),"--ai-report",str(report),
+                  "--output","editorial-agent-routing"],check=True)
+          PY
+      - name: Preserve automatic agent routing (no publication)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-agent-routing-v1
+          path: editorial-agent-routing/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Print numeric results for the trial article
         if: always()
         run: |
