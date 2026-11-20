@@ -25,7 +25,7 @@ SEED=20261120
 COUNTS={"legends":(70,50), "science":(70,50), "cinema":(6,4)}
 PROVENANCE="publisher_claim_not_independently_verified"
 CORPUS_MOVIE_AI="seckur-tech/RuTextLLMDetect"
-CORPUS_MOVIE_HUMAN="yeshpanovrustem/100k_movie_reviews_from_kz"
+CORPUS_MOVIE_HUMAN="MihaoModea/kinopoisk"
 CINEMA_SLUGS=("cinema-pilot-inception-20261120","cinema-pilot-shutter-island-20261120")
 
 
@@ -62,16 +62,21 @@ def film_pairs():
     return list(dedup.values())
 
 
-def film_independent_human(max_count=40):
+def film_independent_human(max_count=60):
     """External movie review stress test; NO automatic human label verification."""
     from datasets import load_dataset
-    data=load_dataset(CORPUS_MOVIE_HUMAN,"full",split="train")
+    data=load_dataset(CORPUS_MOVIE_HUMAN,split="train")
     samples=[]
     groups=set()
     for i,item in enumerate(data):
-        t=item.get("review_text")
-        movie=str(item.get("movie_id") or "")
+        t=item.get("content")
+        movie=str(item.get("movie_name") or "").strip()
+        date=item.get("date")
         if not movie or movie in groups or not isinstance(t,str):
+            continue
+        # Published user reviews predate contemporary LLMs; not absolute
+        # authorship proof, but much stronger than recent unlabeled posts.
+        if date is None or str(date)[:4] > "2012":
             continue
         if len(t)<700 or russian_fraction(t)<.8:
             continue
