@@ -82,5 +82,19 @@
     "prelaunch_behavior": "drafts_and_owner_review_only_no_rss_transmission",
     "postlaunch_behavior": "fully_checked_articles_may_auto_enter_rss_without_per_article_owner_approval_after_explicit_global_launch",
     "currently_active": false
+  },
+  "editorial_content_priority_after_model_training": {
+    "schema": "zen-original-editorial-quality-v1",
+    "activation": "after_current_three_genre_training_completes",
+    "primary_goal": "original_useful_fact_checked_natural_russian_articles_compliant_with_zen_rules",
+    "do_not_require_validated_ai_authorship_score_to_prepare_review_or_release_after_explicit_launch": true,
+    "ai_detector_results": "diagnostic_only_not_a_guarantee_of_zen_classification",
+    "no_claim_of_bypassing_platform_detection": true,
+    "no_fabricated_authorship_or_detector_results": true,
+    "require_real_editing_and_source_checks": true,
+    "require_substantive_quality_and_non_template_content": true,
+    "confirmed_editorial_problems_trigger_two_agent_then_one_chatgpt_revision": true,
+    "keep_unvalidated_thresholds_disabled": true,
+    "no_publication_before_explicit_launch": true
   }
 }
