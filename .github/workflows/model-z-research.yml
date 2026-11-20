@@ -1,0 +1,33 @@
+name: Model Z research capability test (no provider billing)
+on:
+  pull_request:
+    paths:
+      - 'research/model_z_runner.py'
+      - '.github/workflows/model-z-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capability-and-hashes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run Model Z test without API credentials or third-party uploads
+        run: |
+          python research/model_z_runner.py --out "$RUNNER_TEMP/model-z-research.json"
+          python - "$RUNNER_TEMP/model-z-research.json" <<'PY'
+          import json,sys
+          data=json.load(open(sys.argv[1]))
+          assert len(data["articles"])==10
+          assert all(x["model_z"]["status"]=="incomplete" for x in data["articles"])
+          assert all(x["gptzero"]["status"]=="not_run" and x["winston"]["status"]=="not_run" and x["quillbot"]["status"]=="not_run" for x in data["articles"])
+          print("10 articles enumerated; 0 provider scans; Model Z is unavailable without authorized access.")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model-z-capability-report
+          path: ${{ runner.temp }}/model-z-research.json
+          retention-days: 14
