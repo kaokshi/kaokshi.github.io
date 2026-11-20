@@ -5,11 +5,12 @@ Accepts a reviewed nine-topic daily plan. Never fabricates topics or sources;
 never publishes, uploads article text, or silently marks failed tasks complete.
 """
 import argparse
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from hashlib import sha256
 import json
 import os
 from pathlib import Path
+from time import monotonic
 import re
 import sys
 
@@ -68,7 +69,13 @@ def report_status(workspace, task):
 
 
 def execute(plan, workspace, *, status_only=False, health_check=endpoint_ready,
-            runner=run_one):
+            runner=run_one, deadline=None, reserve_minutes=20,
+            now=lambda: datetime.now(timezone.utc)):
+    """Leave time for review rather than starting an unfinishable late task.
+
+    The hard deadline controls *launching new tasks*, not an already running
+    single pipeline process. All deferred tasks retain honest pending statuses.
+    """
     tasks=validate_plan(plan)
     workspace=private_path(Path(workspace))
     workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -76,11 +83,23 @@ def execute(plan, workspace, *, status_only=False, health_check=endpoint_ready,
     url=os.environ.get("ZEN_LLM_URL",
       "http://127.0.0.1:11434" if backend=="ollama" else "http://127.0.0.1:8093")
     health={"status":"not_checked"} if status_only else health_check(url,backend=backend)
+    if deadline is not None and (deadline.tzinfo is None or deadline.utcoffset() is None):
+        raise ValueError("Deadline must include a timezone offset")
+    if not isinstance(reserve_minutes, int) or not 0 <= reserve_minutes <= 240:
+        raise ValueError("reserve_minutes must be an integer 0–240")
     records=[]
     for task in tasks:
         row=report_status(workspace,task)
-        if status_only or health["status"]!="ready":
-            row["execution"]={"status":"not_started","reason":"status_only" if status_only else "model_not_ready"}
+        current_time = now()
+        too_late = deadline is not None and (
+            current_time + timedelta(minutes=reserve_minutes) >= deadline
+        )
+        if status_only or health["status"]!="ready" or too_late:
+            row["execution"]={"status":"not_started","reason":(
+                "status_only" if status_only else
+                "model_not_ready" if health["status"]!="ready" else
+                "review_deadline_reached"
+            )}
         else:
             src=task["source_documents"]
             source_path=Path(src).expanduser().resolve() if src is not None else None
@@ -98,6 +117,8 @@ def execute(plan, workspace, *, status_only=False, health_check=endpoint_ready,
     return {"schema":"zen-nine-draft-queue-v1","date":plan["date"],
             "checked_at":datetime.now(timezone.utc).isoformat(),
             "model_health":health,"requested":9,
+            "deadline":deadline.isoformat() if deadline else None,
+            "review_reserve_minutes":reserve_minutes,
             "per_channel":{c:sum(r["channel"]==c for r in records) for c in CHANNELS},
             "ready_for_owner":sum(bool(r["article_ready_for_owner"]) for r in records),
             "completed_for_publication":0,
@@ -110,11 +131,15 @@ def main():
     ap.add_argument("--plan",type=Path,required=True)
     ap.add_argument("--workspace",type=Path,required=True)
     ap.add_argument("--status-only",action="store_true")
+    ap.add_argument("--deadline",help="ISO datetime with timezone, e.g. 2026-11-21T11:00:00+03:00")
+    ap.add_argument("--review-reserve-minutes",type=int,default=20)
     args=ap.parse_args()
     try:
         workspace=private_path(args.workspace)
         plan=json.loads(args.plan.read_text(encoding="utf-8"))
-        report=execute(plan,workspace,status_only=args.status_only)
+        deadline=datetime.fromisoformat(args.deadline) if args.deadline else None
+        report=execute(plan,workspace,status_only=args.status_only,
+                       deadline=deadline,reserve_minutes=args.review_reserve_minutes)
         output=workspace/("nine-draft-status-"+report["date"]+".json")
         output.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
         os.chmod(output,0o600)
