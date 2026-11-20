@@ -53,7 +53,7 @@ def historical_reviews(min_count=20):
 def generate_pairs(n=20):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
-    reviews = historical_reviews(min_count=n)
+    reviews = historical_reviews(min_count=n + 15)
     set_seed(SEED)
     random.seed(SEED)
     tokenizer = AutoTokenizer.from_pretrained(GENERATOR_MODEL)
@@ -64,24 +64,33 @@ def generate_pairs(n=20):
     pairs = []
     with torch.inference_mode():
         for index, review in enumerate(reviews):
+            if len(pairs) >= n:
+                break
             # Crucial: no portion of the human review text in the generation
             # prompt. Otherwise the classifier might learn copying artifacts.
             prompt = (f"Отзыв о фильме «{review['film_name']}». "
                       f"Оценка: {review['sentiment']}.\n"
                       "Сюжет, режиссура и впечатления зрителя: ")
             encoded = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=180)
-            output = model.generate(
-                **encoded,
-                do_sample=True,
-                top_k=50,
-                top_p=0.92,
-                temperature=0.9,
-                max_new_tokens=300,
-                pad_token_id=tokenizer.eos_token_id,
-            )
-            generated = tokenizer.decode(output[0][encoded.input_ids.shape[1]:], skip_special_tokens=True).strip()
-            if len(generated) < MIN_CHARACTERS or cyrillic_fraction(generated) < .75:
-                raise RuntimeError("Generated film text too short or insufficiently Russian: sample "+str(index))
+            generated = ""
+            for attempt in range(3):
+                set_seed(SEED + index * 7 + attempt)
+                output = model.generate(
+                    **encoded,
+                    do_sample=True,
+                    top_k=50,
+                    top_p=0.92,
+                    temperature=0.9,
+                    max_new_tokens=300,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+                candidate = tokenizer.decode(output[0][encoded.input_ids.shape[1]:], skip_special_tokens=True).strip()
+                if len(candidate) >= MIN_CHARACTERS and cyrillic_fraction(candidate) >= .75:
+                    generated = candidate
+                    break
+            if not generated:
+                print("CINEMA_PAIR_SKIPPED", index, "three_invalid_generations", flush=True)
+                continue
             human = review["review_human"]
             # Length-match without tricking training with systematically
             # shorter AI outputs. Any mismatch is explicitly reported.
@@ -100,5 +109,7 @@ def generate_pairs(n=20):
                 "machine_sha256": hashlib.sha256(generated.encode()).hexdigest(),
             }
             pairs.append(pair)
-            print("CINEMA_PAIR_GENERATED",index+1,"lengths",len(human),len(generated),"group",review["group_id"][:12],flush=True)
+            print("CINEMA_PAIR_GENERATED",len(pairs),"lengths",len(human),len(generated),"group",review["group_id"][:12],flush=True)
+    if len(pairs) != n:
+        raise RuntimeError(f"Only {len(pairs)} valid generated cinema pairs from {len(reviews)} candidates")
     return pairs
