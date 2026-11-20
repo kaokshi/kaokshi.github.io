@@ -63,6 +63,10 @@ class MovieFactCheckTests(unittest.TestCase):
             {"status": "unavailable"})["status"], "source_unavailable")
 
     def test_semantic_ranks_rephrased_evidence_without_claiming_truth(self):
+        try:
+            import numpy
+        except ImportError:
+            self.skipTest("numpy is installed only in the isolated movie workflow")
         import movie_semantic as semantic
         class Dummy:
             def encode(self, texts, **kwargs):
