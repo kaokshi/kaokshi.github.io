@@ -44,7 +44,7 @@ def check_draft(article, language_tool, *, source_urls=()):
         draft["warnings"] = [w for w in draft["warnings"] if w != "science_sources_not_recorded"]
     # Compare only with other drafts from the active channels.
     corpus = [p for p in CONTENT.glob("*.json")
-              if p.name.startswith(("legends-", "science-"))]
+              if p.name.startswith(("legends-", "science-", "cinema-"))]
     similar = similarity_report(corpus, candidate=article)
     image_audit = image_hash_audit(corpus, candidate=article)
     duplicates = [entry for key in ("duplicates", "sha256_duplicates")
@@ -105,7 +105,9 @@ def check_draft(article, language_tool, *, source_urls=()):
         },
         "findings": findings,
         "manual_checks_pending": [
-            "science_claims" if article["channel"] == "science" else "fiction_originality_and_logic",
+            ("science_claims" if article["channel"] == "science" else
+             "cinema_plot_accuracy_and_spoilers" if article["channel"] == "cinema"
+             else "fiction_originality_and_logic"),
             "editorial_style_and_cta", "image_rights",
         ],
     }
