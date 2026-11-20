@@ -17,6 +17,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.style import WD_STYLE_TYPE
 
 from editorial_ai_check import extract_text
+from editorial_layout import docx_body
 from editorial_length import MIN_CHARS, MAX_CHARS, count_characters, length_finding
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -57,8 +58,11 @@ def export_article(channel, slug, target):
         note=doc.add_paragraph("Оригинальная вымышленная история")
         note.alignment=WD_ALIGN_PARAGRAPH.CENTER
     paragraphs=[p.strip() for p in re.split(r"\n+",body) if p.strip()]
-    for paragraph in paragraphs:
-        doc.add_paragraph(paragraph)
+    if a.get("layout_schema") or "<section>" in a["body_html"]:
+        docx_body(doc, a, ROOT)
+    else:
+        for paragraph in paragraphs:
+            doc.add_paragraph(paragraph)
     if a.get("sources"):
         doc.add_heading("Источники для редакционной сверки",level=1)
         for url in a["sources"]:

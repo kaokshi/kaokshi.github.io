@@ -70,7 +70,9 @@ class WebsiteTest(unittest.TestCase):
                     {"provider": "ai_accent_detector", "status": "completed", "report_ref": "https://github.com/example"},
                 ]
                 (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
-                self.assertEqual(len(build.read_posts(now)), 1, "Approved item with confirmed reports may be eligible")
+                self.assertEqual(build.read_posts(now), [], "A missing layout must block release")
+                self.enterContext(mock.patch.object(build, "layout_findings", return_value=[]))
+                self.assertEqual(len(build.read_posts(now)), 1)
                 article["ai_checks"][0]["provider"] = "rubert_v4"
                 (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
                 self.assertEqual(build.read_posts(now), [], "Legacy ruBERT cannot replace the new model")

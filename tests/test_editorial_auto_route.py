@@ -13,6 +13,8 @@ import editorial_auto_route as route
 
 class RoutingTests(unittest.TestCase):
     def setUp(self):
+        # These cases isolate routing; the layout suite exercises the real cover gate.
+        self.enterContext(patch("editorial_auto_route.layout_findings", return_value=[]))
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

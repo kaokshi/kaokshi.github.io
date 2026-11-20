@@ -4,6 +4,9 @@ on:
     paths:
       - 'src/editorial_ai_check.py'
       - 'src/editorial_agent_v1.py'
+      - 'src/editorial_layout.py'
+      - 'src/editorial_cover.py'
+      - 'tests/test_editorial_layout.py'
       - 'src/editorial_writer.py'
       - 'src/editorial_length.py'
       - 'src/editorial_local_llm.py'
@@ -36,6 +39,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Test private article layout and Word rendering
+        run: |
+          python -m pip install Pillow==11.3.0 python-docx==1.2.0
+          python -m unittest tests.test_editorial_layout -v
       - name: Regression suite for model A and agent
         run: |
           python -m unittest             tests.test_editorial_agent_v1             tests.test_editorial_pipeline             tests.test_editorial_ai_check             tests.test_editorial_auto_route             tests.test_editorial_auto_release             tests.test_editorial_ai_revision_policy             tests.test_build -v

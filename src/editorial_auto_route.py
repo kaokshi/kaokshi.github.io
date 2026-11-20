@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 
 from editorial_ai_check import ROOT, CONTENT
+from editorial_layout import layout_findings
 from editorial_length import count_characters, length_finding
 
 ACTIVE_CHANNELS = frozenset({"legends", "science"})
@@ -55,7 +56,7 @@ def valid_evidence(report, digest):
 
 def decide(article, evidence):
     """Fail closed; route to 'approval' unless everything necessary is evidenced."""
-    blockers = []
+    blockers = layout_findings(article, ROOT)
     slug = article.get("slug")
     channel = article.get("channel")
     if channel not in ACTIVE_CHANNELS:

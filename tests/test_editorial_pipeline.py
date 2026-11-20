@@ -55,7 +55,7 @@ class WriterTests(unittest.TestCase):
         paragraphs = ["Первый эпизод. " + "Дверь открылась. " * 85,
                       "Второй эпизод. " + "Анна осталась. " * 85,
                       "Третий эпизод. " + "Ветер стих. " * 85 + " <script>"]
-        reply = {"title": "Сигнал", "paragraphs": paragraphs,
+        reply = {"title": "Сигнал", "sections": [{"start": 1, "heading": "За дверью"}, {"start": 3, "heading": "Когда стих ветер"}], "paragraphs": paragraphs,
                  "cta": "Подпишитесь на «Легенды тёмных улиц», чтобы встретить другие странные ночи."}
 
         def provider(task, request):
@@ -279,7 +279,7 @@ class LocalLlmTests(unittest.TestCase):
             self.assertEqual(endpoint.hostname, "127.0.0.1")
             self.assertEqual(payload["response_format"]["type"], "json_schema")
             return {"choices": [{"message": {"content": json.dumps(
-                {} if len(calls) == 1 else {"title": "Тест", "paragraphs": ["Абзац"], "cta": "Подписаться"}
+                {} if len(calls) == 1 else {"title": "Тест", "sections": [], "paragraphs": ["Абзац"], "cta": "Подписаться"}
             )}, "finish_reason": "stop"}]}
 
         result = complete(request, env={"ZEN_LLM_MODEL": "test"}, send=send)

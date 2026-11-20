@@ -17,7 +17,8 @@ from editorial_research import europe_pmc
 from editorial_revision import run_case, save_case, save_text
 from editorial_revision_checks import check_draft
 from editorial_semantic import diagnose, revise, resize_article
-from editorial_length import count_characters, extract_text, length_finding
+from editorial_length import count_characters, length_finding
+from editorial_layout import markdown_body, repair_sections
 from editorial_writer import Pending, command_provider, private_path, topic_key, write_article
 
 
@@ -134,6 +135,9 @@ def execute(case, directory, provider, research, documents, reviews, response, q
             else:
                 edited = revise(article, report["semantic"]["issues"], provider,
                                 reviews.get(article_digest(article)))
+            if edited and article.get("layout_schema"):
+                candidate, changes = edited
+                edited = repair_sections(candidate, provider), changes
             report["semantic_edit_status"] = "proposed" if edited else "no_applicable_edit"
             return edited
         except Pending as exc:
@@ -153,7 +157,7 @@ def execute(case, directory, provider, research, documents, reviews, response, q
     else:
         draft = version
     article = draft["article"]
-    prose = "\n\n".join(line.strip() for line in extract_text(article["body_html"]).splitlines() if line.strip())
+    prose = markdown_body(article["body_html"])
     save_case(directory / "draft.json", article)
     save_text(directory / "draft.md", f'# {article["title"]}\n\n{prose}\n')
     save_case(directory / "reports.json", {
@@ -182,6 +186,8 @@ def main():
     researchers.add_argument("--europe-pmc", action="store_true", help="Retrieve public research abstracts")
     parser.add_argument("--research-query", help="Public source discovery query for the topic")
     parser.add_argument("--source-documents", type=Path, help="JSON with retrieved documents")
+    parser.add_argument("--illustrations", type=Path, help="Manifest of 7–8 verified JPEG assets")
+    parser.add_argument("--asset-root", type=Path, default=CONTENT.parents[1])
     parser.add_argument("--review", type=Path, help="Operator review for specific text hashes")
     parser.add_argument("--assistant-response", type=Path)
     args = parser.parse_args()
@@ -236,8 +242,14 @@ def main():
                 if path.is_file():
                     case = load(path)
                 else:
+                    original_input = existing
+                    if existing is not None:
+                        existing = repair_sections(existing, provider)
                     case = new_case(root, directory, existing, args.channel, args.topic, provider,
                                     documents=documents or ())
+                    if original_input is not None:
+                        case["input_article"] = original_input
+                        save_case(path, case)
             except Pending as exc:
                 save_case(directory / "writer-status.json", {"status": exc.status, "reason": str(exc)})
                 print(json.dumps({"status": exc.status, "directory": str(directory)}))
@@ -251,7 +263,7 @@ def main():
                 save_case(directory / "writer-status.json", {"status": "draft_created",
                           "text_sha256": first["text_sha256"], "characters": count,
                           "length_finding": length_finding(count)})
-            if existing is not None and existing != case["versions"][0]["article"]:
+            if existing is not None and existing not in (case.get("input_article"), case["versions"][0]["article"]):
                 raise ValueError("Resume using the original draft for this case")
             if existing is None and case.get("topic_sha256") != topic_digest:
                 raise ValueError("Topic does not match the existing case")
@@ -267,6 +279,12 @@ def main():
 
             decision = execute(case, directory, provider, research, documents, reviews, response,
                                lambda draft, urls: check_draft(draft, grammar, source_urls=urls))
+            assembled_path = directory / "assembled.json"
+            assembled_path.unlink(missing_ok=True)
+            if args.illustrations:
+                from editorial_cover import cover_selection
+                assembled = cover_selection(load(directory / "draft.json"), load(args.illustrations), args.asset_root)
+                save_case(assembled_path, assembled)
             print(json.dumps({"status": decision, "directory": str(directory)}))
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         parser.error(str(exc))
