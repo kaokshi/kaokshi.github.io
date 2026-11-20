@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import unicodedata
 
 from editorial_ai_check import ROOT
@@ -41,7 +42,12 @@ def command_provider(executable):
         request = json.dumps({"task": task, **payload}, ensure_ascii=False)
         try:
             timeout = 2 * request_timeout() + 20 if executable.name == "editorial_local_llm.py" else 445
-            proc = subprocess.run([str(executable.expanduser().resolve())], input=request, capture_output=True,
+            program = executable.expanduser().resolve()
+            # GitHub contents API stores .py files as 0644. The built-in
+            # provider must work without executable permissions or a shell.
+            argv = ([sys.executable, str(program)] if program.suffix.lower() == ".py"
+                    else [str(program)])
+            proc = subprocess.run(argv, input=request, capture_output=True,
                                   text=True, encoding="utf-8", timeout=timeout, check=False)
             if proc.returncode:
                 reason = proc.stderr[:240].strip() if executable.name == "editorial_local_llm.py" else ""
