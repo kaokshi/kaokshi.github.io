@@ -40,7 +40,9 @@ def holdout_rows(genre,length):
                 continue
             group=str(identifier)
             words=text.split()
-            if not length<=len(words)<=base.MAX_WORDS or group in dev_ids:
+            # Only excerpt length is relevant for matched-length controls. Full
+            # source documents can exceed the scoring window; exclude overlap IDs.
+            if len(words)<length or group in dev_ids:
                 continue
             available.append((group,text))
         total_candidates[label]=len(available)
