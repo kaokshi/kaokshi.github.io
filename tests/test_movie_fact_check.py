@@ -53,6 +53,37 @@ class MovieFactCheckTests(unittest.TestCase):
         self.assertFalse(report["summary"]["article_authorized_for_publication"])
         self.assertEqual(before, path.read_bytes())
 
+    def test_semantic_split_and_not_a_truth_verdict(self):
+        import movie_semantic as semantic
+        passages = semantic.split_passages("Труман выходит из дома. " * 80, max_words=25)
+        self.assertGreater(len(passages), 2)
+        self.assertTrue(all(len(x.split()) <= 25 for x in passages))
+        self.assertEqual(semantic.semantic_candidates(
+            [{"section": "Начало", "text": "Труман идёт по городу."}],
+            {"status": "unavailable"})["status"], "source_unavailable")
+
+    def test_semantic_ranks_rephrased_evidence_without_claiming_truth(self):
+        import movie_semantic as semantic
+        class Dummy:
+            def encode(self, texts, **kwargs):
+                import numpy as np
+                vectors = []
+                for text in texts:
+                    if "море" in text or "океан" in text:
+                        vectors.append([1.0, 0.0])
+                    else:
+                        vectors.append([0.0, 1.0])
+                return np.array(vectors)
+        source = {"status": "completed",
+                  "extract": "== Сюжет ==\\nТруман выходит к океану и отправляется в плавание, пытаясь найти выход из искусственного города. Он управляет лодкой, находясь под наблюдением телезрителей.",
+                  "url": "https://ru.wikipedia.org/wiki/Шоу_Трумана"}
+        sections = [{"section": "Финал", "text": "Труман выбирается в море, несмотря на трудности. Вскоре он понимает, что все это было снято в искусственном мире."}]
+        result = semantic.semantic_candidates(sections, source, model=Dummy())
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertFalse(result["matches"][0]["fact_verified"])
+        self.assertTrue(result["matches"][0]["candidate_matches"])
+
 
 if __name__ == "__main__":
     unittest.main()
