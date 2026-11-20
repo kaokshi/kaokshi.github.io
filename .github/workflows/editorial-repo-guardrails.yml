@@ -1,0 +1,31 @@
+name: Repository guardrails - actionlint and Gitleaks
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'config/**'
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install and run actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$(go env GOPATH)/bin/actionlint" -oneline
+      - name: Download Gitleaks
+        run: |
+          curl --fail --location --retry 2 -o /tmp/gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          tar -xf /tmp/gitleaks.tgz -C /tmp gitleaks
+      - name: Scan repository without exposing secrets
+        run: /tmp/gitleaks git --no-banner --redact --exit-code 1 .
