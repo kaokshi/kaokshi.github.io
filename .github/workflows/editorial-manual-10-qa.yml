@@ -1,0 +1,65 @@
+name: Audit 10 owner-manual Zen drafts (read only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/editorial_manual_10_qa.py'
+      - '.github/workflows/editorial-manual-10-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: editorial-manual-10-qa
+  cancel-in-progress: true
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-editorial.txt
+      - name: Install editorial tools and Word library
+        run: |
+          python -m pip install -r requirements-editorial.txt -r requirements-quality.txt "python-docx==1.2.0"
+          aiw-ru models install modernbert lightgbm
+      - name: Install pinned ruBERT v4
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install --upgrade pip
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Download pinned ruBERT v4 weights and calibration
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+              "k1y0mi/ru-ai-text-detector",
+              repo_type="model",
+              revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+              allow_patterns=["v4_model/*", "v4_calibrator.joblib", "threshold_v4.json"],
+              local_dir=".rubert-upstream/models",
+          )
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Run four native detectors and Russian grammar on 10 current documents
+        env:
+          OMP_NUM_THREADS: '2'
+          OPENBLAS_NUM_THREADS: '2'
+        run: python src/editorial_manual_10_qa.py
+      - name: Upload report regardless of incomplete checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ten-manual-zen-audit-results
+          path: editorial-manual-10-qa/
+          retention-days: 14
+          if-no-files-found: warn
