@@ -19,7 +19,7 @@
     "science": null,
     "cinema": null
   },
-  "decision_rule": "Owner's latest requirement: once each genre ensemble is independently calibrated and validated, unified index >30 sends to editorial review for up to two targeted revision attempts with fresh full checks, then owner review if unresolved. Until validation, score is diagnostic only and no score-only automated rewrite. Textual or factual defects still trigger revisions independently.",
+  "decision_rule": "Latest owner-approved future sequence: AI editorial agent drafts and runs all configured checks; up to 2 substantive targeted agent corrections with full fresh checks; if unresolved, hand over immutable text+checks+history to ChatGPT editorial escalation for exactly 1 targeted correction and full fresh checks; if still unresolved, deliver article and remaining issues to owner. A high score alone is not proof of authorship or a mandate to rewrite. Until independent validation, threshold 30 is diagnostic only. No automatic publication.",
   "validation_requirements": {
     "minimum_human_holdout": 120,
     "minimum_ai_holdout": 120,
@@ -54,5 +54,17 @@
     "result": "Neither candidate meets the validation criteria; do not enable."
   },
   "planned_ensemble_review_cutoff_0_to_100": 30,
-  "planned_ensemble_review_cutoff_status": "disabled_until_independently_validated"
+  "planned_ensemble_review_cutoff_status": "disabled_until_independently_validated",
+  "editorial_escalation": {
+    "schema": "editorial-three-tier-escalation-v1",
+    "agent_revision_limit": 2,
+    "assistant_revision_limit": 1,
+    "assistant_review_required_after_agent_exhaustion": true,
+    "assistant_handoff_transport": "pending_integration_with_existing_ChatGPT_tasks",
+    "reevaluate_all_checks_after_any_text_change": true,
+    "require_immutable_article_sha256_and_evidence": true,
+    "owner_receives_unresolved_after_assistant_exhaustion": true,
+    "owner_approval_required_for_publication": true,
+    "automatic_publication_authorized": false
+  }
 }
