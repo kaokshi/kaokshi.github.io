@@ -6,6 +6,8 @@ on:
       - 'tests/test_editorial_stage_gate.py'
       - 'src/editorial_collect_receipts.py'
       - 'tests/test_editorial_collect_receipts.py'
+      - 'src/editorial_stage_preview.py'
+      - 'tests/test_editorial_stage_preview.py'
       - 'src/editorial_ai_check.py'
       - 'content/articles/**'
       - '.github/workflows/editorial-stage-gate.yml'
@@ -57,7 +59,7 @@ jobs:
           print('CHANGED_ARTICLES',slugs)
           PY
       - name: Test all safe transition paths
-        run: python -m unittest tests.test_editorial_stage_gate tests.test_editorial_collect_receipts -v
+        run: python -m unittest tests.test_editorial_stage_gate tests.test_editorial_collect_receipts tests.test_editorial_stage_preview -v
       - name: Check that publication stays disabled
         run: |
           python - <<'PY'
@@ -195,7 +197,11 @@ jobs:
                                   capture_output=True,text=True)
               if run.returncode:
                   raise RuntimeError("Stage route failed for "+slug+": "+run.stderr[-500:])
-              rows.append(json.loads(Path("editorial-stage-results",slug+".json").read_text("utf-8")))
+              row=json.loads(Path("editorial-stage-results",slug+".json").read_text("utf-8"))
+              rows.append(row)
+              if row["disposition"]=="ready_for_next_stage":
+                  subprocess.run([sys.executable,"src/editorial_stage_preview.py",
+                      "--slug",slug],check=True)
           dest=Path("editorial-stage-results")
           dest.mkdir(exist_ok=True)
           (dest/"pr-manifest.json").write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding="utf-8")
@@ -331,6 +337,19 @@ jobs:
                       fh.write('- '+v.replace('\n',' ')+'\n')
               fh.write('\nСайт и RSS не изменены, отчёты только для редакции.\n')
           print('FULL_FIRST_PARTY_STAGE',x['disposition'])
+          PY
+      - name: Create safe owner-preview artifact only after fully passed checks
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json,os,subprocess,sys
+          slug=os.environ['ARTICLE_SLUG']
+          verdict=json.loads(Path('editorial-stage-results',slug+'.json').read_text('utf-8'))
+          if verdict["disposition"]=="ready_for_next_stage":
+              subprocess.run([sys.executable,'src/editorial_stage_preview.py','--slug',slug],check=True)
+              print('OWNER_PREVIEW_READY: GitHub artifact only, no publication')
+          else:
+              print('OWNER_PREVIEW_NOT_CREATED',verdict["disposition"])
           PY
       - name: Upload real AI, quality and routing diagnostics as private artifacts
         if: always()
