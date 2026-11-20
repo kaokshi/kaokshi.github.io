@@ -71,10 +71,12 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("aggregate_risk_above_20", result["blockers"])
         self.assertEqual(result["disposition"], "send_for_owner_review")
 
-    def test_model_a_above_80_requires_editorial_review(self):
+    def test_model_a_above_85_is_advisory_not_blocking(self):
         self.evidence["ai"]["checks"]["transformer"]["score_percent"] = 99
         result = route.decide(self.article, self.evidence)
-        self.assertIn("model_a_editorial_review_above_80", result["blockers"])
+        self.assertNotIn("model_a_editorial_review_above_80", result["blockers"])
+        self.assertTrue(result["model_a_review_advisory"])
+        self.assertFalse(result["model_a_threshold_is_hard_block"])
         self.assertFalse(result["ai_rewrite_required_by_detector"])
         self.assertIn("ai_auto_release_threshold_not_validated", result["blockers"])
 
