@@ -6,6 +6,23 @@ from pathlib import Path
 from editorial_ai_check import CONTENT, extract_text
 
 
+def serialize_match(m):
+    """Accept current and legacy LanguageTool Match versions; never hide failures."""
+    length = getattr(m, "error_length", None)
+    if length is None:
+        length = getattr(m, "length", None)
+    offset = getattr(m, "offset", None)
+    if not isinstance(length, int) or length < 0 or not isinstance(offset, int) or offset < 0:
+        raise ValueError("LanguageTool Match offset/length is unavailable")
+    return {
+        "rule_id": getattr(m, "rule_id", None),
+        "message": str(getattr(m, "message", ""))[:200],
+        "offset": offset,
+        "length": length,
+        "replacements": list(getattr(m, "replacements", []))[:3],
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--slug", required=True)
@@ -23,16 +40,12 @@ def main():
         with language_tool_python.LanguageTool("ru") as tool:
             # Restrict diagnostic input to avoid lengthy downloads/checks on all historic drafts.
             checks = tool.check(text[:12000])
-            report["status"] = "completed"
-            report["issues"] = [{
-                "rule_id": getattr(m, "rule_id", None),
-                "message": getattr(m, "message", "")[:200],
-                "offset": m.offset,
-                "length": m.error_length,
-                "replacements": list(m.replacements)[:3],
-            } for m in checks[:100]]
+            serialized = [serialize_match(m) for m in checks[:100]]
+            report["issues"] = serialized
             report["issue_count"] = len(checks)
+            report["status"] = "completed"
     except Exception as exc:
+        report["status"] = "error"
         report["error"] = str(exc)[:450]
     destination = Path(args.output)
     destination.parent.mkdir(parents=True, exist_ok=True)
