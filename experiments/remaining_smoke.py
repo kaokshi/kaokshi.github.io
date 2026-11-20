@@ -34,21 +34,42 @@ def run_clip():
        "caution":"Contrastive similarities are not calibrated probabilities or film identity checks."}
 
 def run_playwright():
+    """Test a complete editor review cycle, never the real Zen website."""
     from playwright.sync_api import sync_playwright
-    local=ROOT/"editorial-remaining-tests/local-review.html"
-    local.write_text("<html><head><meta charset='utf-8'></head><body><h1>Редакторская проверка</h1><textarea id='draft'></textarea><button id='save' onclick=\"document.querySelector('#state').textContent='сохранено'\">Сохранить</button><div id='state'></div></body></html>",encoding="utf-8")
+    local=ROOT/"experiments/approval_preview.html"
+    decisions=[]
     with sync_playwright() as p:
         browser=p.chromium.launch(headless=True)
         page=browser.new_page()
         page.goto(local.as_uri())
-        page.locator("#draft").fill("Проверка формы без внешнего сайта")
-        page.locator("#save").click()
-        state=page.locator("#state").inner_text()
+        # An incomplete approval request must not be accepted.
+        page.locator("#approve").click()
+        assert page.locator("#state").inner_text()=="Текст отсутствует"
+        for channel in ("legends","science","cinema"):
+            page.locator("#channel").select_option(channel)
+            page.locator("#draft").fill("Тестовая статья для проверки редакционного согласования.")
+            page.locator("#comment").fill("")
+            page.locator("#revision").click()
+            assert page.locator("#state").inner_text()=="Нужно указать замечание"
+            page.locator("#comment").fill("Уточнить факт и источник.")
+            page.locator("#revision").click()
+            changes=page.evaluate("window.__localReviewResult")
+            assert changes["decision"]=="changes_requested"
+            assert changes["publication_authorized"] is False
+            page.locator("#approve").click()
+            approved=page.evaluate("window.__localReviewResult")
+            assert approved["decision"]=="editorially_approved"
+            assert approved["channel"]==channel
+            assert approved["publication_authorized"] is False
+            decisions.append({"channel":channel,"revision_request_passed":True,
+                              "approval_state_passed":True,"publication_authorized":False})
         browser.close()
-    assert state=="сохранено",state
     return {"status":"completed","local_form_operated":True,
-            "external_website_tested":False,"login_or_captcha_tested":False,
-            "recommendation":"Browser automation technically works; production sites need their own permission and reliability test."}
+            "channels_tested":len(decisions),"cases":decisions,
+            "missing_content_blocked":True,"missing_revision_reason_blocked":True,
+            "external_website_tested":False,"authentication_tested":False,
+            "publication_authorized":False,
+            "recommendation":"UI prototype is valid. No real approvals or Zen actions were performed."}
 
 if __name__=="__main__":
     name=sys.argv[1]
