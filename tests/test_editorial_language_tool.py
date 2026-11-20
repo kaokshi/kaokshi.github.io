@@ -16,6 +16,9 @@ class LanguageToolSerializationTests(unittest.TestCase):
  def test_legacy_error_length(self):
   m=SimpleNamespace(rule_id="X",message="Fix",offset=7,error_length=3,replacements=[])
   self.assertEqual(serialize_match(m)["length"],3)
+ def test_old_camelcase_errorLength(self):
+  m=SimpleNamespace(ruleId="X",message="Fix",offset=7,errorLength=3,replacements=[])
+  self.assertEqual(serialize_match(m)["length"],3)
  def test_no_silent_zero_when_length_missing(self):
   m=SimpleNamespace(rule_id="X",message="Fix",offset=7,replacements=[])
   with self.assertRaisesRegex(ValueError,"unavailable"):
