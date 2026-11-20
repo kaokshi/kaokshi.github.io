@@ -38,6 +38,7 @@ jobs:
           /tmp/gitleaks git --no-banner --redact --report-format json --report-path editorial-benchmark-results/gitleaks.json . > /tmp/gitleaks_log.txt 2>&1
           rc=$?
           echo "gitleaks_exit=$rc" >> editorial-benchmark-results/check-summary.txt
+          echo "gitleaks_exit=$rc"
           if [ "$rc" -ne 0 ]; then
             echo "Gitleaks reported findings or failed; review restricted report, do not copy secrets to logs"
           fi
