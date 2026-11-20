@@ -9,6 +9,7 @@ from editorial_ai_check import CONTENT, ROOT, evaluate_article, extract_text
 from editorial_agent_v1 import article_digest, validate_ai_report
 from editorial_language_tool import serialize_match
 from editorial_quality import image_hash_audit, inspect_draft, similarity_report
+from editorial_reader_interest import analyze as reader_interest_analyze
 
 
 def command_report(argv, accepted_exit_codes):
@@ -51,6 +52,7 @@ def check_draft(article, language_tool, *, source_urls=()):
     unreadable = [entry for entry in image_audit.get("unreadable", [])
                   if entry["slug"] == article["slug"]]
     grammar = grammar_report(text, language_tool)
+    reader_interest = reader_interest_analyze(article)
     with TemporaryDirectory(prefix="editorial-quality-") as directory:
         source = Path(directory) / "draft.md"
         source.write_text("# " + article.get("title", "") + "\n\n" + text, encoding="utf-8")
@@ -92,6 +94,7 @@ def check_draft(article, language_tool, *, source_urls=()):
         "automated_checks_completed": complete,
         "ai": ai,
         "quality": draft,
+        "reader_interest": reader_interest,
         "grammar": grammar,
         "vale": vale,
         "links": links,
