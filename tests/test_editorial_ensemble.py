@@ -49,17 +49,16 @@ class EnsembleTests(unittest.TestCase):
         self.assertEqual(r["human_holdout_n"],120)
         self.assertEqual(r["ai_holdout_n"],120)
     def test_two_revisions_then_owner(self):
-        base={"channel":"legends","score_percent":91,"threshold":85,
-              "validated":True,"substantive_issues":["Unverified claim"],"checks_completed":True}
+        base={"channel":"legends","substantive_issues":["Unverified claim"],"checks_completed":True}
         self.assertEqual(route_revision(**base,attempt=0)["attempt_next"],1)
         self.assertEqual(route_revision(**base,attempt=1)["attempt_next"],2)
         self.assertEqual(route_revision(**base,attempt=2)["decision"],"owner_review")
     def test_no_score_only_rewrites(self):
-        v=route_revision(channel="science",score_percent=99,threshold=80,validated=True,
+        v=route_revision(channel="science",score_percent=99,
               attempt=0,substantive_issues=[])
         self.assertEqual(v["decision"],"quality_cleared_for_other_release_gates")
     def test_unvalidated_and_missing_check_fail_closed(self):
-        v=route_revision(channel="science",score_percent=99,threshold=80,validated=False,
+        v=route_revision(channel="science",
               attempt=0,substantive_issues=["Repeated paragraph"])
         self.assertEqual(v["decision"],"targeted_revision")
         self.assertFalse(v["release"])
