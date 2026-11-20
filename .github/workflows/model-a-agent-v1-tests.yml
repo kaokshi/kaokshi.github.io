@@ -40,3 +40,52 @@ jobs:
           assert b["paused_channels"]==["cinema"]
           print("Safe: no automatic publishing or cinema reactivation")
           PY
+  real-pilot:
+    needs: offline-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-editorial.txt
+      - name: Install free local text models
+        run: |
+          python -m pip install -r requirements-editorial.txt
+          aiw-ru models install modernbert lightgbm transformer
+      - name: Real two-article Model A and editorial agent pilot
+        run: |
+          python src/editorial_ai_check.py \
+            --slug science-08-sinie-ogni-idzena \
+            --slug legends-01-prohodnaya-17
+          python src/editorial_agent_v1.py \
+            --article content/articles/science-08-sinie-ogni-idzena.json \
+            --ai-report editorial-check-reports/science-08-sinie-ogni-idzena.json
+          python src/editorial_agent_v1.py \
+            --article content/articles/legends-01-prohodnaya-17.json \
+            --ai-report editorial-check-reports/legends-01-prohodnaya-17.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          high=json.loads(Path("editorial-agent-routing/science-08-sinie-ogni-idzena.json").read_text())
+          low=json.loads(Path("editorial-agent-routing/legends-01-prohodnaya-17.json").read_text())
+          assert high["index"] is not None and high["index"]>80
+          assert high["decision"]=="inspect_for_substantive_issues"
+          assert low["index"] is not None and low["index"]<=80
+          assert low["decision"]=="other_editorial_checks_required"
+          assert not high["publication_authorized"] and not low["publication_authorized"]
+          print("Validated real >80 route:",high["index"])
+          print("Validated real <=80 route:",low["index"])
+          PY
+      - name: Archive diagnostics without article text
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-a-agent-v1-real-pilot
+          path: |
+            editorial-check-reports/
+            editorial-agent-routing/
+          if-no-files-found: warn
+          retention-days: 7
