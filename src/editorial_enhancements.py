@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
-import sys
 
 from editorial_ai_check import ROOT, CONTENT, extract_text
 
