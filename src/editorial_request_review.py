@@ -19,7 +19,7 @@ from editorial_encrypted_review import decrypt
 
 REPO="kaokshi/kaokshi.github.io"
 ARTIFACT="nine-real-qwen-owner-review-encrypted"
-WORKFLOW="real-nine-qwen-e2e.yml"
+WORKFLOW_NAME="Nine real Qwen3-4B articles end-to-end editorial rehearsal"
 
 
 def gh(args, *, runner=subprocess.run):
@@ -32,11 +32,11 @@ def gh(args, *, runner=subprocess.run):
 
 def candidate_runs(repo, *, command=gh):
     payload=json.loads(command(["run","list","--repo",repo,
-                               "--workflow",WORKFLOW,
                                "--limit","100",
-                               "--json","databaseId,status,conclusion,createdAt"]))
+                               "--json","databaseId,status,conclusion,createdAt,name"]))
     return [str(row["databaseId"]) for row in payload
-            if row.get("status")=="completed" and row.get("databaseId")]
+            if row.get("status")=="completed" and row.get("databaseId") and
+            row.get("name")==WORKFLOW_NAME]
 
 
 def safely_extract_plaintext(plaintext, output):
