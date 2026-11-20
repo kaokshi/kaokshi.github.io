@@ -1,0 +1,55 @@
+name: Package ten starter articles for OWNER manual Zen posting
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/editorial_export_manual_10.py'
+      - '.github/workflows/editorial-manual-launch-10.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Word writer
+        run: python -m pip install python-docx==1.2.0
+      - name: Produce ten Word drafts and validate ZIP
+        run: |
+          python src/editorial_export_manual_10.py
+          python - <<'PY'
+          import zipfile, json
+          from pathlib import Path
+          from docx import Document
+          folder=Path('editorial-manual-launch-10')
+          archive=folder/'zen_10_manual_launch_review_DOCX.zip'
+          manifest=json.loads((folder/'MANIFEST.json').read_text(encoding='utf-8'))
+          assert len(manifest['articles'])==10
+          assert sum(a['channel']=='legends' for a in manifest['articles'])==5
+          assert sum(a['channel']=='science' for a in manifest['articles'])==5
+          assert all(a['text_length_nonspace']>=3000 for a in manifest['articles'])
+          assert all(a['content_status']=='draft' for a in manifest['articles'])
+          assert not manifest['publication_authorized_by_export']
+          with zipfile.ZipFile(archive) as z:
+              assert z.testzip() is None
+              docs=[n for n in z.namelist() if n.endswith('.docx')]
+              assert len(docs)==10
+          for docpath in (folder/'DOCX').rglob('*.docx'):
+              doc=Document(docpath)
+              assert len(doc.paragraphs)>=8
+              assert len(doc.paragraphs[0].text)>8
+              print('DOCX_VALID',docpath, 'paragraphs',len(doc.paragraphs))
+          print('ARCHIVE_VALID',archive.stat().st_size)
+          PY
+      - name: Store owner-review ZIP without publishing
+        uses: actions/upload-artifact@v4
+        with:
+          name: 10-Zen-articles-manual-review-DOCX
+          path: editorial-manual-launch-10/zen_10_manual_launch_review_DOCX.zip
+          retention-days: 30
+          if-no-files-found: error
