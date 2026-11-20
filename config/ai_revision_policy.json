@@ -1,6 +1,10 @@
 {
   "schema": "editorial-ai-revision-policy-v1",
   "status": "owner_selected_unvalidated_editorial_triage",
+  "article_length": {
+    "min_non_whitespace_chars": 3000,
+    "max_non_whitespace_chars": 6000
+  },
   "current_channels": [
     "legends",
     "science"

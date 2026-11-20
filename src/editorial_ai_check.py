@@ -9,7 +9,6 @@ import hashlib
 import math
 from datetime import datetime, timezone
 from decimal import Decimal
-from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
@@ -17,28 +16,11 @@ from statistics import mean
 import subprocess
 import tempfile
 
+from editorial_length import count_characters, extract_text
+
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT = ROOT / "content" / "articles"
 OUTPUT = ROOT / "editorial-check-reports"
-
-
-class TextExtractor(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts = []
-
-    def handle_data(self, data):
-        self.parts.append(data)
-
-    def handle_starttag(self, tag, attrs):
-        if tag.lower() in {"p", "div", "br", "h1", "h2", "h3", "li"}:
-            self.parts.append("\n")
-
-
-def extract_text(html):
-    parser = TextExtractor()
-    parser.feed(html)
-    return re.sub(r"\n{3,}", "\n\n", "".join(parser.parts)).strip()
 
 
 def selected_articles(slug=None):
@@ -158,7 +140,7 @@ def evaluate_article(article, *, source_file=None, fallback_slug=None):
         "article_slug": article.get("slug", fallback_slug),
         "channel": article.get("channel"),
         "text_sha256": hashlib.sha256(article_text.encode("utf-8")).hexdigest(),
-        "characters_without_spaces": len(re.sub(r"\s", "", article_text)),
+        "characters_without_spaces": count_characters(article.get("body_html", "")),
         "checks": results,
         "editorial_threshold": review,
         "all_checks_completed": review["status"] == "completed",

@@ -32,7 +32,7 @@ jobs:
           assert len(manifest['articles'])==10
           assert sum(a['channel']=='legends' for a in manifest['articles'])==5
           assert sum(a['channel']=='science' for a in manifest['articles'])==5
-          assert all(a['text_length_nonspace']>=3000 for a in manifest['articles'])
+          assert manifest['all_within_article_length']
           assert all(a['content_status']=='draft' for a in manifest['articles'])
           assert not manifest['publication_authorized_by_export']
           with zipfile.ZipFile(archive) as z:

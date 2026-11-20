@@ -10,6 +10,8 @@ from email.utils import format_datetime
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
+from editorial_length import count_characters, length_finding
+
 BASE = Path(__file__).resolve().parents[1]
 OUT = BASE / "site"
 ARTICLES = BASE / "content" / "articles"
@@ -105,7 +107,7 @@ def read_posts(now):
         # Publication is still separately forbidden before an explicit project launch.
         if post.get("ai_editorial_escalation_unresolved") is True:
             continue
-        if len(re.sub(r"\s", "", strip_tags(post.get("body_html", "")))) < 3000:
+        if length_finding(count_characters(post.get("body_html", ""))):
             continue
         images = post.get("image_files", [])
         if len(images) < 7 or any(not (BASE / f).is_file() for f in images):

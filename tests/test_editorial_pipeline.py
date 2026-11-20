@@ -63,7 +63,9 @@ class WriterTests(unittest.TestCase):
             self.assertIn("мотивацию", request["instruction"])
             return reply
 
+        reply["paragraphs"].append(reply["cta"])
         article = write_article("legends", "Сумерки", provider)
+        self.assertEqual(article["body_html"].count(reply["cta"]), 1)
         self.assertIn("&lt;script&gt;", article["body_html"])
         self.assertTrue(article["release_hold"])
         self.assertFalse(article["publication_authorized"])
@@ -204,3 +206,107 @@ class HoldoutTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "overlaps"):
             evaluate_holdout(manifest, [{"slug": "other", "source_sha256": "a" * 64,
                                          "reviewed_sha256": "c" * 64}])
+
+
+class LengthStandardTests(unittest.TestCase):
+    def test_visible_body_and_both_inclusive_bounds(self):
+        from editorial_length import count_characters, length_finding
+        self.assertEqual(count_characters("<head><title>meta</title></head><p data-note='source'>А &amp; Б&nbsp;\t\n"
+                                          "<img alt='not rendered'> В</p><!--note-->"
+                                          "<style>.css</style><script>secret</script><template>sample</template>"), 4)
+        for count, status in ((2999, "short_article"), (3000, None),
+                              (6000, None), (6001, "long_article")):
+            self.assertEqual(length_finding(count_characters(f"<p>{'Я' * count}</p>")), status)
+
+    def test_volume_repairs_expand_or_trim_and_preserve_the_ending(self):
+        from editorial_length import count_characters, length_finding
+        from editorial_semantic import resize_article
+        ending = "<p>Подпишитесь на канал.</p>"
+        for start, direction, reply in (
+            (2700, "expand", {"paragraphs": ["Новая сцена. " * 31]}),
+            (6200, "trim", {"replacements": [{"paragraph": 1, "after": "Б" * 5650}]}),
+        ):
+            article = {**draft(), "body_html": f"<p>{'Я'*start}</p>{ending}"}
+
+            def provider(task, request):
+                self.assertEqual((task, request["mode"], request["direction"]), ("revise", "resize", direction))
+                return reply
+
+            result, changes = resize_article(article, provider)
+            self.assertTrue(result["body_html"].endswith(ending))
+            self.assertIsNone(length_finding(count_characters(result["body_html"])))
+            self.assertIn(str(count_characters(article["body_html"])), changes[0])
+
+    def test_repair_uses_the_same_budget_and_each_edit_is_rechecked(self):
+        from editorial_length import count_characters, length_finding
+        article = {**draft("legends"), "body_html": "<p>" + "Я" * 2760 + "</p><p>Концовка.</p>"}
+        actions = []
+
+        def provider(task, payload):
+            if task == "diagnose":
+                return {"issues": []}
+            actions.append(task)
+            return {"paragraphs": ["Новая сцена. " * 31]}
+
+        def checker(version, links):
+            report = quality(version, links)
+            finding = length_finding(count_characters(version["body_html"]))
+            report["findings"] = [finding] if finding else []
+            return report
+
+        with TemporaryDirectory() as temp:
+            path = Path(temp)
+            case = new_case(path, path, article, "legends", None, None)
+            self.assertEqual(execute(case, path, provider, None, None, {}, None, checker),
+                             "owner_review_pending")
+            self.assertEqual(actions, ["revise"])
+            self.assertEqual(len(case["versions"]), 2)
+            self.assertEqual(case["versions"][1]["rule"], "article_length")
+            self.assertEqual(case["versions"][1]["report"]["findings"], [])
+            self.assertEqual(execute(case, path, provider, None, None, {}, None, checker),
+                             "owner_review_pending")
+            self.assertEqual(actions, ["revise"])
+
+
+class LocalLlmTests(unittest.TestCase):
+    def test_loopback_only_and_validated_retries(self):
+        from editorial_local_llm import ProviderFailure, complete
+        request = {"task": "write", "instruction": "Write a draft"}
+        calls = []
+
+        def send(endpoint, path, payload, timeout):
+            calls.append(path)
+            self.assertEqual(endpoint.hostname, "127.0.0.1")
+            self.assertEqual(payload["response_format"]["type"], "json_schema")
+            return {"choices": [{"message": {"content": json.dumps(
+                {} if len(calls) == 1 else {"title": "Тест", "paragraphs": ["Абзац"], "cta": "Подписаться"}
+            )}, "finish_reason": "stop"}]}
+
+        result = complete(request, env={"ZEN_LLM_MODEL": "test"}, send=send)
+        self.assertEqual(result["title"], "Тест")
+        self.assertEqual(calls, ["/v1/chat/completions"] * 2)
+        with self.assertRaisesRegex(ProviderFailure, "loopback"):
+            complete(request, env={"ZEN_LLM_MODEL": "test", "ZEN_LLM_URL": "http://example.org:8093"}, send=send)
+
+    def test_ollama_returns_exact_claim_and_source_fragments(self):
+        from editorial_local_llm import complete
+        llm_answer = {"claims": [{"id": "c1", "sentence": 2}], "search_query": "velocity"}
+
+        def send(endpoint, path, payload, timeout):
+            self.assertEqual(path, "/api/chat")
+            self.assertIn("format", payload)
+            return {"message": {"content": json.dumps(llm_answer)}, "done_reason": "stop"}
+
+        environment = {"ZEN_LLM_BACKEND": "ollama", "ZEN_LLM_MODEL": "test"}
+        result = complete({"task": "extract_claims", "instruction": "Find claims", "paragraphs": [
+            {"paragraph": 1, "text": "Вступление. Скорость равнялась двум метрам в секунду."},
+        ]}, env=environment, send=send)
+        self.assertEqual(result["claims"][0]["quote"], "Скорость равнялась двум метрам в секунду.")
+
+        llm_answer = {"verdicts": [{"id": "c1", "verdict": "confirmed", "reason": "Совпадает",
+                                    "evidence_ids": [1]}]}
+        result = complete({"task": "compare_claims", "instruction": "Compare evidence",
+                           "documents": [{"title": "Field report", "url": URL, "text": SOURCE,
+                                          "kind": "primary"}], "claims": result["claims"]},
+                          env=environment, send=send)
+        self.assertEqual(result["verdicts"][0]["evidence"], [{"url": URL, "quote": SOURCE}])

@@ -5,6 +5,8 @@ on:
       - 'src/editorial_ai_check.py'
       - 'src/editorial_agent_v1.py'
       - 'src/editorial_writer.py'
+      - 'src/editorial_length.py'
+      - 'src/editorial_local_llm.py'
       - 'src/editorial_semantic.py'
       - 'src/editorial_factcheck.py'
       - 'src/editorial_research.py'

@@ -9,6 +9,7 @@ import re
 
 from editorial_ai_check import ROOT
 from editorial_agent_v1 import ACTIVE, article_digest
+from editorial_writer import Pending, command_provider
 
 PROPOSALS = {
     "facts": "Добавить в фактчек сопоставление каждого проверяемого тезиса с первоисточником.",
@@ -16,6 +17,10 @@ PROPOSALS = {
     "language": "Добавить подтверждённые языковые ошибки в контрольный набор корректора.",
     "repetition": "Проверять соседние повторы и похожие материалы перед редактурой.",
     "story_logic": "Проверять последовательность событий и мотивацию персонажей по сценам.",
+    "title": "Проверять, соответствует ли обещание заголовка содержанию.",
+    "structure": "Сверять порядок смысловых блоков и переходы между ними.",
+    "length": "Проверять содержательный объём до смысловой редакции и после неё.",
+    "rejection": "Разбирать подтверждённые причины отклонения до изменения инструкций.",
     "opening": "Проверять, даёт ли вступление конкретный вопрос или сцену и ведёт ли к основной теме.",
     "image_rights": "Проверять источник, лицензию и атрибуцию каждой иллюстрации при подборе.",
 }
@@ -57,7 +62,7 @@ def reviewed_observations(case, feedback):
             "source_sha256": versions[0]["text_sha256"], "reviewed_sha256": version_sha,
             "category": category, "owner_decision": outcome, "revision_stage": version["stage"],
             "rule": version["rule"] if version.get("rule") in {
-                "duplicate_paragraph", "duplicate_comma", "semantic",
+                "duplicate_paragraph", "duplicate_comma", "semantic", "article_length",
             } else None,
             "checks_completed": report.get("automated_checks_completed") is True,
             "report_pointer": f"/versions/{i}/report",
@@ -138,6 +143,7 @@ def main():
     parser.add_argument("--review", nargs=2, metavar=("CASE_JSON", "OWNER_FEEDBACK_JSON"),
                         type=Path, action="append", required=True)
     parser.add_argument("--on-request", action="store_true")
+    parser.add_argument("--provider", type=Path, help="Local LLM for advisory prompt suggestions")
     parser.add_argument("--holdout", type=Path, help="Blinded independent owner-reviewed comparison")
     args = parser.parse_args()
     try:
@@ -149,6 +155,26 @@ def main():
             observations.extend(reviewed_observations(json.loads(case.read_text(encoding="utf-8")),
                                                        json.loads(feedback.read_text(encoding="utf-8"))))
         result = report(observations, on_request=args.on_request)
+        if args.provider:
+            provider = command_provider(args.provider)
+            categories = {genre: row["proposals"] for genre, row in result["genres"].items() if row["proposals"]}
+            if categories:
+                try:
+                    suggested = provider("learning_proposals", {
+                        "recurring_issues": categories,
+                        "instruction": ("Предложи точные улучшения промптов по подтверждённым итогам. "
+                                        "Не меняй пороги, веса, правила публикации или лимиты правок. "
+                                        "Верни proposals с category, instruction и rationale."),
+                    })
+                    eligible = {p["category"] for items in categories.values() for p in items}
+                    result["llm_suggestions"] = {"status": "advisory",
+                                                 "proposals": [p for p in suggested["proposals"]
+                                                               if p["category"] in eligible],
+                                                 "provider": provider.identity}
+                except Pending as exc:
+                    result["llm_suggestions"] = {"status": exc.status, "reason": str(exc)}
+                except (KeyError, TypeError) as exc:
+                    result["llm_suggestions"] = {"status": "provider_error", "reason": type(exc).__name__}
         if args.holdout:
             result["holdout"] = evaluate_holdout(json.loads(args.holdout.read_text(encoding="utf-8")), observations)
         print(json.dumps(result, ensure_ascii=False, indent=2))
