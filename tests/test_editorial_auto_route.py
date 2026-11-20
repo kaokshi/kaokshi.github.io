@@ -60,7 +60,8 @@ class RoutingTests(unittest.TestCase):
 
     def test_passes_all_evidence_as_candidate_without_authorizing(self):
         result = route.decide(self.article, self.evidence)
-        self.assertEqual(result["disposition"], "automatic_release_candidate")
+        self.assertEqual(result["disposition"], "send_for_owner_review")
+        self.assertIn("ai_auto_release_threshold_not_validated", result["blockers"])
         self.assertLess(result["risk_score"], 20)
         self.assertFalse(result["publication_authorized"])
 
@@ -70,10 +71,13 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("aggregate_risk_above_20", result["blockers"])
         self.assertEqual(result["disposition"], "send_for_owner_review")
 
-    def test_rubert_26_is_hard_blocked_even_if_aggregate_low(self):
-        self.evidence["ai"]["checks"]["rubert_v4"]["score_percent"] = 26
+    def test_high_rubert_does_not_trigger_unvalidated_ai_rewrite(self):
+        self.evidence["ai"]["checks"]["rubert_v4"]["score_percent"] = 99
         result = route.decide(self.article, self.evidence)
-        self.assertIn("rubert_above_25", result["blockers"])
+        self.assertNotIn("rubert_above_25", result["blockers"])
+        self.assertFalse(result["ai_rewrite_required_by_detector"])
+        self.assertIsNone(result["ai_rewrite_threshold"])
+        self.assertIn("ai_auto_release_threshold_not_validated", result["blockers"])
 
     def test_missing_evidence_never_passes(self):
         result = route.decide(self.article, {})
@@ -109,8 +113,8 @@ class RoutingTests(unittest.TestCase):
             "no_unresolved_factual_contradictions": True,
             "verified_claim_ids": ["c1"],
         }
-        self.assertEqual(route.decide(self.article, self.evidence)["disposition"],
-                         "automatic_release_candidate")
+        self.assertIn("ai_auto_release_threshold_not_validated",
+                      route.decide(self.article, self.evidence)["blockers"])
         self.evidence["factual"]["verified_claim_ids"] = []
         self.assertIn("science_claim_coverage_missing",
                       route.decide(self.article, self.evidence)["blockers"])
