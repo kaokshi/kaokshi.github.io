@@ -91,8 +91,10 @@ jobs:
             https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz \
             -o "$RUNNER_TEMP/lychee.tar.gz"
           mkdir -p "$RUNNER_TEMP/lychee"
-          tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP/lychee" lychee
-          sudo install "$RUNNER_TEMP/lychee/lychee" /usr/local/bin/lychee
+          tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP/lychee"
+          LYCHEE="$(find "$RUNNER_TEMP/lychee" -type f -name lychee -print -quit)"
+          test -n "$LYCHEE" || { echo 'lychee executable absent from release archive'; exit 2; }
+          sudo install "$LYCHEE" /usr/local/bin/lychee
           vale --version
           lychee --version
       - name: Execute nine genuine full editorial pipelines (metadata only)
