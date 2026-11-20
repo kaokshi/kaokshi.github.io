@@ -19,7 +19,7 @@
     "science": null,
     "cinema": null
   },
-  "decision_rule": "No AI score alone triggers mandatory rewriting until tested on independently labeled, relevant holdout corpus. Then a genre-specific threshold may trigger targeted editorial revision, followed by all four fresh AI checks.",
+  "decision_rule": "Owner's latest requirement: once each genre ensemble is independently calibrated and validated, unified index >30 sends to editorial review for up to two targeted revision attempts with fresh full checks, then owner review if unresolved. Until validation, score is diagnostic only and no score-only automated rewrite. Textual or factual defects still trigger revisions independently.",
   "validation_requirements": {
     "minimum_human_holdout": 120,
     "minimum_ai_holdout": 120,
@@ -32,7 +32,7 @@
     "no_overlap_with_calibration_or_model_training": true,
     "frozen_threshold_before_holdout": true
   },
-  "ai_numeric_score_0_to_100": "uncalibrated_editorial_signal_not_probability",
+  "ai_numeric_score_0_to_100": "uncalibrated_editorial_index_not_fraction_of_text_written_by_ai",
   "rubert_hard_limit": null,
   "publication_authorized": false,
   "latest_experimental_evidence": {
@@ -52,5 +52,7 @@
       "upper_fpr_95": 0.1593
     },
     "result": "Neither candidate meets the validation criteria; do not enable."
-  }
+  },
+  "planned_ensemble_review_cutoff_0_to_100": 30,
+  "planned_ensemble_review_cutoff_status": "disabled_until_independently_validated"
 }
