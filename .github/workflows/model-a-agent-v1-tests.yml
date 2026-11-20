@@ -21,6 +21,8 @@ on:
       - 'tests/test_editorial_owner_packet.py'
       - 'src/editorial_commons_images.py'
       - 'tests/test_editorial_commons_images.py'
+      - 'src/editorial_nine_draft_queue.py'
+      - 'tests/test_editorial_nine_draft_queue.py'
       - 'tests/test_model_a_85_trend.py'
       - 'src/editorial_auto_route.py'
       - 'src/editorial_auto_release.py'
@@ -46,7 +48,7 @@ jobs:
           python-version: '3.12'
       - name: Regression suite for model A and agent
         run: |
-          python -m unittest             tests.test_editorial_agent_v1             tests.test_editorial_pipeline             tests.test_editorial_llm_http             tests.test_editorial_two_channel_pilot             tests.test_editorial_owner_packet             tests.test_editorial_commons_images             tests.test_model_a_85_trend             tests.test_editorial_ai_check             tests.test_editorial_auto_route             tests.test_editorial_auto_release             tests.test_editorial_ai_revision_policy             tests.test_build -v
+          python -m unittest             tests.test_editorial_agent_v1             tests.test_editorial_pipeline             tests.test_editorial_llm_http             tests.test_editorial_two_channel_pilot             tests.test_editorial_owner_packet             tests.test_editorial_commons_images             tests.test_editorial_nine_draft_queue             tests.test_model_a_85_trend             tests.test_editorial_ai_check             tests.test_editorial_auto_route             tests.test_editorial_auto_release             tests.test_editorial_ai_revision_policy             tests.test_build -v
       - name: Smoke-test two-channel status-only CLI without a model
         run: |
           python src/editorial_two_channel_pilot.py \
@@ -72,8 +74,10 @@ jobs:
           b=json.load(open("config/ai_revision_policy.json"))
           assert a["publication_enabled"] is False
           assert b["publication_authorized"] is False
-          assert b["paused_channels"]==["cinema"]
-          print("Safe: no automatic publishing or cinema reactivation")
+          assert b["paused_channels"]==[]
+          assert b["current_channels"]==["legends","science","cinema"]
+          assert b["daily_draft_targets"]["total"]==9
+          print("Safe: 3-channel drafts enabled; no automatic publication")
           PY
   real-pilot:
     needs: offline-tests
