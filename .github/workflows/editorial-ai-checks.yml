@@ -76,8 +76,15 @@ jobs:
                 echo "Only article deletions; no analysis to run"
               fi
             else
-              # Workflow-only updates: smoke test an existing read-only draft.
-              python src/editorial_ai_check.py --slug cinema-01-truman-show-real-photos
+              # Workflow-only updates: explicit read-only six-article QA benchmark.
+              # No release, RSS, or source article mutation.
+              python src/editorial_ai_check.py \
+                --slug legends-pilot-midnight-bus-20261120 \
+                --slug legends-pilot-photo-studio-20261120 \
+                --slug science-pilot-noctilucent-clouds-20261120 \
+                --slug science-pilot-hair-ice-20261120 \
+                --slug cinema-pilot-inception-20261120 \
+                --slug cinema-pilot-shutter-island-20261120
             fi
           elif [ -n "$ARTICLE_SLUG" ]; then
             python src/editorial_ai_check.py --slug "$ARTICLE_SLUG"
