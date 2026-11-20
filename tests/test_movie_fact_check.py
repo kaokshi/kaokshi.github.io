@@ -88,6 +88,26 @@ class MovieFactCheckTests(unittest.TestCase):
         self.assertFalse(result["matches"][0]["fact_verified"])
         self.assertTrue(result["matches"][0]["candidate_matches"])
 
+    def test_revision_queue_does_not_rewrite_without_verified_contradiction(self):
+        import movie_revision_queue as revisions
+        report = {
+            "article_slug": "cinema-01-truman-show-real-photos",
+            "source_file": "content/articles/cinema-01-truman-show-real-photos.json",
+            "article_sections": [{"section": "Финал", "status": "requires_editor_review",
+                                  "source_url": "https://ru.wikipedia.org/wiki/Шоу_Трумана"}],
+            "semantic_plot_search": {"matches": [{"section": "Финал",
+                "candidate_matches": [{"cosine_similarity": 0.99, "source_excerpt": "Труман уходит", "source_url": "https://ru.wikipedia.org/wiki/Шоу_Трумана"}]}]},
+            "stills": [{"file": "example.jpg", "article_section": "Финал",
+                        "source_url": "https://example.com", "warnings": ["source_caption_differs_from_article"],
+                        "visual_scene_match": "not_verified"}],
+        }
+        result = revisions.build_queue({"title": "Тест"}, report)
+        self.assertEqual(result["counts"]["automatically_rewritten"], 0)
+        self.assertEqual(result["counts"]["verified_contradictions"], 0)
+        self.assertFalse(result["publication_authorized"])
+        self.assertIsNone(result["items"][0]["suggested_rewrite"])
+        self.assertGreaterEqual(result["counts"]["review_required"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
