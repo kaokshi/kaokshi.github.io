@@ -24,6 +24,10 @@ SOURCE_FILES = {
     "science": ("main/scientific_texts/orig_scientific.json", "main/scientific_texts/generated_scientific.json"),
 }
 GENRES = ("legends", "science")
+PILOT_ARTICLES = {
+    "legends": ("legends-pilot-midnight-bus-20261120", "legends-pilot-photo-studio-20261120"),
+    "science": ("science-pilot-noctilucent-clouds-20261120", "science-pilot-hair-ice-20261120"),
+}
 # Corpus essays are a poor proxy for original horror; film has no verified training set.
 N_TRAIN_PAIRS = 20
 N_HOLDOUT_PAIRS = 10
@@ -186,10 +190,24 @@ def main():
             assert not train_ids.intersection(r["pair_id"] for r in te)
             model=train_research(tr)
             stats=score_research(model,te)
+            pilot_indices = []
+            for slug in PILOT_ARTICLES[genre]:
+                article_path = Path("content/articles") / (slug + ".json")
+                if not article_path.is_file():
+                    raise RuntimeError("Missing pilot for scoring: " + slug)
+                diagnostic = evaluate(article_path.resolve())
+                row = {"features": four_features(diagnostic)}
+                pilot_indices.append({
+                    "slug": slug,
+                    "article_sha256": hashlib.sha256(article_path.read_bytes()).hexdigest(),
+                    "provisional_index_0_100": round(100 * predict(model, row), 2),
+                    "status": "RESEARCH_NOT_CALIBRATED_NOT_AI_AUTHORSHIP_PROBABILITY",
+                })
             report["genres"][genre]={"status":"provisional_trained_and_evaluated",
                                       "domain_warning": "essay is not supernatural fiction" if genre=="legends" else None,
                                       "train_n":len(tr),"holdout_n":len(te),
-                                      "evaluation":stats}
+                                      "evaluation":stats,
+                                      "pilot_indices": pilot_indices}
             (out/(genre+"-RESEARCH-ONLY.json")).write_text(json.dumps(model,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
         finally:
             for p in temp.glob("*.json"):
