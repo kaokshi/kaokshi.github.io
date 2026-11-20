@@ -7,6 +7,8 @@ on:
       - 'editorial-release-evidence/**'
       - 'src/editorial_auto_route.py'
       - 'src/editorial_auto_release.py'
+      - 'tests/test_editorial_auto_route.py'
+      - 'tests/test_editorial_auto_release.py'
       - '.github/workflows/editorial-auto-route.yml'
   workflow_dispatch:
     inputs:
