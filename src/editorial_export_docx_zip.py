@@ -38,11 +38,14 @@ def export_article(channel, slug, target):
         raise ValueError("Article less than 3000 non-space characters")
     doc=Document()
     sec=doc.sections[0]
-    sec.top_margin=Cm(2.1); sec.bottom_margin=Cm(2.1)
-    sec.left_margin=Cm(2.4); sec.right_margin=Cm(2.2)
+    sec.top_margin=Cm(2.1)
+    sec.bottom_margin=Cm(2.1)
+    sec.left_margin=Cm(2.4)
+    sec.right_margin=Cm(2.2)
     styles=doc.styles
     normal=styles["Normal"]
-    normal.font.name="Calibri"; normal.font.size=Pt(11)
+    normal.font.name="Calibri"
+    normal.font.size=Pt(11)
     normal.paragraph_format.space_after=Pt(8)
     normal.paragraph_format.line_spacing=1.18
     title=doc.add_heading(a["title"],level=0)
@@ -78,7 +81,8 @@ def export_article(channel, slug, target):
 
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
-    docs=OUT/"DOCX"; docs.mkdir(exist_ok=True)
+    docs=OUT/"DOCX"
+    docs.mkdir(exist_ok=True)
     manifest={"schema":"six-article-word-export-v1",
               "generated_at":datetime.now(timezone.utc).isoformat(),
               "status":"EDITORIAL_DRAFTS_NOT_PUBLICATION_READY",
