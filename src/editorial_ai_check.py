@@ -54,7 +54,7 @@ def tool_result(argv, text_path, timeout=240):
 
 MODEL_A = ("modernbert", "lightgbm", "transformer")
 REQUIRED_CHECKS = (*MODEL_A, "ai_accent_detector")
-REVIEW_THRESHOLD = 80.0
+REVIEW_THRESHOLD = 85.0
 
 def normalized_aiw_result(argv, text_path):
     """aiw-ru 2.5.2 returns probability in [0, 1]; require valid whole-doc scores."""
@@ -71,7 +71,7 @@ def normalized_aiw_result(argv, text_path):
     return result
 
 def threshold_review(results):
-    """Owner-approved >80 diagnostic REVIEW flag, not a calibrated AI percentage."""
+    """Owner-recommended >85 diagnostic REVIEW flag, not a hard constraint or probability."""
     diagnostics = {}
     for name in MODEL_A:
         item = results.get(name, {})
@@ -108,9 +108,10 @@ def threshold_review(results):
         "review_if_above": REVIEW_THRESHOLD,
         "exceeds_owner_review_threshold": index > REVIEW_THRESHOLD if complete else None,
         "needs_rewrite_based_on_ai": None,
+        "advisory_only": True,
         "calibrated_ai_probability": None,
-        "note": ("Above 80 requires editorial examination and an attempted substantive "
-                 "improvement when defects exist. This index is not percent AI authorship; "
+        "note": ("Above 85 recommends editorial examination; substantive "
+                  "revision requires verified defects. This index is not percent AI authorship; "
                  "a score alone cannot verify a defect or authorize publication."),
     }
 

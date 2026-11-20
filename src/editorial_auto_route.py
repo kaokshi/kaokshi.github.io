@@ -109,8 +109,9 @@ def decide(article, evidence):
         else:
             component_scores.append(value)
     model_a_index = round(sum(component_scores) / 3, 2) if len(component_scores) == 3 else None
-    if model_a_index is not None and model_a_index > 80:
-        blockers.append("model_a_editorial_review_above_80")
+    model_a_review_advisory = model_a_index is not None and model_a_index > 85
+    # This is only a recommended editorial review; a detector score cannot
+    # by itself block or authorize publication. Other launch guards remain.
     if evidence.get("ai_editorial_escalation_unresolved") is True:
         blockers.append("unresolved_ai_editorial_escalation")
     quality = evidence.get("quality")
@@ -184,7 +185,9 @@ def decide(article, evidence):
         "channel": channel, "article_sha256": dg,
         "risk_score": risk, "risk_components": components, "risk_scale": "0-100", "review_if_above": RISK_THRESHOLD,
         "model_a_index_0_100": model_a_index,
-        "model_a_editorial_review_if_above": 80,
+        "model_a_editorial_review_if_above": 85,
+        "model_a_review_advisory": model_a_review_advisory,
+        "model_a_threshold_is_hard_block": False,
         "ai_rewrite_required_by_detector": False,
         "ai_rewrite_threshold": None,
         "disposition": disposition,
@@ -192,7 +195,7 @@ def decide(article, evidence):
         "publication_authorized": False,
         "notes": [
             "A low risk score is NOT scientific fact-checking, legal rights verification, or proof of human authorship.",
-            "Model A >80 routes to editorial review; only verified substantive defects justify actual rewrites.",
+            "Model A >85 is an advisory review signal, never a hard release blocker; only verified substantive defects justify rewrites.",
             "This module routes articles; a separate verified release workflow must check the decision before deployment.",
         ],
     }

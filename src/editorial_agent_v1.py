@@ -93,7 +93,19 @@ def route(article, report, history=None, substantive_issues=None):
         return {**common, "decision": "incomplete_or_stale_checks", "index": None}
     common["index"] = index
     common["review_if_above"] = THRESHOLD
-    if index <= THRESHOLD:
+    common["threshold_advisory_only"] = True
+    if stages and history[-1].get("before_model_a_index") is not None:
+        previous_index = history[-1]["before_model_a_index"]
+        if not (isinstance(previous_index, (int, float)) and not isinstance(previous_index, bool)
+                and math.isfinite(previous_index) and 0 <= previous_index <= 100):
+            raise ValueError("Invalid previous Model A index")
+        common["model_a_delta"] = index - previous_index
+        if stages[-1] == "agent" and index > previous_index:
+            return {**common, "decision": "chatgpt_one_revision_handoff",
+                    "reason": "model_a_increased_after_agent_revision",
+                    "transport_status": "not_connected",
+                    "requires_new_text_and_fresh_all_checks": True}
+    if index <= THRESHOLD and not substantive_issues:
         return {**common, "decision": "other_editorial_checks_required"}
     if substantive_issues is None:
         return {**common, "decision": "inspect_for_substantive_issues"}
