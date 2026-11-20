@@ -17,6 +17,7 @@ from editorial_agent_v1 import ACTIVE
 from editorial_length import count_characters, length_finding, MIN_CHARS, MAX_CHARS
 from editorial_local_llm import request_timeout
 from editorial_revision import save_case
+from editorial_no_repeat import topic_duplicate_reason
 
 GUIDES = {
     "legends": ("Легенды тёмных улиц", "Создай оригинальный вымышленный сюжет. "
@@ -113,6 +114,9 @@ def writer_shape_problem(reply, channel_name):
 def write_article(channel, topic, provider, existing_titles=(), *, documents=(), allow_length_repair=False):
     if channel not in ACTIVE or not topic_key(topic):
         raise ValueError("Use a nonempty topic for legends, science or cinema")
+    duplicate = topic_duplicate_reason(channel, topic, existing_titles)
+    if duplicate:
+        raise ValueError("Repeated editorial topic prohibited: " + duplicate)
     all_titles = list(existing_titles)
     if topic_key(topic) in {topic_key(title) for title in all_titles}:
         raise ValueError("Topic already exists in the editorial corpus")
