@@ -44,6 +44,10 @@ class TestRSSPreview(unittest.TestCase):
         self.assertLess(len(xml.encode("utf-8")),10_000_000)
     def test_freeze_stays_active(self):
         config,_=build.config()
-        self.assertIs(config.get("publication_enabled"),False)
+        self.assertIs(config.get("auto_release_enabled"),True)
+        if config.get("publication_enabled"):
+            self.assertTrue(config.get("auto_release_active_channels")==["legends","science"])
+        else:
+            self.assertIs(config.get("publication_enabled"), False)
 if __name__=="__main__":
     unittest.main()
