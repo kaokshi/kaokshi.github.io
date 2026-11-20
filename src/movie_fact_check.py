@@ -252,7 +252,7 @@ def stills(article, html_images, reference):
     return results
 
 
-def analyze(path, use_imdb=False):
+def analyze(path, use_imdb=False, use_semantic=False):
     article = json.loads(path.read_text(encoding="utf-8"))
     if article.get("channel") != "cinema":
         raise ValueError("Movie Fact Check only works for cinema")
@@ -266,6 +266,13 @@ def analyze(path, use_imdb=False):
         wiki = {"status": "unavailable", "reason": "No film reference metadata indexed"}
         imdb = {"status": "unavailable", "reason": "No IMDb ID indexed"}
     detailed = comparison(article_sections, wiki)
+    semantic = {"status": "not_run", "matches": []}
+    if use_semantic:
+        try:
+            from movie_semantic import semantic_candidates
+            semantic = semantic_candidates(article_sections, wiki)
+        except Exception as exc:
+            semantic = {"status": "unavailable", "matches": [], "reason": str(exc)[:300]}
     images = stills(article, html_images, ref)
     imdb_data = imdb.get("data") or {}
     metadata = {"expected": ref, "imdb_lookup": imdb, "wikipedia_metadata": metadata_from_wikipedia(wiki, ref), "status": "needs_human_review"}
@@ -281,12 +288,15 @@ def analyze(path, use_imdb=False):
         "reference_catalog": metadata,
         "wikipedia": {k: v for k, v in wiki.items() if k != "extract"},
         "article_sections": detailed,
+        "semantic_plot_search": semantic,
         "stills": images,
         "summary": {
             "sections_reviewed": len(detailed),
             "sections_with_textual_overlap": sum(x["status"] == "plot_textual_overlap" for x in detailed),
             "sections_needing_review": sum(x["status"] == "requires_editor_review" for x in detailed),
             "commentary_sections_excluded": sum(x["status"] == "commentary_not_suitable_for_plot_lookup" for x in detailed),
+            "semantic_status": semantic["status"],
+            "semantic_sections_with_candidates": sum(bool(x.get("candidate_matches")) for x in semantic.get("matches", [])),
             "images_indexed": len(images),
             "images_with_metadata_warnings": sum(bool(x["warnings"]) for x in images),
             "film_plot_verified": False,
@@ -295,7 +305,7 @@ def analyze(path, use_imdb=False):
         },
         "limits": [
             "Wikipedia/IMDb are secondary sources and may omit scenes or be inaccurate.",
-            "Keyword/lexical similarity is a triage hint, not factual verification.",
+            "Keyword/lexical similarity and embedding cosine are retrieval hints, not factual verification or entailment.",
             "Still-frame mapping checks existing filenames/captions/source URLs only; it does not recognise image content.",
             "No full film, audio, subtitles or screenplay were downloaded.",
             "The tool never changes original articles, editorial approval, rights, or publication state."
@@ -307,6 +317,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--slug", required=True)
     parser.add_argument("--imdb", action="store_true", help="Optional Cinemagoer online metadata lookup")
+    parser.add_argument("--semantic", action="store_true", help="Run local multilingual E5 semantic retrieval on Wikipedia plot passages")
     parser.add_argument("--output", default=str(REPORTS))
     args = parser.parse_args()
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,100}", args.slug):
@@ -314,7 +325,7 @@ def main():
     path = CONTENT / (args.slug + ".json")
     if not path.is_file():
         parser.error("Article not found")
-    report = analyze(path, args.imdb)
+    report = analyze(path, args.imdb, args.semantic)
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
     file = out / f"{args.slug}.json"
