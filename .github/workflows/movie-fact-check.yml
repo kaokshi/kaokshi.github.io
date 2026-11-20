@@ -70,6 +70,8 @@ jobs:
           import json
           for path in Path("editorial-movie-reports").glob("*.json"):
               d=json.loads(path.read_text(encoding="utf-8"))
+              if d.get("schema") != "movie-evidence-pilot-v1":
+                  continue
               print("MOVIE_FACT_REPORT", d["article_slug"])
               print("SOURCES",json.dumps({"wikipedia":d["wikipedia"],"imdb":d["reference_catalog"]["imdb_lookup"].get("status")},ensure_ascii=False))
               print("SUMMARY",json.dumps(d["summary"],ensure_ascii=False))
