@@ -1,0 +1,15 @@
+{
+  "cinema-01-truman-show-real-photos": {
+    "channel": "cinema",
+    "prompts": {
+      "01_seahaven_site.jpg": "a neat sunny American suburban town, houses and streets",
+      "02_mirror_site.jpg": "a man looking at himself in a bathroom mirror",
+      "03_viewers_site.jpg": "a group of people watching a television screen",
+      "04_meryl_truman_site.jpg": "a man and a woman standing together talking",
+      "05_cocoa_site.jpg": "a woman advertising a cocoa product in front of a camera",
+      "06_christof_site.jpg": "a television director inside a production control room",
+      "07_sea_site.jpg": "a man sailing alone on a small boat in the ocean",
+      "08_exit_site.jpg": "a man touching the blue wall at the edge of a simulated sky"
+    }
+  }
+}
