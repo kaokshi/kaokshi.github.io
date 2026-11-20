@@ -7,7 +7,6 @@ narrative film recaps. Outputs metadata and hashes, never copyrighted text.
 import hashlib
 import json
 from pathlib import Path
-from collections import Counter
 from datetime import datetime, timezone
 from datasets import load_dataset
 
