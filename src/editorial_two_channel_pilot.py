@@ -24,7 +24,7 @@ PIPELINE = ROOT / "src" / "editorial_pipeline.py"
 PROVIDER = ROOT / "src" / "editorial_local_llm.py"
 
 
-def endpoint_ready(url, timeout=5):
+def endpoint_ready(url, timeout=5, backend="llama.cpp"):
     """Check true local endpoint readiness; no remote URL, no body uploads."""
     endpoint = urlsplit(url)
     try:
@@ -38,7 +38,7 @@ def endpoint_ready(url, timeout=5):
         return {"status": "invalid_endpoint", "reason": "must be a literal loopback HTTP endpoint"}
     conn = http.client.HTTPConnection(endpoint.hostname, endpoint.port, timeout=timeout)
     try:
-        conn.request("GET", "/health")
+        conn.request("GET", "/api/tags" if backend == "ollama" else "/health")
         response = conn.getresponse()
         response.read(2048)
         return {"status": "ready" if response.status == 200 else "not_ready",
@@ -132,7 +132,8 @@ def main():
         p.error("Source documents must exist")
     health = {"status":"not_checked"}
     if not args.status_only:
-        health = endpoint_ready(os.getenv("ZEN_LLM_URL", "http://127.0.0.1:8093"))
+        backend = os.getenv("ZEN_LLM_BACKEND", "llama.cpp")
+        health = endpoint_ready(os.getenv("ZEN_LLM_URL", "http://127.0.0.1:11434" if backend == "ollama" else "http://127.0.0.1:8093"), backend=backend)
     rows = []
     for channel, topic in (("legends", args.legends_topic), ("science", args.science_topic)):
         if args.status_only or health["status"] != "ready":
