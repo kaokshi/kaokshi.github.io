@@ -1,0 +1,32 @@
+name: Prepare free manual ZeroGPT review (no API, read-only)
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: "Exact existing article slug"
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test local text preparation (offline)
+        run: python -m unittest discover -s tests -p test_zerogpt_manual_packet.py
+      - name: Prepare text and SHA-256 for manual upload
+        env:
+          ARTICLE_SLUG: ${{ inputs.slug }}
+        run: python src/zerogpt_manual_packet.py --slug "$ARTICLE_SLUG"
+      - name: Upload manual review packet (never publish)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zerogpt-manual-packet
+          path: zerogpt-manual-packets/
+          if-no-files-found: error
+          retention-days: 1
