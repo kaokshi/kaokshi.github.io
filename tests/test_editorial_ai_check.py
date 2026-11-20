@@ -42,34 +42,24 @@ class EditorialAiChecksTest(unittest.TestCase):
             self.assertEqual(saved["status"], "draft")
             self.assertFalse(saved["publication_authorized"])
 
-    def test_no_unvalidated_ai_threshold(self):
-        results={
-            "rubert_v4":{"status":"completed","data":{"probability":.99,"score_percent":99}},
-            "modernbert":{"status":"completed","data":{"score_percent":99}},
-            "lightgbm":{"status":"completed","data":{"score_percent":99}},
-            "ai_accent_detector":{"status":"completed","data":{"ai_accent_score":.99}},
-        }
-        decision=checker.threshold_review(results)
-        self.assertEqual(decision["status"],"diagnostics_only")
-        self.assertIsNone(decision["passed"])
-        self.assertIsNone(decision["limit_percent"])
-        self.assertIsNone(decision["needs_rewrite_based_on_ai"])
-        self.assertEqual(decision["checks"]["rubert_v4"]["index_0_100"],99)
+    def test_owner_model_a_threshold_and_style_separation(self):
+        def checked(p):
+            return {"status": "completed", "data": {"score_percent": p}}
+        r={"modernbert":checked(80),"lightgbm":checked(90),"transformer":checked(70),
+           "ai_accent_detector":{"status":"completed","data":{"ai_accent_score":.10}}}
+        result=checker.threshold_review(r)
+        self.assertEqual(result["model_a_index_0_100"],80)
+        self.assertFalse(result["exceeds_owner_review_threshold"])
+        self.assertIsNone(result["calibrated_ai_probability"])
+        r["transformer"]["data"]["score_percent"]=90
+        self.assertTrue(checker.threshold_review(r)["exceeds_owner_review_threshold"])
+        self.assertIsNone(checker.threshold_review({})["model_a_index_0_100"])
 
-    def test_missing_ai_scores_are_not_falsely_passed(self):
-        decision=checker.threshold_review({})
-        self.assertEqual(decision["status"],"diagnostics_only")
-        self.assertIsNone(decision["checks"]["rubert_v4"]["index_0_100"])
-        self.assertIsNone(decision["passed"])
-
-    def test_rubert_windows_cover_long_text(self):
-        from rubert_v4_runner import windows
-        words = [f"слово{i}" for i in range(340)]
-        segments = windows(" ".join(words))
-        self.assertGreater(len(segments), 2)
-        self.assertEqual(segments[0].split()[0], "слово0")
-        self.assertEqual(segments[-1].split()[-1], "слово339")
-        self.assertTrue(all(len(x.split()) <= 85 for x in segments))
+    def test_normalized_aiw_probability(self):
+        from unittest.mock import patch
+        with patch.object(checker,"tool_result",return_value={"status":"completed","data":{"probability":.8,"skipped":False}}):
+            result=checker.normalized_aiw_result(["aiw-ru"],Path("test.txt"))
+        self.assertEqual(result["data"]["score_percent"],80)
 
     def test_slug_validation(self):
         with self.assertRaises(ValueError):
