@@ -4,9 +4,13 @@ import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import copy
+import tempfile
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 import editorial_agent_v1 as agent
 import editorial_ai_check as ai
+import editorial_revision as revision
+import editorial_revision_checks as revision_checks
 
 def data(text="Текст статьи"):
     a={"slug":"legends-test","channel":"legends","body_html":"<p>"+text+"</p>"}
@@ -73,6 +77,14 @@ class CheckerTests(unittest.TestCase):
         self.assertEqual(x["model_a_index_0_100"],80)
         self.assertFalse(x["exceeds_owner_review_threshold"])
         self.assertEqual(x["checks"]["ai_accent_detector"]["index_0_100"],12)
+    def test_above_80_is_not_rounded_back_to_threshold(self):
+        results = {name: {"status": "completed", "data": {"score_percent": score}}
+                   for name, score in zip(ai.MODEL_A, (70, 80, 90.0001))}
+        results["ai_accent_detector"] = {"status": "completed", "data": {"ai_accent_score": 0.11}}
+        review = ai.threshold_review(results)
+        self.assertTrue(review["exceeds_owner_review_threshold"])
+        self.assertGreater(review["model_a_index_0_100"], 80)
+
     def test_failed_model_cannot_average(self):
         results={}
         self.assertIsNone(ai.threshold_review(results)["model_a_index_0_100"])
@@ -84,5 +96,125 @@ class CheckerTests(unittest.TestCase):
         with patch.object(ai,"tool_result",return_value={"status":"completed","data":{"probability":.10,"skipped":True}}):
             x=ai.normalized_aiw_result(["cmd"],Path("/tmp/no-file"))
         self.assertEqual(x["status"],"error")
+
+class RevisionTests(unittest.TestCase):
+    def setUp(self):
+        repeated = "<p>В полночь открылась дверь, и сторож услышал шаги в коридоре.</p>"
+        body = ("<h2>Глава</h2><p>Сторож,, остался у окна.</p>" + repeated + "\n" + repeated
+                + '<p><a href="https://example.org">Запись,, сохранилась</a>.</p>'
+                + "<p>" + "Часы пробили полночь. " * 200 + "</p>")
+        self.draft = {"slug": "legends-revision-test", "channel": "legends", "status": "draft",
+                      "body_html": body, "release_hold": True, "publication_authorized": False}
+        self.case = {"decision": "checks_pending", "versions": [
+            {"stage": "original", "article": copy.deepcopy(self.draft),
+             "text_sha256": agent.article_digest(self.draft)}]}
+
+    def report(self, article, score=91, complete=True, issues=()):
+        _, ai_report = data()
+        ai_report["article_slug"] = article["slug"]
+        ai_report["text_sha256"] = agent.article_digest(article)
+        ai_report["editorial_threshold"]["model_a_index_0_100"] = score
+        return {"ai": ai_report, "text_sha256": agent.article_digest(article),
+                "automated_checks_completed": complete, "findings": [],
+                "grammar": {"issues": list(issues)}, "vale": {"issues": []},
+                "manual_checks_pending": ["fiction_originality_and_logic", "image_rights"]}
+
+    def test_two_real_edits_then_assistant_on_residual_issue_even_after_index_drops(self):
+        checked = []
+        snapshots = []
+
+        def check(article):
+            checked.append(article["body_html"])
+            return self.report(article, score=91 if len(checked) == 1 else 70,
+                               issues=["Проверить мотивацию персонажа."])
+
+        def save(case):
+            snapshots.append(copy.deepcopy(case))
+
+        revision.run_case(self.case, check, save)
+        self.assertEqual(len(checked), 3)
+        self.assertEqual(checked[1].count("дверь, и сторож"), 1)
+        self.assertIn("Сторож,, остался", checked[1])
+        self.assertIn("Сторож, остался", checked[2])
+        self.assertIn('<a href="https://example.org">Запись,, сохранилась</a>', checked[2])
+        self.assertEqual(self.case["decision"], "assistant_handoff_pending")
+        self.assertEqual(self.case["handoff"]["transport_status"], "not_connected")
+        self.assertTrue(self.case["versions"][0]["model_a_review_triggered"])
+        self.assertFalse(self.case["versions"][-1]["model_a_review_triggered"])
+        self.assertNotIn("report", snapshots[0]["versions"][-1])
+        response = {"base_text_sha256": self.case["handoff"]["text_sha256"], "edits": [
+            {"paragraph": 1, "before": "Сторож, остался у окна.",
+             "after": "Сторож остался у окна, чтобы разглядеть ключ в руке незнакомца.",
+             "reason": "Объяснил решение сторожа."}]}
+        revision.run_case(self.case, check, save, response)
+        self.assertEqual(self.case["decision"], "owner_review_pending")
+        self.assertEqual(len(checked), 4)
+        self.assertEqual([v["stage"] for v in self.case["versions"]],
+                         ["original", "agent", "agent", "assistant"])
+        for before, after in zip(self.case["versions"], self.case["versions"][1:]):
+            self.assertEqual(before["text_sha256"], after["before_text_sha256"])
+            self.assertEqual(after["report"]["text_sha256"], after["text_sha256"])
+            self.assertTrue(after["article"]["release_hold"])
+            self.assertFalse(after["article"]["publication_authorized"])
+        self.assertEqual(self.case["versions"][0]["article"], self.draft)
+        with self.assertRaises(ValueError):
+            revision.run_case(self.case, check, save, response)
+
+    def test_incomplete_candidate_check_is_retried_without_another_edit(self):
+        checked = []
+
+        def interrupted(article):
+            checked.append(agent.article_digest(article))
+            return self.report(article, complete=len(checked) == 1)
+
+        revision.run_case(self.case, interrupted, lambda _: None)
+        self.assertEqual(self.case["decision"], "checks_pending")
+        self.assertEqual(len(self.case["versions"]), 2)
+        self.assertNotIn("index", self.case["versions"][-1])
+        revision.run_case(self.case, self.report, lambda _: None)
+        self.assertEqual(len(self.case["versions"]), 3)
+        self.assertEqual(self.case["versions"][1]["text_sha256"], checked[1])
+        self.assertEqual(self.case["decision"], "owner_review_pending")
+
+    def test_stale_and_unchanged_assistant_responses(self):
+        draft = {**self.draft, "body_html": "<p>Сторож вышел.</p>"}
+        edit = {"paragraph": 1, "before": "Сторож вышел.", "after": "Сторож вышел.  ",
+                "reason": "Пример."}
+        with self.assertRaises(ValueError):
+            revision.assistant_edit(draft, {"base_text_sha256": "stale", "edits": [edit]})
+        with self.assertRaises(ValueError):
+            revision.assistant_edit(draft, {"base_text_sha256": agent.article_digest(draft), "edits": [edit]})
+
+    def test_high_index_without_defect_does_not_rewrite(self):
+        self.case["versions"] = [{"stage": "original",
+                                 "article": {**self.draft, "body_html": "<p>Сторож вышел.</p>"}}]
+        version = self.case["versions"][0]
+        version["text_sha256"] = agent.article_digest(version["article"])
+        revision.run_case(self.case, self.report, lambda _: None)
+        self.assertEqual(len(self.case["versions"]), 1)
+        self.assertEqual(self.case["decision"], "owner_review_pending")
+        self.assertIn("model_a_editorial_review", self.case["handoff"]["reasons"])
+
+    def test_cli_skips_paused_channel_without_creating_case(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "cinema.json"
+            source.write_text(json.dumps({**self.draft, "channel": "cinema"}), encoding="utf-8")
+            output = Path(temp) / "case"
+            with patch.object(sys, "argv", ["revision", "--article", str(source), "--case-dir", str(output)]):
+                revision.main()
+            self.assertFalse(output.exists())
+
+    def test_real_quality_adapter_marks_missing_grammar_and_model(self):
+        with (patch.object(revision_checks, "command_report", return_value={"status": "error"}),
+              patch.object(revision_checks, "evaluate_article", return_value={}),
+              patch.object(revision_checks, "CONTENT", Path("/nonexistent"))):
+            def unavailable(_):
+                raise OSError("LanguageTool not installed")
+            result = revision_checks.check_draft(self.draft, unavailable)
+        self.assertEqual(result["text_sha256"], agent.article_digest(self.draft))
+        self.assertEqual(result["grammar"]["status"], "error")
+        self.assertFalse(result["automated_checks_completed"])
+        self.assertIn("image_rights", result["manual_checks_pending"])
+
 
 if __name__=="__main__": unittest.main()

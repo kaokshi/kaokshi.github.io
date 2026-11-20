@@ -47,5 +47,5 @@
     "cannot_unpause_cinema": true,
     "cannot_approve_articles_automatically": true
   },
-  "implementation_status": "configuration_and_guidelines_only_learner_runtime_not_implemented"
+  "implementation_status": "owner_reviewed_local_observations_and_proposals_implemented"
 }

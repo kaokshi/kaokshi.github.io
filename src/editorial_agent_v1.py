@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """Zen AI Editorial Agent v1: read-only, provenance-bound review/escalation router.
 
-This *routes* completed quality/AI evidence; actual writing, automatic revision,
-ChatGPT handoff transport and owner messaging require separate integrations.
-No operation publishes, activates RSS, or changes article source.
+This routes evidence produced by the existing check workflow. The separate
+editorial_revision command performs draft revisions and prepares handoff packages.
 """
 import argparse
 from hashlib import sha256
 import json
 import math
 from pathlib import Path
-from editorial_ai_check import extract_text
+from editorial_ai_check import MODEL_A, REQUIRED_CHECKS, REVIEW_THRESHOLD, extract_text
 
-MODEL_A = ("modernbert", "lightgbm", "transformer")
-THRESHOLD = 80.0
+THRESHOLD = REVIEW_THRESHOLD
 ACTIVE = ("legends", "science")
 MAX_AGENT = 2
 MAX_ASSISTANT = 1
@@ -33,10 +31,14 @@ def validate_ai_report(article, report):
         return None
     if report.get("all_checks_completed") is not True:
         return None
-    if not all(report.get("checks", {}).get(name, {}).get("status") == "completed"
-               for name in (*MODEL_A, "ai_accent_detector")):
+    checks = report.get("checks")
+    if not isinstance(checks, dict) or not all(
+        isinstance(checks.get(name), dict) and checks[name].get("status") == "completed"
+        for name in REQUIRED_CHECKS
+    ):
         return None
-    score = report.get("editorial_threshold", {}).get("model_a_index_0_100")
+    threshold = report.get("editorial_threshold")
+    score = threshold.get("model_a_index_0_100") if isinstance(threshold, dict) else None
     if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score) or not 0 <= score <= 100:
         return None
     return float(score)

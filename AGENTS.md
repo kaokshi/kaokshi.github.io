@@ -17,7 +17,7 @@ Self-learning is **feedback-driven improvement**, not uncontrolled online model 
 1. Gather verified reviewer feedback, concrete factual/style corrections, full revision provenance, and successful/failed quality checks into structured cases. Retain failures and never treat a ZeroGPT or Model A score as human-written ground truth.
 2. Identify recurring editorial defects by genre; recommend improvements to drafting prompts, checking rules, source vetting, and image rights. Only use lawfully reusable, provenance-verified training samples; avoid contamination of independent holdouts.
 3. Propose experiments in separate branches and demonstrate improvements on an untouched holdout with regression tests and a clear rollback plan. Present before/after evidence and uncertainty; human approval required to deploy new weights, prompts or thresholds.
-4. Do not automatically retrain or swap classifier weights, autonomously change the >80 review threshold, create open-ended revision loops, or change publication policies. The self-learning runtime is **not yet implemented**; treat `enabled=true` as permission to collect learning evidence and prepare proposals, not as a promise that the agent trains itself in the background.
+4. Do not automatically retrain or swap classifier weights, autonomously change the >80 review threshold, create open-ended revision loops, or change publication policies. `src/editorial_learning.py` collects owner-reviewed cases and proposes experiments on request or after a batch. Keep case data and feedback outside the repository.
 5. Never store private data, credentials, unlicensed datasets or personal information in public repository files.
 
 ## Development expectations
