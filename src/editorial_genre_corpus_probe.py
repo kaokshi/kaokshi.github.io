@@ -80,9 +80,23 @@ def probe_literary():
 
 
 def probe_zen_science():
+    # Dataset features include nested comments with inconsistent Arrow types.
+    # Parse its published JSON directly instead of using Arrow schema inference.
+    from huggingface_hub import hf_hub_download
+    path = hf_hub_download(repo_id=ZEN, filename="dzen-data.json", repo_type="dataset")
+    with open(path, encoding="utf-8") as reader:
+        payload = json.load(reader)
+    if isinstance(payload, dict):
+        observations = payload.get("data") or payload.get("articles") or payload.get("records") or []
+    elif isinstance(payload, list):
+        observations = payload
+    else:
+        raise ValueError("Unsupported Dzen raw file format")
     counts = collections.Counter()
     ids = set()
-    for row in genres(ZEN):
+    for row in observations[:MAX_ROWS]:
+        if not isinstance(row, dict):
+            continue
         counts["scanned"] += 1
         category = str(row.get("category") or "").strip().lower()
         if category != "science":
