@@ -63,6 +63,24 @@ class TopicPlanTests(unittest.TestCase):
         self.assertEqual(len({row["channel"] for row in plan["tasks"]}),3)
         self.assertFalse(plan["publication_authorized"])
 
+    def test_rejection_diagnostics_contain_counts_not_topics(self):
+        diagnostics={}
+        calls={}
+        def provider(task,payload):
+            channel=payload["channel"]
+            calls[channel]=calls.get(channel,0)+1
+            if channel=="legends" and calls[channel]==1:
+                return {"tasks":[{"topic":"Коротко","research_query":""}]}
+            return provider_proposals(task,channel,count=1)
+        with TemporaryDirectory() as tmp:
+            result=create_plan("2026-11-22",Path(tmp),provider,
+                               per_channel=1,diagnostics=diagnostics)
+        self.assertEqual(len(result["tasks"]),3)
+        self.assertEqual(diagnostics["channels"]["legends"]["invalid_topic"],1)
+        self.assertEqual(diagnostics["channels"]["legends"]["attempts"],2)
+        self.assertEqual(diagnostics["channels"]["cinema"]["accepted"],1)
+        self.assertNotIn("topic",str(diagnostics))
+
     def test_pilot_still_rejects_bad_science_query(self):
         def provider(task,payload):
             if payload["channel"]=="science":
