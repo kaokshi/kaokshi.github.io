@@ -283,11 +283,19 @@ def run(args, parser, root):
                 if documents is None and saved_docs.is_file():
                     documents = load(saved_docs)["documents"]
                 if documents is None and args.topic and args.channel == "science" and research and args.provider:
+                    query = args.research_query
+                    if args.auto_topic and not query and not path.exists():
+                        query = provider("research_query", {"topic": args.topic, "instruction":
+                            "Give a short English database search query using the scientific subject of this topic."})["query"]
                     try:
-                        documents = research("discover", {"topic": args.topic, "search_query": args.research_query,
+                        documents = research("discover", {"topic": args.topic, "search_query": query,
                                                          "claims": []})["documents"]
                     except Pending:
+                        if args.auto_topic and not path.exists():
+                            raise
                         documents = None
+                    if args.auto_topic and not path.exists() and not documents:
+                        raise Pending("fact_check_pending", "No source text retrieved for the selected science topic")
                 if documents:
                     documents = list(valid_sources(documents).values())
                     save_case(saved_docs, {"documents": documents})

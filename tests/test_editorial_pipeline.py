@@ -190,6 +190,15 @@ class FactTests(unittest.TestCase):
                                                 "title": "Measurement", "kind": "primary",
                                                 "scope": "abstract", "text": SOURCE}])
 
+    def test_primary_results_require_matching_article_id_and_type(self):
+        from editorial_research import read_primary
+        def reader(pmcid, kind):
+            data = f'<article article-type="{kind}"><front><article-meta><article-id pub-id-type="pmc">{pmcid}</article-id></article-meta></front><body><sec><title>Results</title><p>First <i>measurement</i>.</p></sec></body></article>'
+            return lambda url, timeout: BytesIO(data.encode())
+        self.assertEqual(read_primary("PMC123", reader("123", "research-article")), "First measurement.")
+        self.assertIsNone(read_primary("PMC123", reader("456", "research-article")))
+        self.assertIsNone(read_primary("PMC123", reader("123", "review-article")))
+
 
 class HoldoutTests(unittest.TestCase):
     def test_paired_qualitative_metrics_and_no_overlap(self):

@@ -23,7 +23,7 @@ def valid_sources(rows):
                 or kind not in {"primary", "secondary"} or url in sources):
             raise ValueError("Each source needs a unique HTTPS URL, title, kind and retrieved text")
         sources[url] = {"url": url, "title": title, "text": text[:24000], "kind": kind,
-                        "scope": "abstract" if row.get("scope") == "abstract" else "supplied_text"}
+                        "scope": row["scope"] if row.get("scope") in {"abstract", "abstract_and_results"} else "supplied_text"}
     return sources
 
 
