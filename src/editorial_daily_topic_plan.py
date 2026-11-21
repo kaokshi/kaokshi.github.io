@@ -73,18 +73,49 @@ def create_plan(day, workspace, provider, *, per_channel=3):
             if not missing:
                 break
             try:
-                reply = provider("plan_channel_topics", {
-                    "date": day, "channel": channel, "needed": missing,
-                    "existing_titles": (archive + [x["topic"] for x in selected + accepted])[-120:],
-                    "instruction": (
-                        instructions[channel] +
-                        f" Верни ровно {missing} вариантов в JSON tasks с полями "
-                        "topic, research_query. Без канала в каждой записи. "
-                        "Для legends/cinema research_query — пустая строка. "
-                        "В предложенных темах нельзя повторять предыдущие. "
-                        "Вся статья будет создана агентом самостоятельно."
-                    ),
-                })
+                instruction = (
+                    instructions[channel] +
+                    f" Верни ровно {missing} вариантов. "
+                    "Не повторяй заголовки из existing_titles. "
+                    "Выбирай только темы, для которых ты сможешь написать текст самостоятельно."
+                )
+                if channel == "cinema":
+                    # A small instruction-tuned model reliably fills two typed
+                    # fields more often than it reproduces elaborate punctuation
+                    # around an entire Russian editorial headline.
+                    reply = provider("plan_cinema_titles", {
+                        "date": day, "channel": channel, "needed": missing,
+                        "existing_titles": (archive + [x["topic"] for x in selected + accepted])[-120:],
+                        "instruction": instruction +
+                            " Только существующие художественные фильмы. "
+                            "Верни JSON films: title — реальное название фильма, "
+                            "year — четырёхзначный год его выпуска (integer). "
+                            "Год будет отдельно подтверждён по Wikidata.",
+                    })
+                    if isinstance(reply, dict) and isinstance(reply.get("films"), list):
+                        proposed = []
+                        for movie in reply["films"]:
+                            if not isinstance(movie, dict):
+                                continue
+                            title, year = movie.get("title"), movie.get("year")
+                            if (not isinstance(title, str) or not 2 <= len(title.strip()) <= 100
+                                    or type(year) is not int or not 1900 <= year <= 2035
+                                    or "«" in title or "»" in title):
+                                continue
+                            proposed.append({
+                                "topic": f"«{title.strip()}» ({year}) — обзор без спойлеров",
+                                "research_query": "",
+                            })
+                        reply = {"tasks": proposed}
+                else:
+                    reply = provider("plan_channel_topics", {
+                        "date": day, "channel": channel, "needed": missing,
+                        "existing_titles": (archive + [x["topic"] for x in selected + accepted])[-120:],
+                        "instruction": instruction +
+                            " Верни JSON tasks с полями topic и research_query. "
+                            "Для науки research_query на английском для поиска исследований, "
+                            "для мистики research_query — пустая строка.",
+                    })
             except Pending:
                 raise
             if not isinstance(reply, dict) or not isinstance(reply.get("tasks"), list):
