@@ -12,7 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
-from time import monotonic
+from time import monotonic, sleep
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -47,8 +47,8 @@ TASKS={
 SYSTEM=("Ты редакционный автор русскоязычного Яндекс Дзена. Пиши естественным живым "
         "русским языком, без канцелярита, повторов, фальшивых цитат, придуманных "
         "источников и утверждений о непроверенных фактах. "
-        "Статья должна содержать 3000–5000 знаков без пробелов, "
-        "4–7 смысловых разделов; каждый раздел начинается строкой **Жирный заголовок**. "
+        "Статья должна содержать 3000–6000 знаков без пробелов, "
+        "4–8 смысловых разделов; каждый раздел начинается строкой **Жирный заголовок**. "
         "Первая строка — выразительный заголовок статьи. "
         "В конце естественный призыв подписаться на соответствующий канал. "
         "Верни только готовую статью, без пояснений.")
@@ -94,11 +94,24 @@ def http_json(url, payload, headers, timeout=150):
         "Content-Type":"application/json",
         "User-Agent":"ZenEditorialAPIDiagnostic/1.0",**headers
     },data=json.dumps(payload,ensure_ascii=False).encode("utf-8"))
-    with urlopen(request,timeout=timeout) as response:
-        raw=response.read(MAX_HTTP_BYTES+1)
-    if len(raw)>MAX_HTTP_BYTES:
-        raise ValueError("response_too_large")
-    return json.loads(raw)
+    for attempt in range(3):
+        try:
+            with urlopen(request,timeout=timeout) as response:
+                raw=response.read(MAX_HTTP_BYTES+1)
+            if len(raw)>MAX_HTTP_BYTES:
+                raise ValueError("response_too_large")
+            return json.loads(raw)
+        except HTTPError as exc:
+            if exc.code not in (429,503) or attempt==2:
+                raise
+            # Respect a short Retry-After only. Never wait through a daily
+            # exhausted quota or treat an error response as valid content.
+            retry_after=exc.headers.get("Retry-After","") if exc.headers else ""
+            if retry_after.isdigit() and int(retry_after)>30:
+                raise
+            sleep(min(30,int(retry_after)) if retry_after.isdigit()
+                  else (4 if attempt==0 else 12))
+    raise RuntimeError("unreachable_retry_state")
 
 def generate(backend,prompt,*,http=http_json,env=None,system_instruction=SYSTEM):
     env=os.environ if env is None else env
@@ -137,9 +150,9 @@ def metrics(prose,elapsed):
     plain=re.sub(r"\*\*|[#_*]","",prose)
     chars=len(re.sub(r"\s","",plain))
     headings=len(re.findall(r"(?m)^\*\*[^*\n]{5,120}\*\*\s*$",prose))
-    return {"chars_without_whitespace":chars,"length_ok":3000<=chars<=5000,
+    return {"chars_without_whitespace":chars,"length_ok":3000<=chars<=6000,
             "bold_section_headers":headings,
-            "section_headers_ok":4<=headings<=7,
+            "section_headers_ok":4<=headings<=8,
             "has_subscription_cta":bool(re.search(r"подпис",prose,re.I)),
             "elapsed_seconds":round(elapsed,2),
             "text_sha256":sha256(prose.encode()).hexdigest(),
@@ -206,7 +219,7 @@ def run(backend,root,*,generator=generate,env=None):
                     "Исправь повторы, канцелярит и логические ошибки, сохраняя "
                     "смысл и фактические ограничения. Не добавляй новые факты, "
                     "цифры, сцены, источники или цитаты. "
-                    "Оставь 3000–5000 символов без пробелов, 4–7 разделов, "
+                    "Оставь 3000–6000 символов без пробелов, 4–8 разделов, "
                     "каждый с заголовком в **двух звёздочках**, и естественный CTA. "
                     "Верни только полностью отредактированную статью."
                 )
