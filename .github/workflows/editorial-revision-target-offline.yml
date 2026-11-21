@@ -1,0 +1,25 @@
+name: Qwen revision target offline regression
+on:
+  push:
+    branches:
+      - fix/editorial-qwen-revision-target-20261121
+    paths:
+      - src/editorial_local_llm.py
+      - tests/test_editorial_qwen_revision_targets.py
+      - .github/workflows/editorial-revision-target-offline.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  targeted-revision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify constrained edit schema without model or paid APIs
+        run: python -m unittest discover -s tests -p 'test_editorial_qwen_revision_targets.py' -v
