@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'research/real_three_channel_qwen_pilot.py'
+      - 'src/editorial_daily_topic_plan.py'
+      - 'src/editorial_local_llm.py'
+      - 'tests/test_editorial_daily_topic_plan.py'
       - 'src/editorial_encrypted_review.py'
       - 'tests/test_editorial_encrypted_review.py'
       - 'src/editorial_writer.py'
