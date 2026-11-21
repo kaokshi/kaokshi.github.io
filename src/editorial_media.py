@@ -153,8 +153,12 @@ def produce_one(channel, row, root, endpoint):
     else:
         image_provider = os.environ.get("ZEN_IMAGE_PROVIDER", "sd-webui")
         if image_provider == "cloudflare":
-            from editorial_cloudflare import generate_scene
-            data, credit = generate_scene(row["prompt"])
+            from editorial_cloudflare import CloudflarePending, generate_scene
+            from editorial_writer import Pending
+            try:
+                data, credit = generate_scene(row["prompt"])
+            except CloudflarePending as exc:
+                raise Pending("media_production_pending", str(exc)) from None
             credit["license"] = row["rights_basis"]
         elif image_provider == "sd-webui":
             # SD WebUI returns base64; send only to an explicitly configured loopback service.
