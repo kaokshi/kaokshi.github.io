@@ -1,0 +1,59 @@
+name: Visual profile Klein 16x9 smoke
+on:
+  push:
+    branches:
+      - feature/editorial-cloudflare-free-image
+    paths:
+      - .github/workflows/klein-visual-profile-smoke.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: "true"
+      ZEN_IMAGE_ALLOW_PAID: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloudflare-scenes-2-and-3
+          run-id: 44900806627
+          github-token: ${{ github.token }}
+          path: input
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check pillow requests
+      - name: Check 16 by 9 image with style profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          PYTHONPATH=src python - <<'PY'
+          from pathlib import Path
+          from editorial_cloudflare_refine import refine_image
+          from editorial_visual_style import final_edit_prompt
+          prompt=("A young dark-haired woman in a dark green wool coat stands before a passable "
+                  "wooden doorframe leading into a cold snowy fir forest at night, holding a small flashlight. "
+                  "The doorway is unblocked and physically coherent, natural snow-covered ground and trees.")
+          data,meta=refine_image(Path("input/cloudflare-scene-2.jpg").read_bytes(),final_edit_prompt(prompt))
+          Path("output/legends-style-1280x720.jpg").write_bytes(data)
+          print("VISUAL_STYLE_TEST=success")
+          print("VISUAL_STYLE_SIZE=%sx%s" % (meta["final_width"],meta["final_height"]))
+          PY
+      - name: Save image privately for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: legends-visual-style-16x9-trial
+          path: output/*.jpg
+          retention-days: 2
+          if-no-files-found: error
