@@ -129,7 +129,12 @@ def produce(channel, plan, root, endpoint, *, checkpoint=None):
         raise ValueError("Plan requires seven or eight unique scenes")
     from editorial_cover import asset
     provider_name = os.environ.get("ZEN_IMAGE_PROVIDER", "sd-webui")
-    key = sha256(json.dumps([channel, plan, endpoint, provider_name,
+    visual_profile = None
+    if channel == "legends" and provider_name == "cloudflare":
+        from editorial_visual_style import PROFILE_FILE
+        visual_profile = sha256(PROFILE_FILE.read_bytes()).hexdigest()
+    key = sha256(json.dumps([channel, plan, endpoint, provider_name, visual_profile,
+                             os.environ.get("ZEN_IMAGE_FINAL_KLEIN", "false"),
                              generation_settings() if channel == "legends" and provider_name == "sd-webui" else None],
                             ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     saved = json.loads(checkpoint.read_text()) if checkpoint and checkpoint.exists() else {}
@@ -154,9 +159,19 @@ def produce_one(channel, row, root, endpoint):
         image_provider = os.environ.get("ZEN_IMAGE_PROVIDER", "sd-webui")
         if image_provider == "cloudflare":
             from editorial_cloudflare import CloudflarePending, generate_scene
+            from editorial_visual_style import scene_prompt, final_edit_prompt
             from editorial_writer import Pending
             try:
-                data, credit = generate_scene(row["prompt"])
+                # A shared, versioned style is always used for new Cloudflare legends scenes.
+                styled_prompt = scene_prompt(row["prompt"])
+                data, credit = generate_scene(styled_prompt)
+                credit["visual_style"] = "zen-legends-visual-profile-v1"
+                # Klein refinement is opt-in until the user approves real 16:9 trial and quota.
+                if os.environ.get("ZEN_IMAGE_FINAL_KLEIN", "false").lower() == "true":
+                    from editorial_cloudflare_refine import refine_image
+                    data, final = refine_image(data, final_edit_prompt(row["prompt"]))
+                    credit["base_model"] = credit["model"]
+                    credit.update(final)
             except CloudflarePending as exc:
                 raise Pending("media_production_pending", str(exc)) from None
             credit["license"] = row["rights_basis"]
