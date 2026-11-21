@@ -99,6 +99,14 @@ def run_one(workspace, channel, topic, *, research_query=None, source_documents=
             cmd.extend(["--source-documents", str(source_documents)])
         else:
             cmd.extend(["--europe-pmc", "--research-query", research_query])
+    elif channel == "cinema":
+        # Film selection is autonomous; do not accept unverified screenplay
+        # guesses as an evidence substitute. A supplied private source bundle
+        # can be resumed without a network lookup.
+        if source_documents is not None:
+            cmd.extend(["--source-documents", str(source_documents)])
+        else:
+            cmd.append("--movie-research")
     try:
         completed = runner(cmd, cwd=ROOT, capture_output=True, text=True,
                            timeout=1800, check=False)
