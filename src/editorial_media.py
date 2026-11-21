@@ -128,7 +128,10 @@ def produce(channel, plan, root, endpoint, *, checkpoint=None):
     if len(plan) not in (7, 8) or len({row["id"] for row in plan}) != len(plan):
         raise ValueError("Plan requires seven or eight unique scenes")
     from editorial_cover import asset
-    key = sha256(json.dumps([channel, plan, endpoint, generation_settings() if channel == "legends" else None], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    provider_name = os.environ.get("ZEN_IMAGE_PROVIDER", "sd-webui")
+    key = sha256(json.dumps([channel, plan, endpoint, provider_name,
+                             generation_settings() if channel == "legends" and provider_name == "sd-webui" else None],
+                            ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     saved = json.loads(checkpoint.read_text()) if checkpoint and checkpoint.exists() else {}
     prior = saved.get("images", {}) if saved.get("plan_sha256") == key else {}
     images = {}
