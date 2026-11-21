@@ -43,7 +43,10 @@ class CloudflareTests(unittest.TestCase):
             generate_scene("dark corridor", env={**VALID, "CLOUDFLARE_API_TOKEN": ""})
 
     def test_success_uses_expected_model_and_does_not_expose_key(self):
-        data = b"\xff\xd8" + b"real-image-bytes" * 20
+        from PIL import Image
+        stream = io.BytesIO()
+        Image.new("RGB", (80, 80)).save(stream, "JPEG")
+        data = stream.getvalue()
         def open_request(request, timeout):
             self.assertEqual(timeout, 120)
             self.assertIn("/ai/run/@cf/black-forest-labs/flux-1-schnell", request.full_url)

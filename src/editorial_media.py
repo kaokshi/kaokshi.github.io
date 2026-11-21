@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from PIL import Image, ImageOps
 from editorial_local_llm import local_endpoint
@@ -17,9 +17,22 @@ from editorial_revision import save_case
 from editorial_writer import private_path
 
 
+def commons_url(url):
+    parsed = urlsplit(url)
+    if (parsed.scheme != "https" or parsed.hostname not in {"commons.wikimedia.org", "upload.wikimedia.org"}
+            or parsed.username is not None or parsed.password is not None or parsed.port not in {None, 443}):
+        raise ValueError("Unsupported Commons URL")
+    return url
+
+
+class CommonsRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return super().redirect_request(req, fp, code, msg, headers, commons_url(newurl))
+
+
 def fetch(url, limit):
-    req = Request(url, headers={"User-Agent": "ZenEditorial/1.0 (github.com/kaokshi/kaokshi.github.io)"})
-    with urlopen(req, timeout=60) as reply:
+    req = Request(commons_url(url), headers={"User-Agent": "ZenEditorial/1.0 (github.com/kaokshi/kaokshi.github.io)"})
+    with build_opener(CommonsRedirect()).open(req, timeout=60) as reply:
         data = reply.read(limit + 1)
     if len(data) > limit:
         raise ValueError("Media response exceeds size limit")
@@ -39,6 +52,7 @@ def commons_photo(pageid):
         raise ValueError("Commons photo lacks an accepted reusable license")
     if not meta.get("Artist") or urlsplit(info["url"]).hostname != "upload.wikimedia.org":
         raise ValueError("Missing photographer or unsupported file host")
+    commons_url(info["descriptionurl"])
     data = fetch(info["url"], 45_000_000)
     return data, {"source": info["descriptionurl"], "original_url": info["url"], "artist": meta["Artist"],
                   "license": meta["LicenseShortName"], "license_url": license_url,
@@ -49,6 +63,8 @@ def save_image(root, channel, identifier, data, credit, caption):
     if channel not in {"science", "legends"} or not re.fullmatch(r"[a-z0-9-]{1,80}", identifier):
         raise ValueError("Unsupported channel or illustration identifier")
     with Image.open(BytesIO(data)) as source:
+        if source.width * source.height > 60_000_000:
+            raise ValueError("Illustration exceeds decode pixel limit")
         img = ImageOps.exif_transpose(source).convert("RGB")
     img.thumbnail((1800, 1800))
     stream = BytesIO()
@@ -63,6 +79,33 @@ def save_image(root, channel, identifier, data, credit, caption):
             "sha256": digest, "rights_verified": True, "adaptation": "JPEG; масштабирование"}
 
 
+def continuity_prompt(row):
+    details = row.get("continuity", [])
+    if not isinstance(details, list) or len(details) > 3 or any(
+            not isinstance(x, str) or not x.strip() or len(x) > 150 for x in details):
+        raise ValueError("Invalid character or location card")
+    return row["prompt"] + ("\nPreserve these visible details: " + "; ".join(details) if details else "")
+
+
+def attach_scene_cards(rows, cards):
+    by_key = {}
+    if not isinstance(cards, list) or len(cards) > 6:
+        raise ValueError("Invalid story continuity cards")
+    for card in cards:
+        key = card["key"]
+        detail = card["description"]
+        if not isinstance(key, str) or not key.strip() or key in by_key or not isinstance(detail, str) or not 1 <= len(detail.strip()) <= 150:
+            raise ValueError("Invalid or repeated continuity card")
+        by_key[key] = detail
+    result = []
+    for row in rows:
+        refs = row.get("continuity_refs", [])
+        if not isinstance(refs, list) or len(refs) > 3 or any(not isinstance(k, str) or k not in by_key for k in refs):
+            raise ValueError("Unknown or excessive scene references")
+        result.append(dict(row, continuity=[by_key[k] for k in refs]))
+    return result
+
+
 def plan_images(article, provider, *, query=None, rights_basis=None, exclude=()):
     from editorial_length import extract_text
     from editorial_layout import parse_sections
@@ -70,12 +113,13 @@ def plan_images(article, provider, *, query=None, rights_basis=None, exclude=())
     inputs = {"title": article["title"], "text": extract_text(article["body_html"]),
               "section_headings": [section[0][0].text for section in sections]}
     if article["channel"] == "legends":
-        if not rights_basis or not rights_basis.strip():
+        if os.getenv("ZEN_IMAGE_PROVIDER", "sd-webui") != "cloudflare" and (not rights_basis or not rights_basis.strip()):
             raise ValueError("Supply the rights basis for this local generator")
         task = "scene_plan"
         inputs["instruction"] = ("Выбери семь разных конкретных сцен из рассказа. Для каждой дай "
                                  "caption на русском и самостоятельный prompt для генерации оригинальной "
-                                 "иллюстрации. Сохрани героев, место и время; избегай надписей и спойлеров.")
+                                 "иллюстрации. В cards дай краткие постоянные признаки повторяющихся героев и мест из текста. "
+                                 "В continuity_refs каждой сцены укажи ключи только видимых в ней героев и мест. Избегай надписей и спойлеров.")
     else:
         if not query or not query.strip():
             query = provider("photo_query", {**inputs, "instruction": "Give a concise English Wikimedia Commons search query for documentary photographs of this subject."})["query"]
@@ -94,22 +138,37 @@ def plan_images(article, provider, *, query=None, rights_basis=None, exclude=())
                 continue
             candidates[page["pageid"]] = {"name": page["title"], "description":
                 unescape(re.sub("<[^>]+>", "", str(meta.get("ImageDescription", {}).get("value", ""))))[:400]}
-        if len(candidates) < 7:
-            raise ValueError("Insufficient photographic candidates from Commons")
+
+        from editorial_science_asset import INNER_PLANETS, MOON_PHASES
         task = "photo_plan"
-        inputs.update(candidates=candidates, instruction="Выбери семь различных документальных фотографий, "
+        inputs.update(candidates=candidates, instruction="Планируй смешанный комплект. Для наблюдаемых объектов выбирай documentary_photo, "
                       "соответствующих теме, по описаниям; приведи pageid и точную подпись на русском. "
-                      "Исключи схемы, рисунки и изображения с недостоверным контекстом.")
+                      "Для механизма допускай explanatory_2d или explanatory_3d, для существенного движения animation. "
+                      "Для каждого элемента укажи media_type и caption, для схемы или анимации обоснуй выбор в rationale "
+                      "и укажи проверяемое утверждение claim. Указывай pageid только для фото. "
+                      f"Доступны точные контракты схем: 2D «{INNER_PLANETS}» и 3D «{MOON_PHASES}». "
+                      "Выбирай их только при прямом соответствии разделу.")
     inputs["instruction"] += " Укажи для каждого изображения номер подходящего смыслового раздела section, начиная с 1."
-    rows = provider(task, inputs)["images"]
+    response = provider(task, inputs)
+    rows = response["images"]
+    if task == "scene_plan":
+        rows = attach_scene_cards(rows, response.get("cards", []))
     if len(rows) not in (7, 8):
         raise ValueError("Model did not select seven or eight images")
     count = len(sections)
     if any(type(r.get("section")) is not int or not 1 <= r["section"] <= count for r in rows):
         raise ValueError("Each planned image needs a valid article section")
-    if task == "photo_plan" and (len({r["pageid"] for r in rows}) != len(rows)
-                                or any(r["pageid"] not in candidates for r in rows)):
-        raise ValueError("Unknown or repeated Commons photograph")
+    if task == "photo_plan":
+        photos = []
+        for row in rows:
+            kind = row.get("media_type", "documentary_photo")
+            if kind == "documentary_photo":
+                photos.append(row["pageid"])
+            elif (kind not in {"explanatory_2d", "explanatory_3d", "animation"}
+                  or "pageid" in row or not row.get("rationale") or not row.get("claim")):
+                raise ValueError("Unsupported or ungrounded science illustration")
+        if len(set(photos)) != len(photos) or any(page not in candidates for page in photos):
+            raise ValueError("Unknown or repeated Commons photograph")
     return [{**r, "id": f"image-{n}", "rights_basis": rights_basis} for n, r in enumerate(rows, 1)]
 
 
@@ -142,6 +201,8 @@ def produce(channel, plan, root, endpoint, *, checkpoint=None):
     images = {}
     for row in plan:
         cached = prior.get(row["id"])
+        if (provider_name == "cloudflare" and channel == "legends") or row.get("media_type") in {"explanatory_2d", "explanatory_3d", "animation"}:
+            cached = None  # Revalidate private rights and the current review on resume.
         if cached:
             path = asset(root, cached["file"])
             if not path.is_file() or sha256(path.read_bytes()).hexdigest() != cached["sha256"]:
@@ -153,56 +214,39 @@ def produce(channel, plan, root, endpoint, *, checkpoint=None):
 
 
 def produce_one(channel, row, root, endpoint):
+    if channel not in {"science", "legends"} or not re.fullmatch(r"[a-z0-9-]{1,80}", row["id"]):
+        raise ValueError("Invalid channel or media identifier")
     if channel == "science":
-        data, credit = commons_photo(row["pageid"])
+        kind = row.get("media_type", "documentary_photo")
+        if kind == "documentary_photo":
+            data, credit = commons_photo(row["pageid"])
+        elif kind in {"explanatory_2d", "explanatory_3d", "animation"}:
+            from editorial_science_asset import reviewed_still
+            data, credit = reviewed_still(root, row)
+            label = "Поясняющая 2D-иллюстрация" if kind == "explanatory_2d" else "Научная 3D-визуализация"
+            row = dict(row, caption=label + ". " + row["caption"])
+        else:
+            raise ValueError("Unknown scientific media type")
+        credit["media_type"] = kind
     else:
         image_provider = os.environ.get("ZEN_IMAGE_PROVIDER", "sd-webui")
         if image_provider == "cloudflare":
-            from editorial_cloudflare import CloudflarePending, generate_scene
-            from editorial_visual_style import scene_prompt, final_edit_prompt
+            from editorial_cloudflare import CloudflarePending
+            from editorial_scene_review import prepare_scene
             from editorial_writer import Pending
             try:
-                # A shared, versioned style is always used for new Cloudflare legends scenes.
-                styled_prompt = scene_prompt(row["prompt"])
-                data, credit = generate_scene(styled_prompt)
-                credit["visual_style"] = "zen-legends-visual-profile-v1"
-                # Klein refinement is opt-in until the user approves real 16:9 trial and quota.
-                if os.environ.get("ZEN_IMAGE_FINAL_KLEIN", "false").lower() == "true":
-                    from editorial_cloudflare_refine import refine_image
-                    from editorial_scene_contract import make_contract, validate_contract, controlled_edit_prompt, structural_verdict, fingerprint
-                    # Optional structured, reviewer-supplied contract; legacy plans get a conservative contract.
-                    supplied = row.get("scene_contract")
-                    contract = validate_contract(supplied) if supplied is not None else make_contract(
-                        row["prompt"], must_keep=["the source scene's subjects, objects, architecture and exact camera viewpoint"])
-                    candidate, final = refine_image(data, controlled_edit_prompt(contract))
-                    result = structural_verdict(data, candidate)
-                    if result["status"] == "reject":
-                        raise Pending("media_production_pending", "Klein generated an unusable frame: " + result["reason"])
-                    from editorial_image_guardrails import detect_severe_crop
-                    crop_check = detect_severe_crop(data, candidate)
-                    if crop_check["status"] == "reject":
-                        raise Pending("media_production_pending", "Klein changed the camera framing too severely")
-                    # Visual semantics cannot be confirmed by geometry/format checks.
-                    # Preserve both candidates and stop before silently promoting a possible semantic regression.
-                    from hashlib import sha256 as _sha256
-                    if not re.fullmatch(r"image-[1-8]", row["id"]):
-                        raise ValueError("Invalid illustration ID")
-                    prefix = "content/assets/legends/" + row["id"] + "-"
-                    source_name = prefix + "source-" + _sha256(data).hexdigest()[:16] + ".jpg"
-                    pending_name = prefix + "klein-review-" + _sha256(candidate).hexdigest()[:16] + ".jpg"
-                    for name, image_bytes in ((source_name, data), (pending_name, candidate)):
-                        path = root / name
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes(image_bytes)
-                    raise Pending("media_production_pending",
-                                  "Original and Klein candidate saved for visual review; "
-                                  "semantic accuracy unverified: " + pending_name)
+                data, credit = prepare_scene(row, root)
+                from editorial_visual_style import expected_size
+                with Image.open(BytesIO(data)) as frame:
+                    if frame.size != expected_size():
+                        raise Pending("media_production_pending", "Сохранённый вариант "
+                                      + sha256(data).hexdigest()
+                                      + " требует проверки композиции и согласованной адаптации к 1280×720")
             except CloudflarePending as exc:
                 raise Pending("media_production_pending", str(exc)) from None
-            credit["license"] = row["rights_basis"]
         elif image_provider == "sd-webui":
             # SD WebUI returns base64; send only to an explicitly configured loopback service.
-            payload = {"prompt": row["prompt"], **generation_settings(),
+            payload = {"prompt": continuity_prompt(row), **generation_settings(),
                        "negative_prompt": "watermark, caption, text, collage", "batch_size": 1}
             req = Request(local_endpoint(endpoint).geturl().rstrip("/") + "/sdapi/v1/txt2img",
                           data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
@@ -213,7 +257,7 @@ def produce_one(channel, row, root, endpoint):
             result = json.loads(raw)
             data = base64.b64decode(result["images"][0], validate=True)
             credit = {"source": "Local Stable Diffusion WebUI", "artist": "ИИ-иллюстрация",
-                      "generation": json.loads(result["info"]), "prompt": row["prompt"],
+                      "generation": json.loads(result["info"]), "prompt": payload["prompt"],
                       "license": row["rights_basis"]}
         else:
             raise ValueError("Unsupported image provider; Modal is disabled pending billing controls")
@@ -264,7 +308,7 @@ def replace_duplicates(article, plan, manifest, root, registry, endpoint, provid
                 spec = next(alternatives) if alternatives is not None else plan[i]
                 if "pageid" in spec:
                     excluded.add(spec["pageid"])
-                changed[i] = produce_one(article["channel"], dict(spec,id=plan[i]["id"]), root, endpoint)
+                changed[i] = produce_one(article["channel"], dict(spec,id=plan[i]["id"], replaces=row["sha256"]), root, endpoint)
 
 def replace_unsuitable(article, plan, images, rejected, root, registry, endpoint, provider, query):
     """Generate new scene bytes or acquire new Commons IDs, then repeat the corpus audit."""
@@ -276,6 +320,6 @@ def replace_unsuitable(article, plan, images, rejected, root, registry, endpoint
         ident = current["id"]
         if ident in rejected:
             row = next(alternatives) if alternatives is not None else by_id[ident]
-            current = produce_one(article["channel"], dict(row, id=ident), root, endpoint)
+            current = produce_one(article["channel"], dict(row, id=ident, replaces=current["sha256"]), root, endpoint)
         result.append(current)
     return replace_duplicates(article, plan, result, root, registry, endpoint, provider, query=query)

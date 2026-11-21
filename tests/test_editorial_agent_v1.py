@@ -98,6 +98,23 @@ class CheckerTests(unittest.TestCase):
         self.assertEqual(x["status"],"error")
 
 class RevisionTests(unittest.TestCase):
+    def test_technical_failures_use_the_same_budget_after_resume(self):
+        from unittest.mock import patch
+        def check(article):
+            result = self.report(article)
+            result["semantic"] = {"status":"completed","issues":[{"id":"issue-1"}]}
+            return result
+        def unavailable(article, report):
+            report["semantic_edit_status"] = "provider_error"
+        with patch.object(revision, "automatic_edit", return_value=None):
+            revision.run_case(self.case, check, lambda _: None, semantic_editor=unavailable)
+            self.assertEqual(self.case["decision"], "semantic_review_pending")
+            resumed = json.loads(json.dumps(self.case))
+            revision.run_case(resumed, check, lambda _: None, semantic_editor=unavailable)
+            self.assertEqual(resumed["agent_attempts_used"], 2)
+            self.assertEqual(resumed["decision"], "assistant_handoff_pending")
+            self.assertEqual(len(resumed["versions"]), 1)
+
     def setUp(self):
         repeated = "<p>В полночь открылась дверь, и сторож услышал шаги в коридоре.</p>"
         body = ("<h2>Глава</h2><p>Сторож,, остался у окна.</p>" + repeated + "\n" + repeated

@@ -1,0 +1,96 @@
+name: Editorial offline benchmark evidence
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'docs/CODEX_INDEPENDENT_AUDIT.md'
+      - '.github/workflows/editorial-audit-replay.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  recount:
+    if: github.head_ref == 'audit/editorial-cloudflare-48'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {run: '44907087391', artifact: qwen-24-case-benchmark, file: benchmark.json, count: 24}
+          - {run: '44909886101', artifact: qwen-real-klein-and-science-benchmark, file: detail.json, count: 16}
+          - {run: '44912319713', artifact: qwen-new-documentary-photos-24, file: cases.json, count: 24}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          run-id: ${{ matrix.run }}
+          github-token: ${{ github.token }}
+          path: evidence
+      - run: python -m pip install pillow
+        if: matrix.file == 'detail.json'
+      - id: replay
+        shell: bash
+        run: |
+          result=$(python src/editorial_audit_replay.py evidence/${{ matrix.file }} ${{ matrix.count }})
+          echo "$result" >> "$GITHUB_STEP_SUMMARY"
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+      - name: Recount • ${{ steps.replay.outputs.result }}
+        run: echo "Recount complete"
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-quality.txt requests
+      - run: python -m unittest discover -s tests
+  archived-klein-pairs:
+    if: github.head_ref == 'audit/editorial-cloudflare-48'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: klein-opencv-three-scenes-results
+          run-id: 44902867759
+          github-token: ${{ github.token }}
+          path: pairs
+      - run: python -m pip install pillow
+      - id: pairs
+        env:
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from hashlib import sha256
+          from io import BytesIO
+          from PIL import Image
+          from editorial_scene_contract import structural_verdict
+          from editorial_image_guardrails import detect_severe_crop
+          statuses = []
+          for n in range(1, 4):
+              folder = Path("pairs") / f"scene-{n}"
+              source = (folder/"01-original.jpg").read_bytes()
+              edited = (folder/"02-klein.jpg").read_bytes()
+              technical = structural_verdict(source, edited)
+              crop = detect_severe_crop(source, edited)
+              with Image.open(BytesIO(edited)) as image:
+                  statuses.append(f"{n}={image.width}x{image.height}/{technical['reason']}/{crop['status']}")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  print(n, sha256(source).hexdigest(), sha256(edited).hexdigest(), technical, crop, file=summary)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print("result=" + ", ".join(statuses), file=output)
+          PY
+      - name: Archived pairs • ${{ steps.pairs.outputs.result }}
+        run: echo "Private pixels inspected by technical checks"

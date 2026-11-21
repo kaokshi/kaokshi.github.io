@@ -21,8 +21,8 @@ def scene_prompt(scene):
     if not isinstance(scene, str) or not scene.strip():
         raise ValueError("Missing image scene")
     p = visual_profile()
-    style = "; ".join(p["visual_identity"][:4])
-    restrictions = "; ".join(p["restrictions"][:4])
+    style = "; ".join(p["visual_identity"])
+    restrictions = "; ".join(p["restrictions"])
     suffix = "\nVISUAL IDENTITY: " + style + ".\nCOMPOSITION: " + p["composition"] + "\nAVOID: " + restrictions
     if len(scene.strip()) + len(suffix) > 2048:
         raise ValueError("Scene plus the channel visual identity exceeds the 2048-character model limit")

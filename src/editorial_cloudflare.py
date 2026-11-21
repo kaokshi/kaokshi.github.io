@@ -6,6 +6,8 @@ be enabled: the account owner must verify Workers Free before running this adapt
 import base64
 import binascii
 import json
+from io import BytesIO
+from PIL import Image
 import os
 import re
 from urllib.error import HTTPError, URLError
@@ -19,7 +21,7 @@ class CloudflarePending(RuntimeError):
     """Generation is unavailable and must not silently switch to paid services."""
 
 
-def generate_scene(prompt, *, env=None, opener=urlopen):
+def generate_scene(prompt, *, env=None, opener=None):
     env = os.environ if env is None else env
     if env.get("ZEN_IMAGE_ALLOW_PAID", "false").lower() not in {"false", "0", "no"}:
         raise CloudflarePending("Paid image mode is forbidden")
@@ -38,6 +40,19 @@ def generate_scene(prompt, *, env=None, opener=urlopen):
         "Content-Type": "application/json",
         "Accept": "application/json",
     }, method="POST")
+    if opener is None:
+        from editorial_cloud_budget import reserve
+        from urllib.request import build_opener, HTTPRedirectHandler
+
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self, *args):
+                return None
+
+        try:
+            reserve(env)
+        except OSError as exc:
+            raise CloudflarePending(str(exc)) from None
+        opener = build_opener(NoRedirect).open
     try:
         with opener(req, timeout=120) as response:
             raw = response.read(MAX_RESPONSE + 1)
@@ -50,13 +65,17 @@ def generate_scene(prompt, *, env=None, opener=urlopen):
         raise CloudflarePending("Cloudflare image response too large")
     try:
         response = json.loads(raw)
-        if response.get("success") is not True:
+        if not isinstance(response, dict) or response.get("success") is not True:
             raise CloudflarePending("Cloudflare rejected the image request")
         image = response["result"]["image"]
         data = base64.b64decode(image, validate=True)
-        if len(data) < 100:
-            raise ValueError("Image data is empty")
+        with Image.open(BytesIO(data)) as decoded:
+            if decoded.format not in {"JPEG", "PNG", "WEBP"} or decoded.width * decoded.height > 16_000_000:
+                raise ValueError("Invalid generated image")
+            decoded.verify()
+        with Image.open(BytesIO(data)) as decoded:
+            decoded.load()
         return data, {"source": "Cloudflare Workers AI", "artist": "ИИ-иллюстрация",
                       "model": MODEL, "prompt": prompt, "steps": 4}
-    except (KeyError, TypeError, ValueError, binascii.Error) as exc:
+    except (KeyError, TypeError, ValueError, OSError, Image.DecompressionBombError, binascii.Error) as exc:
         raise CloudflarePending("Invalid Cloudflare image response") from None

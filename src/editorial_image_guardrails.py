@@ -1,6 +1,6 @@
 """Deterministic guardrail for severe center-crop regressions.
 
-Only compares images with identical dimensions. A changed aspect ratio is not
+Compares center-crop hypotheses, including changed aspect ratios. A changed aspect ratio is not
 proof of a crop. Conservative abstention avoids mistaking legitimate Klein edits.
 Uses Pillow for ANALYSIS only, not for image visual post-processing.
 """
@@ -20,6 +20,14 @@ def detect_severe_crop(original, candidate):
         src.load()
         dst.load()
         if src.size!=dst.size:
+            from PIL import ImageOps
+            fitted = ImageOps.fit(src, dst.size)
+            kept_area = min(src.width * dst.height / (src.height * dst.width),
+                            src.height * dst.width / (src.width * dst.height))
+            difference = _mean_difference(fitted, dst)
+            baseline = _mean_difference(src, dst)
+            if kept_area < 0.70 and difference < 10 and difference < baseline * 0.40:
+                return {"status": "reject", "reason": "severe_center_crop", "retained_fraction": kept_area}
             return {"status":"abstain","reason":"dimensions_differ"}
         src=src.convert("RGB")
         dst=dst.convert("RGB")

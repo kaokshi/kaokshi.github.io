@@ -61,7 +61,10 @@ class AutoReleaseTests(unittest.TestCase):
     def test_verified_article_after_official_launch(self):
         settings = {"publication_enabled": True, "auto_release_enabled": True}
         self.assertIsNone(release.prepare_release(self.article, self.evidence, settings)["article"])
-        result = release.prepare_release(self.article, self.evidence, settings, policy={"future_rss_delivery":{"project_launched":True,"currently_active":True}})
+        policy = {"future_rss_delivery": {"project_launched": True, "currently_active": True}}
+        self.assertIsNone(release.prepare_release(self.article, self.evidence, settings, policy=policy)["article"])
+        policy["editorial_escalation"] = {"automatic_publication_authorized": True}
+        result = release.prepare_release(self.article, self.evidence, settings, policy=policy)
         self.assertEqual(result["article"]["status"], "approved")
         self.assertEqual(result["settings"], settings)
         self.article["release_hold"] = True

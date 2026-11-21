@@ -7,6 +7,7 @@ still cannot certify that the image is scientifically correct in all respects.
 from hashlib import sha256
 import json
 import os
+from editorial_cloud_budget import BudgetUnavailable
 import re
 from editorial_cloudflare_vision import _image_data, VisionPending, MODEL
 
@@ -28,6 +29,8 @@ CONTRACTS = {
 def score_transcription(raw, image_data, contract_key):
     if contract_key not in CONTRACTS:
         raise ValueError("Unknown scientific evidence contract")
+    if not isinstance(raw, str):
+        raise VisionPending("Missing scientific inspection JSON")
     try:
         value=json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())
     except (ValueError,TypeError):
@@ -35,7 +38,7 @@ def score_transcription(raw, image_data, contract_key):
     if not isinstance(value,dict) or not isinstance(value.get("observed_labels"),list):
         raise VisionPending("Missing observed scientific labels")
     labels=value["observed_labels"]
-    if any(not isinstance(x,str) or len(x)>64 for x in labels):
+    if len(labels) > 16 or any(not isinstance(x,str) or len(x)>64 for x in labels):
         raise VisionPending("Invalid scientific label")
     certainty=value.get("all_labels_legible")
     if type(certainty) is not bool:
@@ -68,8 +71,8 @@ def review_science_diagram(image_data,contract_key,*,env=None,post=None):
     if not re.fullmatch("[a-fA-F0-9]{32}",account) or not token:
         raise VisionPending("Missing Cloudflare credentials")
     if post is None:
-        import requests
-        post=requests.post
+        from editorial_cloud_budget import bounded_post
+        post = bounded_post(env, 1_000_000)
     title=CONTRACTS[contract_key]["claim"]
     instruction=(
         "Read the actual visible text printed on this educational diagram. "
@@ -104,7 +107,7 @@ def review_science_diagram(image_data,contract_key,*,env=None,post=None):
         else:
             raise VisionPending("Scientific QA response format unsupported")
         return score_transcription(raw,image_data,contract_key)
-    except VisionPending:
+    except (BudgetUnavailable, VisionPending):
         raise
     except Exception:
         raise VisionPending("Scientific QA model unavailable") from None

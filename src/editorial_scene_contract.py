@@ -108,7 +108,7 @@ def select_reviewed_variant(original, edited, evidence):
         raise ValueError("Review evidence is stale or for a different candidate")
     if evidence.get("original_sha256") != sha256(original).hexdigest():
         raise ValueError("Review source mismatch")
-    if evidence.get("reviewer_kind") not in ("human", "independent_validated_vision"):
+    if evidence.get("reviewer_kind") != "human":
         raise ValueError("A real qualified reviewer is required")
     if evidence.get("decision") == "reject":
         return original, {"selection": "original", "reviewed": True}
