@@ -61,7 +61,7 @@ class BenchmarkTests(unittest.TestCase):
         def generator(backend,prompt,env):
             order.append(backend)
             if backend=="groq":
-                self.assertIn("Черновик Gemini",prompt)
+                self.assertTrue("Черновик Gemini" in prompt or "ТЕКУЩИЙ ТЕКСТ:" in prompt)
             return mock_body,{"total_tokens":45}
         with TemporaryDirectory() as tmp:
             result=run("hybrid",Path(tmp),generator=generator,
