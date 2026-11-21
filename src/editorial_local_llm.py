@@ -40,7 +40,11 @@ SCHEMAS = {
     "article_layout": obj(sections={**SECTIONS, "minItems": 2, "maxItems": 4},
                           cta={**STRING, "minLength": 1, "maxLength": 260}),
     "scene_plan": obj(images=array(obj(caption=STRING, prompt=STRING, section=INTEGER))),
-    "photo_plan": obj(images=array(obj(caption=STRING, pageid=INTEGER, section=INTEGER))),
+    "photo_plan": obj(images=array({"anyOf": [
+        obj(caption=STRING, pageid=INTEGER, section=INTEGER, media_type={"enum": ["documentary_photo"]}),
+        obj(caption=STRING, section=INTEGER, media_type={"enum": ["explanatory_2d", "explanatory_3d", "animation"]},
+            claim=STRING, rationale=STRING),
+    ]})),
     "section_plan": obj(sections=SECTIONS),
     "diagnose": obj(issues=array(ISSUE)),
     "revise": obj(edits=array(EDIT)),
@@ -182,7 +186,7 @@ def complete(request, *, env=None, send=read_json_response):
         instruction += " Поле before не нужно, его восстановит адаптер из исходного абзаца. Пустой after удаляет абзац."
     messages = [{"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps(data, ensure_ascii=False)}]
-    tokens = {"field_review": 40, "photo_query": 60, "research_query": 80, "topics": 450, "scene_plan": 1650, "photo_plan": 900, "section_plan": 350, "article_layout": 450, "write": 3400, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
+    tokens = {"field_review": 40, "photo_query": 60, "research_query": 80, "topics": 450, "scene_plan": 1650, "photo_plan": 1650, "section_plan": 350, "article_layout": 450, "write": 3400, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
               "compare_claims": 1800, "learning_proposals": 800}[task]
     temperature = 0.65 if task == "write" else 0.2
     native = kind == "llama.cpp" and task in {"write", "compare_claims", "article_layout"}

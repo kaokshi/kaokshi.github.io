@@ -32,6 +32,8 @@ def refine_image(original, prompt, *, env=None, post=None, style_reference=None)
         raise ValueError("Invalid original image")
     try:
         with Image.open(BytesIO(original)) as img:
+            if img.width * img.height > 16_000_000:
+                raise ValueError("Oversized reference image")
             img.load()
             img = img.convert("RGB")
             img.thumbnail((480, 480))
@@ -45,6 +47,8 @@ def refine_image(original, prompt, *, env=None, post=None, style_reference=None)
             raise ValueError("Invalid optional style reference")
         try:
             with Image.open(BytesIO(style_reference)) as style:
+                if style.width * style.height > 16_000_000:
+                    raise ValueError("Oversized style reference")
                 style.load()
                 style = style.convert("RGB")
                 style.thumbnail((480, 480))
@@ -72,9 +76,9 @@ def refine_image(original, prompt, *, env=None, post=None, style_reference=None)
             raise CloudflarePending("Klein image refinement rejected")
         data = base64.b64decode(payload["result"]["image"], validate=True)
         with Image.open(BytesIO(data)) as final:
-            final.load()
             if final.size != (width, height):
                 raise CloudflarePending("Klein returned the wrong image dimensions")
+            final.load()
     except CloudflarePending:
         raise
     except (ValueError, KeyError, TypeError, OSError, binascii.Error):

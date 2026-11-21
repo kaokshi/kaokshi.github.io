@@ -19,7 +19,8 @@ def officially_launched(settings, policy=None):
         policy = json.loads((ROOT / "config/ai_revision_policy.json").read_text())
     rss = policy.get("future_rss_delivery", {})
     return (settings.get("publication_enabled") is True and rss.get("project_launched") is True
-            and rss.get("currently_active") is True)
+            and rss.get("currently_active") is True
+            and policy.get("editorial_escalation", {}).get("automatic_publication_authorized") is True)
 
 
 def prepare_release(article, evidence, settings, *, policy=None):

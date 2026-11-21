@@ -28,6 +28,8 @@ CONTRACTS = {
 def score_transcription(raw, image_data, contract_key):
     if contract_key not in CONTRACTS:
         raise ValueError("Unknown scientific evidence contract")
+    if not isinstance(raw, str):
+        raise VisionPending("Missing scientific inspection JSON")
     try:
         value=json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())
     except (ValueError,TypeError):
@@ -35,7 +37,7 @@ def score_transcription(raw, image_data, contract_key):
     if not isinstance(value,dict) or not isinstance(value.get("observed_labels"),list):
         raise VisionPending("Missing observed scientific labels")
     labels=value["observed_labels"]
-    if any(not isinstance(x,str) or len(x)>64 for x in labels):
+    if len(labels) > 16 or any(not isinstance(x,str) or len(x)>64 for x in labels):
         raise VisionPending("Invalid scientific label")
     certainty=value.get("all_labels_legible")
     if type(certainty) is not bool:
