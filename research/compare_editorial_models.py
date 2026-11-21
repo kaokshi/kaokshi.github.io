@@ -161,7 +161,7 @@ def run(backend,root,*,generator=generate,env=None):
         return manifest
     # Preflight yields explicit authentication/model compatibility evidence,
     # never API key contents. Only public model IDs and HTTP codes are stored.
-    if backend in ("gemini","hybrid"):
+    if generator is generate and backend in ("gemini","hybrid"):
         try:
             actual_model=discover_gemini_model(env)
             env=dict(env, GEMINI_SELECTED_MODEL=actual_model)
@@ -173,7 +173,7 @@ def run(backend,root,*,generator=generate,env=None):
                             error_type=type(exc).__name__,
                             http_status=(exc.code if isinstance(exc,HTTPError) else None))
             return manifest
-    if backend in ("groq","hybrid"):
+    if generator is generate and backend in ("groq","hybrid"):
         try:
             manifest["groq_target_listed"]=discover_groq_access(env)
             if not manifest["groq_target_listed"]:
