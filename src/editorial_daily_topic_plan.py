@@ -39,47 +39,57 @@ def create_plan(day,workspace,provider):
     if not (day.startswith("20") and len(day)==10):
         raise ValueError("Expected a calendar date YYYY-MM-DD")
     archive=existing_topics(workspace)
-    reply=provider("plan_topics",{
-        "date":day,"existing_titles":archive[-120:],
-        "instruction":(
-            "Подготовь РОВНО 9 РАЗНЫХ тем для русскоязычных каналов Яндекс Дзена: "
-            "3 legends (самобытная городская мистика), 3 science (необычные, но проверяемые явления), "
-            "3 cinema (конкретные существующие фильмы, выразительные обзоры или точные пересказы). "
-            "Каждую кинотему записывай в форме «Название фильма» (год) — обзор без спойлеров "
-            "или «Название фильма» (год) — пересказ со спойлерами. Название и год должны "
-            "однозначно идентифицировать существующую картину для проверки по Wikidata; "
-            "не вставляй в кавычки слова «обзор» или «пересказ». "
-            "Не повторяй существующие заголовки или темы. Не предлагай выдуманных фильмов, "
-            "не обещай проверенных источников, не выдумывай фактов о кинопроизводстве. "
-            "Для каждой научной темы дай research_query на английском для поиска независимых "
-            "первоисточников. Для мистики и кино research_query возвращай пустую строку. "
-            "Строго JSON {tasks:[{channel,topic,research_query}]}, ровно три каждой категории."
-        )
-    })
-    if not isinstance(reply,dict):
-        raise ValueError("Planner returned invalid JSON")
-    tasks=[]
-    for x in reply.get("tasks",[]):
-        if not isinstance(x,dict):
-            raise ValueError("Malformed topic object")
-        cleaned={"channel":x.get("channel"),"topic":x.get("topic")}
-        if x.get("channel")=="science":
-            cleaned["research_query"]=x.get("research_query")
-        tasks.append(cleaned)
-    plan={"date":day,"tasks":tasks,"generation_provenance":"local_llm_topic_proposal",
-          "article_generation_completed":False,
-          "sources_verified":False,"film_facts_verified":False,
-          "publication_authorized":False}
-    validate_plan(plan)
-    prior={topic_key(t) for t in archive}
-    if any(topic_key(x["topic"]) in prior for x in tasks):
-        raise ValueError("Topic exactly repeats a previous draft or plan")
-    for item in tasks:
-        issue = topic_duplicate_reason(item["channel"], item["topic"], archive)
-        if issue:
-            raise ValueError("Refuse repeated editorial topic: " + issue)
-    return plan
-
+    instructions=(
+        "Подготовь РОВНО 9 РАЗНЫХ тем для русскоязычных каналов Яндекс Дзена: "
+        "3 legends (самобытная городская мистика), 3 science (необычные, но проверяемые явления), "
+        "3 cinema (конкретные существующие фильмы, выразительные обзоры или точные пересказы). "
+        "Каждую кинотему записывай в форме «Название фильма» (год) — обзор без спойлеров "
+        "или «Название фильма» (год) — пересказ со спойлерами. Название и год должны "
+        "однозначно идентифицировать существующую картину для проверки по Wikidata; "
+        "не вставляй в кавычки слова «обзор» или «пересказ». "
+        "Не повторяй существующие заголовки или темы. Не предлагай выдуманных фильмов, "
+        "не обещай проверенных источников, не выдумывай фактов о кинопроизводстве. "
+        "Для каждой научной темы дай research_query на английском для поиска независимых "
+        "первоисточников. Для мистики и кино research_query возвращай пустую строку. "
+        "Строго JSON {tasks:[{channel,topic,research_query}]}, ровно три каждой категории."
+    )
+    last_error = None
+    for attempt in range(3):
+        request = {"date": day, "existing_titles": archive[-120:],
+                   "instruction": instructions + (
+                       "" if last_error is None else
+                       " ПРЕДЫДУЩИЙ ПЛАН ОТКЛОНЁН (" + last_error +
+                       "). Сгенерируй новый независимый план из девяти тем. "
+                       "Проверь количество по каналам, существование фильмов, "
+                       "отсутствие повторов, три корректных поисковых запроса для science."
+                   )}
+        reply = provider("plan_topics", request)
+        try:
+            if not isinstance(reply, dict):
+                raise ValueError("invalid_planner_json")
+            tasks=[]
+            for x in reply.get("tasks", []):
+                if not isinstance(x, dict):
+                    raise ValueError("malformed_task")
+                cleaned={"channel":x.get("channel"), "topic":x.get("topic")}
+                if x.get("channel")=="science":
+                    cleaned["research_query"]=x.get("research_query")
+                tasks.append(cleaned)
+            plan={"date":day,"tasks":tasks,"generation_provenance":"local_llm_topic_proposal",
+                  "article_generation_completed":False,"sources_verified":False,
+                  "film_facts_verified":False,"publication_authorized":False}
+            validate_plan(plan)
+            prior={topic_key(t) for t in archive}
+            if any(topic_key(x["topic"]) in prior for x in tasks):
+                raise ValueError("previous_topic_exact_repeat")
+            for item in tasks:
+                issue=topic_duplicate_reason(item["channel"],item["topic"],archive)
+                if issue:
+                    raise ValueError("previous_topic_semantic_repeat: "+issue)
+            return plan
+        except (ValueError,KeyError,TypeError) as exc:
+            last_error = type(exc).__name__ + ":" + str(exc)[:100]
+    raise ValueError("planner_rejected_after_three_attempts: "+str(last_error)[:120])
 
 def main():
     p=argparse.ArgumentParser()
