@@ -32,6 +32,7 @@ VERDICT = obj(id=STRING, verdict={"type": "string", "enum": ["confirmed", "dispu
 SCHEMAS = {
     "write": ARTICLE,
     "plan_topics": obj(tasks=array(obj(channel={"type": "string", "enum": ["legends", "science", "cinema"]}, topic=STRING, research_query=STRING))),
+    "plan_channel_topics": obj(tasks=array(obj(topic=STRING, research_query=STRING))),
     "diagnose": obj(issues=array(ISSUE)),
     "revise": obj(edits=array(EDIT)),
     "extract_claims": obj(claims=array(CLAIM), search_query=STRING),
@@ -154,9 +155,9 @@ def complete(request, *, env=None, send=read_json_response):
         instruction += " Поле before не нужно, его восстановит адаптер из исходного абзаца. Пустой after удаляет абзац."
     messages = [{"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps(data, ensure_ascii=False)}]
-    tokens = {"write": 3400, "plan_topics": 1200, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
+    tokens = {"write": 3400, "plan_topics": 1200, "plan_channel_topics": 650, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
               "compare_claims": 1800, "learning_proposals": 800}[task]
-    temperature = 0.65 if task in {"write", "plan_topics"} else 0.2
+    temperature = 0.65 if task in {"write", "plan_topics", "plan_channel_topics"} else 0.2
     if kind == "ollama":
         path = "/api/chat"
         payload = {"model": model, "messages": messages, "format": schema, "stream": False,
