@@ -137,7 +137,20 @@ def movie_sources(task, payload, *, get_json=fetch_json):
     plot = match.group(1).strip() if match else ""
     if len(plot) < 180:
         raise Pending("fact_check_pending", "No sufficiently detailed retrieved plot for this film")
+    # P453 is a character-role qualifier of an individual cast (P161) claim,
+    # not an actor name. Keep the mapping attached to its actual actor statement.
+    cast_claims = movie.get("claims", {}).get("P161", [])[:8]
+    character_pairs = []
+    for statement in cast_claims:
+        actor = statement.get("mainsnak", {}).get("datavalue", {}).get("value", {})
+        actor_id = actor.get("id") if isinstance(actor, dict) else None
+        for role in statement.get("qualifiers", {}).get("P453", [])[:2]:
+            character = role.get("datavalue", {}).get("value", {})
+            role_id = character.get("id") if isinstance(character, dict) else None
+            if actor_id in claim_ids(movie, "P161") and isinstance(role_id, str) and re.fullmatch(r"Q[1-9][0-9]*", role_id):
+                character_pairs.append((actor_id, role_id))
     linked = claim_ids(movie, "P57")[:3] + claim_ids(movie, "P161")[:8]
+    linked += [role for _, role in character_pairs]
     people = {}
     if linked:
         names = get_json(WIKIDATA_API, {
@@ -147,6 +160,8 @@ def movie_sources(task, payload, *, get_json=fetch_json):
         people = {ident: label(names.get(ident, {})) for ident in linked if isinstance(names.get(ident), dict)}
     directors = [people[q] for q in claim_ids(movie, "P57")[:3] if people.get(q)]
     cast = [people[q] for q in claim_ids(movie, "P161")[:8] if people.get(q)]
+    cast_roles = [{"actor": people[actor], "character": people[role]}
+                  for actor, role in character_pairs if people.get(actor) and people.get(role)]
     movie_name = label(movie) or title
     fact_lines = [f"Фильм: {movie_name}", "Wikidata ID: " + qid]
     if years:
@@ -155,12 +170,16 @@ def movie_sources(task, payload, *, get_json=fetch_json):
         fact_lines.append("Режиссёры: " + ", ".join(directors))
     if cast:
         fact_lines.append("Актёры (не имена персонажей): " + ", ".join(cast))
+    if cast_roles:
+        fact_lines.append("Актёры и роли по отдельным утверждениям Wikidata P161/P453 (возможны ошибки): " +
+                          "; ".join(row["actor"] + " — " + row["character"] for row in cast_roles))
     identity_url = "https://www.wikidata.org/wiki/" + qid
     plot_url = "https://ru.wikipedia.org/wiki/" + quote(wiki_title.replace(" ", "_"))
     return {
         "status": "source_documents_retrieved_not_plot_verified",
         "film": {"qid": qid, "title": movie_name, "years": years,
-                 "directors": directors, "cast": cast, "wikipedia_title": wiki_title},
+                 "directors": directors, "cast": cast, "cast_roles": cast_roles,
+                 "wikipedia_title": wiki_title},
         "documents": [
             {"url": identity_url, "title": "Wikidata: " + movie_name,
              "text": "\n".join(fact_lines), "kind": "secondary"},
