@@ -1,0 +1,68 @@
+{
+  "schema": "zen-science-mixed-visual-policy-v1",
+  "channel": "science",
+  "status": "approved_editorial_policy_not_active_generator",
+  "strategy": "mixed",
+  "goal": "Use authentic evidence photographs when showing an observed object or experiment; use clearly labeled explanatory 2D/3D scientific diagrams when explaining mechanisms; animation only when motion is essential and platform support has been verified.",
+  "media_types": {
+    "documentary_photo": {
+      "enabled": true,
+      "default": true,
+      "source": "Wikimedia Commons or vetted primary institution",
+      "requires": [
+        "source_url",
+        "license",
+        "author",
+        "scientific_context_verified"
+      ]
+    },
+    "explanatory_2d": {
+      "enabled_for_planning": true,
+      "automatic_production": false,
+      "visual_style": "clear restrained science explainer, precise labels when scientifically validated",
+      "requires": [
+        "clearly_mark_as_illustration",
+        "scientific_factcheck",
+        "rights_verified"
+      ]
+    },
+    "explanatory_3d": {
+      "enabled_for_planning": true,
+      "automatic_production": false,
+      "requires": [
+        "clearly_mark_as_visualization",
+        "scientific_factcheck",
+        "rights_verified"
+      ]
+    },
+    "animation": {
+      "enabled_for_planning": true,
+      "automatic_production": false,
+      "requires": [
+        "motion_has_explanatory_purpose",
+        "zen_rss_support_verified",
+        "rights_verified",
+        "scientific_factcheck"
+      ]
+    }
+  },
+  "visual_rules": [
+    "Do not present synthetic illustrations as documentary photographs",
+    "Never modify authentic photographs to change scientific evidence",
+    "Match every visual to a specific claim and article section",
+    "No fabricated scientific phenomena",
+    "Caption/source attribution in export metadata and policy-compliant rendered placement",
+    "Reject assets with unverified claims or image rights"
+  ],
+  "selection_examples": {
+    "observable_subject": "documentary_photo",
+    "invisible_mechanism": "explanatory_2d_or_3d",
+    "time_evolving_process": "animation_if_supported_else_stepwise_2d"
+  },
+  "production_guardrails": {
+    "publication_enabled": false,
+    "keep_existing_commons_photo_pipeline": true,
+    "no_new_paid_services": true
+  },
+  "evidence_review": "docs/SCIENCE_VISUAL_AUDIENCE_RESEARCH_20261121.md"
+}
