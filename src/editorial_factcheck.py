@@ -126,3 +126,33 @@ def fact_check(article, provider, research=None, documents=None, reviewed=None, 
     report["status"] = "completed"
     report["origin"] = "operator" if manual else "model_grounded_in_sources"
     return report
+
+
+def reference_verdicts(provider):
+    """Independently scored, source-bound controls for the actual configured fact reviewer."""
+    passage = ("Cysts populate liquid water at the periphery of ice, are photosynthetically active, "
+               "can survive for months, and are sensitive to freezing.")
+    source = {"title": "Adaptive traits of cysts of the snow alga Sanguina nivaloides unveiled by 3D subcellular imaging",
+              "url": "https://doi.org/10.1038/s41467-023-43030-7", "text": passage, "kind": "primary"}
+    controls = [
+        ("Цисты находятся в жидкой воде у края льда.", "confirmed"),
+        ("Цисты устойчивы к замораживанию.", "disputed"),
+        ("Средний возраст цист равен семи годам.", "unconfirmed"),
+        ("У Меркурия два спутника.", "unconfirmed"),
+    ]
+    claims = [{"id": str(i), "paragraph": i + 1, "quote": text} for i, (text, _) in enumerate(controls)]
+    reply = provider("compare_claims", {"claims": claims, "documents": [source],
+                     "instruction": "Для каждой цитаты оцени только то, что следует из указанного источника."})
+    rows = reply["verdicts"]
+    if len(rows) != len(claims):
+        raise ValueError("Incomplete factual control results")
+    actual = {r["id"]: r for r in rows}
+    checks = []
+    for claim, (_, expected) in zip(claims, controls):
+        row = actual[claim["id"]]
+        proofs = row["evidence"]
+        grounded = all(p["url"] == source["url"] and p["quote"] and p["quote"] in passage for p in proofs)
+        checks.append({"id": claim["id"], "expected": expected, "actual": row["verdict"],
+                       "passed": row["verdict"] == expected and grounded and bool(proofs or expected == "unconfirmed")})
+    return {"status": "completed" if all(r["passed"] for r in checks) else "fact_check_pending",
+            "source": source["url"], "checks": checks}

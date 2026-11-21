@@ -172,10 +172,10 @@ def complete(request, *, env=None, send=read_json_response):
         data["sources"] = [{k: doc[k] for k in ("source", "title", "kind")} for doc in docs]
         data["passages"] = [{"passage": n, "source": row["source"], "text": prose}
                             for n, (row, prose) in numbered.items()]
-        schema = obj(verdicts=array(obj(id=STRING, verdict=VERDICT["properties"]["verdict"],
-                                        reason=STRING, evidence_ids=array(INTEGER))))
+        schema = obj(verdicts=array(obj(id=STRING, evidence_ids=array(INTEGER),
+                                        reason={**STRING, "maxLength": 320}, verdict=VERDICT["properties"]["verdict"])))
         instruction += (" Вместо evidence верни evidence_ids с номерами passage, "
-                        "по которым можно проверить вывод. При отсутствии прямого "
+                        "по которым можно проверить вывод. Сначала приведи номера фрагментов, затем объясни их смысл и лишь в конце выбери вердикт. Не используй внешние знания. Нерелевантный источник означает unconfirmed. При отсутствии прямого "
                         "подтверждения или опровержения выбери unconfirmed.")
     if task == "revise" and not resize:
         instruction += " Поле before не нужно, его восстановит адаптер из исходного абзаца. Пустой after удаляет абзац."
@@ -184,7 +184,7 @@ def complete(request, *, env=None, send=read_json_response):
     tokens = {"field_review": 40, "photo_query": 60, "research_query": 80, "topics": 450, "scene_plan": 1650, "photo_plan": 900, "section_plan": 350, "write": 3400, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
               "compare_claims": 1800, "learning_proposals": 800}[task]
     temperature = 0.65 if task == "write" else 0.2
-    native = kind == "llama.cpp" and task == "write"
+    native = kind == "llama.cpp" and task in {"write", "compare_claims"}
     if native:
         # Apply the deployed model's template, then constrain token sampling itself.
         rendered = send(endpoint, "/apply-template", {"messages": messages}, timeout=request_timeout(env))

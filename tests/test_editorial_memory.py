@@ -82,3 +82,14 @@ class PersistentExperience(unittest.TestCase):
                 with self.assertRaises(Pending):
                     new_case(root, case_dir, None, "legends", "Задание", invalid)
             self.assertEqual(calls, ["write", "write"])
+
+    def test_reference_checks_block_a_reviewer_that_confirms_everything(self):
+        from editorial_factcheck import reference_verdicts
+        def model(task, data):
+            doc = data["documents"][0]
+            return {"verdicts": [{"id": row["id"], "verdict": "confirmed", "reason": "yes",
+                                  "evidence": [{"url": doc["url"], "quote": doc["text"]}]}
+                                 for row in data["claims"]]}
+        result = reference_verdicts(model)
+        self.assertEqual(result["status"], "fact_check_pending")
+        self.assertEqual(sum(r["passed"] for r in result["checks"]), 1)

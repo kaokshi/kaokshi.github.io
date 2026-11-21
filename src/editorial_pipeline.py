@@ -60,6 +60,7 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
                     attempt = {"number": len(attempts) + 1, "input_sha256": key, "status": "started"}
                     attempts.append(attempt)
                     save_case(attempts_path, attempts)
+                    reply = None
                     try:
                         reply = provider(task, dict(payload, single_attempt=True))
                         save_case(directory / f"writer-raw-{len(attempts)}.json", reply)
@@ -125,8 +126,22 @@ def assemble_report(article, provider, research, documents, reviewed, checkpoint
     checkpoint("semantic_review", semantic)
     facts = saved.get("fact_check")
     if not facts or facts["status"] not in {"completed", "not_applicable"}:
-        facts = fact_check(article, provider, research, documents, reviewed, previous=facts,
-                           checkpoint=lambda partial: checkpoint("fact_check", partial))
+        control = saved.get("fact_control")
+        if (article["channel"] == "science" and reviewed is None
+                and (getattr(provider, "identity", None) or {}).get("kind") in {"llama.cpp", "ollama"}):
+            from editorial_factcheck import reference_verdicts
+            if not control or control["status"] != "completed":
+                try:
+                    control = reference_verdicts(provider)
+                except (Pending, ValueError, KeyError, TypeError) as exc:
+                    control = {"status": "fact_check_pending", "reason": str(exc)}
+                checkpoint("fact_control", control)
+        if control and control["status"] != "completed" and reviewed is None:
+            facts = {"status": "fact_check_pending", "text_sha256": article_digest(article),
+                     "reason": "Fact reviewer failed independent source controls", "sources": [], "claims": []}
+        else:
+            facts = fact_check(article, provider, research, documents, reviewed, previous=facts,
+                               checkpoint=lambda partial: checkpoint("fact_check", partial))
     checkpoint("fact_check", facts)
     if facts["status"] == "completed":
         disputed = [c for c in facts["claims"] if c["verdict"] == "disputed"]
@@ -397,6 +412,11 @@ def run(args, parser, root):
             assembled_path.unlink(missing_ok=True)
             manifest_path = directory / "illustrations.json"
             selection_path = directory / "cover-selection.json"
+            if args.produce_media and decision in {"checks_pending", "fact_check_pending",
+                                                  "semantic_review_pending", "assistant_handoff_pending"}:
+                save_case(selection_path, {"status": "waiting_for_editorial_checks", "decision": decision})
+                print(json.dumps({"status": decision, "directory": str(directory)}))
+                raise SystemExit(2)
             if args.media_plan or args.produce_media:
                 from editorial_media import plan_images, produce, replace_duplicates
                 production_root = private_path(args.asset_root)
