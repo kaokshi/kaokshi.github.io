@@ -110,3 +110,27 @@ def topic_sources(seed, research):
             return related
         failures.append("No matching primary source text")
     raise Pending("topic_selection_pending", "; ".join(failures))
+
+
+
+def science_research(task, payload, *, europe=europe_pmc, fallback=None):
+    """Use verifiable PubMed abstracts only on a real Europe PMC outage.
+
+    Do not treat a genuinely empty Europe PMC result as an outage.
+    If both services fail/return no usable sources, remain fact_check_pending.
+    """
+    from editorial_pubmed import pubmed_sources
+    alternate = pubmed_sources if fallback is None else fallback
+    try:
+        return europe(task, payload)
+    except Pending as original:
+        if task != "discover":
+            raise
+        try:
+            response = alternate(task, payload)
+            if response.get("documents"):
+                return response
+        except (Pending, OSError, ValueError, KeyError, TypeError):
+            pass
+        raise Pending("fact_check_pending",
+                      "Europe PMC unavailable and PubMed returned no verified source documents") from original

@@ -13,7 +13,7 @@ from editorial_agent_v1 import ACTIVE, MAX_AGENT, article_digest
 from editorial_ai_check import CONTENT
 from editorial_factcheck import fact_check, valid_sources
 from editorial_quality import similarity_report
-from editorial_research import europe_pmc, topic_sources
+from editorial_research import science_research, topic_sources
 from editorial_revision import agent_attempts_used, run_case, save_case, save_text
 from editorial_revision_checks import check_draft
 from editorial_semantic import diagnose, revise, resize_article
@@ -279,7 +279,7 @@ def run(args, parser, root):
         if args.research_provider:
             research = command_provider(args.research_provider)
         elif args.europe_pmc:
-            research = europe_pmc
+            research = science_research
         docs = load(args.source_documents)
         documents = docs["documents"] if docs is not None else None
         reviews = {}

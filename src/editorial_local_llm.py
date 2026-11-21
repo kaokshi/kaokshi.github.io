@@ -199,7 +199,36 @@ def complete(request, *, env=None, send=read_json_response):
                         "по которым можно проверить вывод. Сначала приведи номера фрагментов, затем объясни их смысл и лишь в конце выбери вердикт. Не используй внешние знания. Нерелевантный источник означает unconfirmed. При отсутствии прямого "
                         "подтверждения или опровержения выбери unconfirmed.")
     if task == "revise" and not resize:
-        instruction += " Поле before не нужно, его восстановит адаптер из исходного абзаца. Пустой after удаляет абзац."
+        # Choose one concrete issue per provider call. Qwen previously returned
+        # repeated/wrong paragraph indices and exhausted the revision budget.
+        # Constrained decoding must prevent those responses, not merely detect
+        # them after an expensive inference.
+        issues = request.get("issues")
+        paragraphs = request.get("paragraphs")
+        if (not isinstance(issues, list) or not issues or
+                not isinstance(paragraphs, list) or not paragraphs):
+            raise ProviderFailure("Revision requires diagnosed issues and editable paragraphs")
+        available = {row.get("paragraph") for row in paragraphs if isinstance(row, dict)
+                     and type(row.get("paragraph")) is int}
+        chosen = next((issue for issue in issues
+                       if isinstance(issue, dict) and type(issue.get("paragraph")) is int
+                       and issue.get("paragraph") in available
+                       and isinstance(issue.get("id"), str) and issue["id"]), None)
+        if chosen is None:
+            raise ProviderFailure("No valid diagnosed revision target")
+        data["issues"] = [chosen]
+        schema = obj(edits={**array(obj(
+            issue_id={"type": "string", "enum": [chosen["id"]]},
+            paragraph={"type": "integer", "minimum": chosen["paragraph"],
+                       "maximum": chosen["paragraph"]},
+            after=STRING, reason=STRING)), "maxItems": 1})
+        instruction += (
+            " Исправь максимум ОДИН абзац из текущего замечания. "
+            "Используй строго указанные issue_id и paragraph. "
+            "Если безопасного исправления нет, верни edits: []. "
+            "Поле before не нужно, его восстановит адаптер из исходного абзаца. "
+            "Пустой after допускается только для ранее диагностированного filler."
+        )
     messages = [{"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps(data, ensure_ascii=False)}]
     tokens = {"field_review": 40, "photo_query": 60, "research_query": 80, "topics": 450, "scene_plan": 1650, "photo_plan": 1650, "section_plan": 350, "article_layout": 600, "write": 3400, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
