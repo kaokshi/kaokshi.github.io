@@ -41,3 +41,5 @@ jobs:
           if-no-files-found: warn
 
 # Retry after exact host validation update.
+
+# Authorized official Wikimedia thumbnail CDN.
