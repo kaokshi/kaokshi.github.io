@@ -1,0 +1,124 @@
+name: Three-channel real Qwen editorial production pilot
+on:
+  pull_request:
+    paths:
+      - 'research/real_three_channel_qwen_pilot.py'
+      - 'src/editorial_daily_topic_plan.py'
+      - 'src/editorial_local_llm.py'
+      - 'tests/test_editorial_daily_topic_plan.py'
+      - 'src/editorial_encrypted_review.py'
+      - 'tests/test_editorial_encrypted_review.py'
+      - 'src/editorial_writer.py'
+      - 'tests/test_editorial_qwen_writer_recovery.py'
+      - '.github/workflows/real-three-channel-qwen-pilot.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  genuine-local-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      ZEN_REVIEW_PUBLIC_KEY_HEX: c4a92b34baaf877160714955f32ea81021f066d63e6c1ae1587323c2e8a0d561
+      ZEN_LLM_BACKEND: llama.cpp
+      ZEN_LLM_MODEL: qwen3-4b-instruct-2507
+      ZEN_LLM_URL: http://127.0.0.1:8093
+      ZEN_LLM_TIMEOUT: '780'
+      ZEN_LLM_MODEL_REVISION: 2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4464e
+      HF_HUB_DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned public llama.cpp CPU binary
+        run: |
+          curl -fL --retry 3 --connect-timeout 20 \
+            https://github.com/ggml-org/llama.cpp/releases/download/b12580/llama-b12580-bin-ubuntu-x64.tar.gz \
+            -o "$RUNNER_TEMP/llama.tar.gz"
+          mkdir -p "$RUNNER_TEMP/llama"
+          tar -xzf "$RUNNER_TEMP/llama.tar.gz" -C "$RUNNER_TEMP/llama"
+          find "$RUNNER_TEMP/llama" -type f -name llama-server -print
+      - name: Download and verify exact Qwen3 GGUF weights
+        run: |
+          python -m pip install 'huggingface-hub==0.36.0'
+          python - <<'PY'
+          import hashlib, os
+          from huggingface_hub import hf_hub_download
+          path=hf_hub_download(
+            repo_id="bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
+            filename="Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+            revision="ae44f08e1392f39c0e474af10c3ff8355c8b6688",
+            local_dir=os.environ["RUNNER_TEMP"]+"/qwen")
+          h=hashlib.sha256()
+          with open(path,"rb") as stream:
+            for block in iter(lambda:stream.read(4*1024*1024),b""):
+              h.update(block)
+          assert h.hexdigest()=="2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4464e", "Model SHA mismatch"
+          with open(os.environ["RUNNER_TEMP"]+"/gguf-path.txt","w") as f:
+            f.write(path)
+          print("Pinned GGUF SHA verified. No article text transferred.")
+          PY
+      - name: Start local CPU model and wait for real health check
+        run: |
+          SERVER="$(find "$RUNNER_TEMP/llama" -type f -name llama-server | head -1)"
+          test -n "$SERVER"
+          chmod +x "$SERVER"
+          "$SERVER" --model "$(cat "$RUNNER_TEMP/gguf-path.txt")" \
+            --alias qwen3-4b-instruct-2507 --host 127.0.0.1 --port 8093 \
+            --ctx-size 8192 --threads 4 --parallel 1 --no-ui \
+            > "$RUNNER_TEMP/llama-server.log" 2>&1 &
+          python - <<'PY'
+          import json,time,urllib.request
+          for i in range(180):
+            try:
+              data=json.load(urllib.request.urlopen("http://127.0.0.1:8093/health",timeout=2))
+              if data.get("status")=="ok":
+                print("Real Qwen server ready")
+                break
+            except Exception:
+              pass
+            time.sleep(2)
+          else:
+            raise SystemExit("Real local Qwen failed to start")
+          PY
+      - name: Install editorial toolchain and three real Model A models
+        run: |
+          python -m pip install -r requirements-editorial.txt
+          python -m pip install 'language-tool-python>=2.8,<3' 'ruts' 'cryptography>=44,<48'
+          aiw-ru models install modernbert lightgbm transformer
+          curl -fL --retry 3 --connect-timeout 20 \
+            https://github.com/vale-cli/vale/releases/download/v3.12.0/vale_3.12.0_Linux_64-bit.tar.gz \
+            -o "$RUNNER_TEMP/vale.tar.gz"
+          mkdir -p "$RUNNER_TEMP/vale"
+          tar -xzf "$RUNNER_TEMP/vale.tar.gz" -C "$RUNNER_TEMP/vale" vale
+          sudo install "$RUNNER_TEMP/vale/vale" /usr/local/bin/vale
+          curl -fL --retry 3 --connect-timeout 20 \
+            https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz \
+            -o "$RUNNER_TEMP/lychee.tar.gz"
+          mkdir -p "$RUNNER_TEMP/lychee"
+          tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP/lychee"
+          LYCHEE="$(find "$RUNNER_TEMP/lychee" -type f -name lychee -print -quit)"
+          test -n "$LYCHEE" || { echo 'lychee executable absent from release archive'; exit 2; }
+          sudo install "$LYCHEE" /usr/local/bin/lychee
+          vale --version
+          lychee --version
+      - name: Let Qwen choose three topics and execute all three editorial pipelines
+        run: |
+          python research/real_three_channel_qwen_pilot.py
+      - name: Upload only per-task diagnostic metadata (never article text)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: three-real-qwen-metadata
+          path: ${{ runner.temp }}/zen-three-pilot-metadata.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload encrypted owner articles only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: three-real-qwen-owner-review-encrypted
+          path: ${{ runner.temp }}/zen-three-private-review.enc
+          if-no-files-found: warn
+          retention-days: 30
