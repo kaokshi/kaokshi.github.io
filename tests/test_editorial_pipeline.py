@@ -300,7 +300,7 @@ class LocalLlmTests(unittest.TestCase):
             self.assertEqual(payload["prompt"], "Rendered by the server")
             self.assertIn("paragraphs", payload["json_schema"]["properties"])
             return {"content": json.dumps({} if len(calls) == 2 else
-                    {"title": "Тест", "paragraphs": ["Один", "Два", "Три"], "cta": "Подписаться"})}
+                    {"title": "Тест", "paragraphs": ["Один", "Два", "Три"]})}
 
         result = complete(request, env={"ZEN_LLM_MODEL": "test"}, send=send)
         self.assertEqual(result["title"], "Тест")

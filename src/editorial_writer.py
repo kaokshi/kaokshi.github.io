@@ -93,7 +93,7 @@ def validate_prose_reply(reply):
     if (not isinstance(reply, dict) or set(reply) - {"title", "paragraphs", "cta", "sections"}
             or not isinstance(reply.get("paragraphs"), list) or len(reply["paragraphs"]) < 3):
         raise ValueError("Invalid prose response structure")
-    for text in [reply.get("title"), *reply["paragraphs"], reply.get("cta")]:
+    for text in [reply.get("title"), *reply["paragraphs"], *([reply["cta"]] if "cta" in reply else [])]:
         assert_reader_text(text)
         if len(text.strip().splitlines()) != 1:
             raise ValueError("Each prose field must be one reader-facing line")
@@ -117,12 +117,18 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
                        f"конкретными примерами. "
                        f"Сделай 6–8 достаточно содержательных абзацев, сохраняй естественный ритм. "
                        f"Подбери самостоятельный короткий заголовок. "
-                       f"Запиши оригинальный призыв подписаться на канал «{channel_name}» "
-                       f"только в отдельное поле cta. Свяжи его с темой материала. "
                        f"Не дублируй абзацы. Каждый элемент paragraphs — один готовый к чтению абзац без заголовка, переноса строки и разметки.",
     })
     title, blocks, cta = reply.get("title"), reply.get("paragraphs"), reply.get("cta")
     validate_prose_reply(reply)
+    plan = reply.get("sections")
+    if "cta" not in reply:
+        layout = provider("article_layout", {"title": title, "paragraphs": blocks,
+            "instruction": f"Сгруппируй абзацы по смыслу. Верни sections с номерами start от 1 и заголовками heading. "
+                           f"Начни с 1, делай разделы по несколько абзацев. Дай отдельный короткий, связанный "
+                           f"с материалом призыв подписаться на канал «{channel_name}» в поле cta."})
+        cta, plan = layout["cta"], layout["sections"]
+        assert_reader_text(cta)
     if (not isinstance(title, str) or not title.strip() or not isinstance(blocks, list)
             or len(blocks) < 3 or not all(isinstance(p, str) and p.strip() for p in blocks)
             or not isinstance(cta, str) or channel_name.casefold() not in cta.casefold()
@@ -137,7 +143,7 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
     if len(set(map(topic_key, blocks))) != len(blocks):
         raise ValueError("Writer output has duplicate paragraphs")
     prose = " ".join(blocks)
-    body = arrange(blocks, reply.get("sections"), provider, title)
+    body = arrange(blocks, plan, provider, title)
     chars = count_characters(body)
     if len(re.findall(r"[а-яё]", prose, re.I)) < chars // 2:
         raise ValueError("Writer output must be predominantly Russian prose")

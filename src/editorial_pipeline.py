@@ -44,7 +44,8 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
         status_path = directory / "writer-status.json"
 
         def generate(task, payload):
-            response_path = directory / ("writer-response.json" if task == "write" else "section-plan-response.json")
+            response_path = directory / {"write": "writer-response.json", "article_layout": "article-layout-response.json",
+                                         "section_plan": "section-plan-response.json"}[task]
             inputs = [getattr(provider, "identity", None), task, payload]
             key = sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
             saved = load(response_path) if response_path.is_file() else {}
