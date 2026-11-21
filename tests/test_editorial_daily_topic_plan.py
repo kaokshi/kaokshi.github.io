@@ -81,6 +81,24 @@ class TopicPlanTests(unittest.TestCase):
         self.assertEqual(diagnostics["channels"]["cinema"]["accepted"],1)
         self.assertNotIn("Сторож",str(diagnostics))
 
+    def test_non_science_search_hint_is_discarded_not_rejected(self):
+        diagnostics = {}
+        def provider(task, payload):
+            if payload["channel"] == "legends":
+                return {"tasks": [{
+                    "topic": "Сторож услышал стук в пустом аквариуме музея",
+                    "research_query": "abandoned aquarium ghost mystery",
+                }]}
+            return provider_proposals(task, payload["channel"], count=1)
+        with TemporaryDirectory() as tmp:
+            plan = create_plan("2026-11-22", Path(tmp), provider,
+                               per_channel=1, diagnostics=diagnostics)
+        self.assertEqual(len(plan["tasks"]), 3)
+        self.assertNotIn("research_query", plan["tasks"][0])
+        self.assertEqual(
+            diagnostics["channels"]["legends"]["unused_query_normalized"], 1)
+        self.assertEqual(diagnostics["channels"]["legends"]["bad_shape"], 0)
+
     def test_pilot_still_rejects_bad_science_query(self):
         def provider(task,payload):
             if payload["channel"]=="science":
