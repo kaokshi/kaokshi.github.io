@@ -148,20 +148,28 @@ def produce_one(channel, row, root, endpoint):
     if channel == "science":
         data, credit = commons_photo(row["pageid"])
     else:
-        # SD WebUI returns base64; send only to an explicitly configured loopback service.
-        payload = {"prompt": row["prompt"], **generation_settings(),
-                   "negative_prompt": "watermark, caption, text, collage", "batch_size": 1}
-        req = Request(local_endpoint(endpoint).geturl().rstrip("/") + "/sdapi/v1/txt2img",
-                      data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
-        with urlopen(req, timeout=900) as response:
-            raw = response.read(32_000_001)
-        if len(raw) > 32_000_000:
-            raise ValueError("Generator response too large")
-        result = json.loads(raw)
-        data = base64.b64decode(result["images"][0], validate=True)
-        credit = {"source": "Local Stable Diffusion WebUI", "artist": "ИИ-иллюстрация",
-                  "generation": json.loads(result["info"]), "prompt": row["prompt"],
-                  "license": row["rights_basis"]}
+        image_provider = os.environ.get("ZEN_IMAGE_PROVIDER", "sd-webui")
+        if image_provider == "cloudflare":
+            from editorial_cloudflare import generate_scene
+            data, credit = generate_scene(row["prompt"])
+            credit["license"] = row["rights_basis"]
+        elif image_provider == "sd-webui":
+            # SD WebUI returns base64; send only to an explicitly configured loopback service.
+            payload = {"prompt": row["prompt"], **generation_settings(),
+                       "negative_prompt": "watermark, caption, text, collage", "batch_size": 1}
+            req = Request(local_endpoint(endpoint).geturl().rstrip("/") + "/sdapi/v1/txt2img",
+                          data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=900) as response:
+                raw = response.read(32_000_001)
+            if len(raw) > 32_000_000:
+                raise ValueError("Generator response too large")
+            result = json.loads(raw)
+            data = base64.b64decode(result["images"][0], validate=True)
+            credit = {"source": "Local Stable Diffusion WebUI", "artist": "ИИ-иллюстрация",
+                      "generation": json.loads(result["info"]), "prompt": row["prompt"],
+                      "license": row["rights_basis"]}
+        else:
+            raise ValueError("Unsupported image provider; Modal is disabled pending billing controls")
         if not credit["license"].strip():
             raise ValueError("Supply rights basis for the deployed model and its output")
     result = save_image(root, channel, row["id"], data, credit, row["caption"])
