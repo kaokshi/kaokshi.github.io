@@ -1,0 +1,83 @@
+# One-shot, non-publishing connectivity smoke for a free-only image provider.
+# The workflow runs only when THIS workflow file changes on the named integration branch.
+name: Cloud image providers safe smoke
+on:
+  push:
+    branches:
+      - feature/editorial-cloudflare-free-image
+    paths:
+      - .github/workflows/cloud-image-free-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-cloudflare-and-modal-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: "true"
+      ZEN_IMAGE_ALLOW_PAID: "false"
+    steps:
+      - name: Checkout trusted integration branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal client dependencies
+        run: python -m pip install --disable-pip-version-check pillow modal
+      - name: Run adapter tests
+        run: python -m unittest discover -s tests -p 'test_editorial_cloudflare.py' -v
+      - name: Cloudflare single-image Free test
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" || -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo "CLOUDFLARE_STATUS=missing_credentials"
+          else
+            PYTHONPATH=src python - <<'PY'
+          import hashlib
+          import io
+          from PIL import Image
+          from editorial_cloudflare import CloudflarePending, generate_scene
+
+          prompt = ("A single original atmospheric photograph-like illustration of an empty "
+                    "old stone alley at dusk, blue fog and a warm streetlamp, no text, "
+                    "no people, horizontal landscape composition")
+          try:
+              data, metadata = generate_scene(prompt)
+              with Image.open(io.BytesIO(data)) as img:
+                  img.verify()
+              print("CLOUDFLARE_STATUS=success")
+              print("CLOUDFLARE_IMAGE_BYTES=" + str(len(data)))
+              print("CLOUDFLARE_IMAGE_SHA256=" + hashlib.sha256(data).hexdigest())
+              print("CLOUDFLARE_MODEL=" + metadata["model"])
+          except (CloudflarePending, ValueError, OSError) as exc:
+              print("CLOUDFLARE_STATUS=pending")
+              print("CLOUDFLARE_REASON=" + str(exc))
+          PY
+          fi
+      - name: Modal token check only — never provision GPU or create charges
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${MODAL_TOKEN_ID:-}" || -z "${MODAL_TOKEN_SECRET:-}" ]]; then
+            echo "MODAL_STATUS=missing_credentials"
+          else
+            # The token info command performs only an account-authenticated read.
+            # Never print the returned token metadata.
+            if modal token info > /dev/null 2>&1; then
+              echo "MODAL_STATUS=authenticated"
+              echo "MODAL_GPU_IMAGE_GENERATION=not_tested_no_zero_spend_guarantee"
+            else
+              echo "MODAL_STATUS=authentication_failed"
+            fi
+          fi
