@@ -5,6 +5,7 @@ from hashlib import sha256
 from html import unescape
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 import re
 from urllib.parse import urlencode, urlsplit
@@ -112,11 +113,22 @@ def plan_images(article, provider, *, query=None, rights_basis=None, exclude=())
     return [{**r, "id": f"image-{n}", "rights_basis": rights_basis} for n, r in enumerate(rows, 1)]
 
 
+def generation_settings():
+    """Fixed per run; a CPU deployment can reduce the workload for its validated model."""
+    width = int(os.environ.get("ZEN_SD_WIDTH", 1024))
+    height = int(os.environ.get("ZEN_SD_HEIGHT", 768))
+    steps = int(os.environ.get("ZEN_SD_STEPS", 25))
+    if (min(width, height) < 600 or max(width, height) > 1024 or width % 64 or height % 64
+            or not 1 <= steps <= 25):
+        raise ValueError("Choose 64-aligned dimensions between 600 and 1024 and 1 to 25 steps")
+    return {"width": width, "height": height, "steps": steps}
+
+
 def produce(channel, plan, root, endpoint, *, checkpoint=None):
     if len(plan) not in (7, 8) or len({row["id"] for row in plan}) != len(plan):
         raise ValueError("Plan requires seven or eight unique scenes")
     from editorial_cover import asset
-    key = sha256(json.dumps([channel, plan, endpoint], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    key = sha256(json.dumps([channel, plan, endpoint, generation_settings() if channel == "legends" else None], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     saved = json.loads(checkpoint.read_text()) if checkpoint and checkpoint.exists() else {}
     prior = saved.get("images", {}) if saved.get("plan_sha256") == key else {}
     images = {}
@@ -137,7 +149,7 @@ def produce_one(channel, row, root, endpoint):
         data, credit = commons_photo(row["pageid"])
     else:
         # SD WebUI returns base64; send only to an explicitly configured loopback service.
-        payload = {"prompt": row["prompt"], "width": 1024, "height": 768, "steps": 25,
+        payload = {"prompt": row["prompt"], **generation_settings(),
                    "negative_prompt": "watermark, caption, text, collage", "batch_size": 1}
         req = Request(local_endpoint(endpoint).geturl().rstrip("/") + "/sdapi/v1/txt2img",
                       data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
