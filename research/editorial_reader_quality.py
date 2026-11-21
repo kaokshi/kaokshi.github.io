@@ -94,3 +94,36 @@ def review_checklist(channel):
             "Обзор раскрывает причины смотреть или не смотреть, а не пересказывает синопсис"],
     }
     return shared+specific[channel]
+
+def cross_article_diversity(articles):
+    """Compare text openings and phrase overlap across sibling articles.
+
+    Does not replace topic_duplicate_reason against the historical corpus.
+    Only normalized structural evidence is returned; never return article prose.
+    """
+    channels=sorted(articles)
+    normalized={}
+    openings={}
+    for channel,article in articles.items():
+        tokens=[w.lower().replace("ё","е") for w in WORD.findall(article)]
+        normalized[channel]={tuple(tokens[i:i+5])
+                             for i in range(max(0,len(tokens)-4))}
+        openings[channel]=set(tokens[:45])
+    pairs=[]
+    for i,one in enumerate(channels):
+        for two in channels[i+1:]:
+            common=len(normalized[one] & normalized[two])
+            denom=max(1,min(len(normalized[one]),len(normalized[two])))
+            opening_overlap=len(openings[one]&openings[two])/max(
+                1,len(openings[one]|openings[two]))
+            pairs.append({
+                "channels":[one,two],
+                "shared_fivegrams":common,
+                "shared_fivegram_min_share":round(common/denom,3),
+                "opening_token_jaccard":round(opening_overlap,3),
+                "suspected_template_reuse":common>=12 and common/denom>.12,
+            })
+    return {"pairs":pairs,
+            "suspected_cross_article_template_reuse":
+                any(x["suspected_template_reuse"] for x in pairs),
+            "historical_topic_duplicate_check":"separate_required"}
