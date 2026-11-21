@@ -137,6 +137,7 @@ def recalled_provider(root, channel, provider):
     def invoke(task, payload):
         cues = [dict(row, reminder=REMINDERS[row["observed"]][1]) for row in experience(root,channel)
                 if row["observed"] in REMINDERS and REMINDERS[row["observed"]][0] == task]
+        invoke.last_reminders = cues
         return provider(task, {**payload, "genre_experience":cues} if cues else payload)
     invoke.identity = getattr(provider, "identity", None)
     return invoke
@@ -203,3 +204,23 @@ def proposal_report(root, channel):
             task, instruction = REMINDERS[row["observed"]]
             proposals.append({**row,"role":roles[task],"proposal":instruction,"state":"requires_holdout"})
     return proposals
+
+
+def writer_experience_report(root, channel, prior, response):
+    """Measure the known field leak on the raw model output before any repairs."""
+    marker = re.compile(r"^\s*(?:start\s*:?\s*\d+|heading\s*:.*|cta\s*:?)\s*$", re.I)
+    lines = [line for paragraph in response.get("paragraphs", []) if isinstance(paragraph, str)
+             for line in paragraph.splitlines()]
+    previous = []
+    with closing(connect(root)) as db:
+        for slug, digest in db.execute(
+                "SELECT slug,digest FROM observations WHERE channel=? AND defect='writer_field_in_prose'",
+                (channel,)):
+            previous.append({"article": slug, "text_sha256": digest})
+    seen = sum(bool(marker.fullmatch(line)) for line in lines)
+    return {"channel": channel, "prior_observations": previous, "applied_reminders": prior,
+            "raw_output_sha256": sha256(json.dumps(response, sort_keys=True).encode()).hexdigest(),
+            "field_lines": seen, "measured_lines": len(lines),
+            "outcome": ("no_comparable_history" if not any(r["observed"] == "writer_field_in_prose" for r in prior) else "no_prose" if not lines
+                        else "defect_recurred" if seen else "defect_absent_on_this_draft"),
+            "prompt_deployed": False}

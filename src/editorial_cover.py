@@ -93,6 +93,17 @@ def eligible_cover(rating, size):
             and min(rating[k] for k in ("topic", "genre", "thumbnail", "crop", "sharpness")) >= 4)
 
 
+class UnsuitableIllustrations(ValueError):
+    def __init__(self, identifiers):
+        self.identifiers = identifiers
+        super().__init__("Illustrations require replacement: " + ", ".join(identifiers))
+
+
+def unsuitable(row):
+    rating = row["assessment"]
+    return bool(rating["defect"].strip()) or min(rating["topic"], rating["genre"]) == 0
+
+
 def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None, review=None):
     from PIL import Image, ImageOps
     body = parse_sections(article["body_html"])
@@ -131,6 +142,9 @@ def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None, 
     candidates = [r for r in records if r["eligible"]]
     if checkpoint:
         checkpoint({"status": "assessed", "article_sha256": identity(article), "images": records})
+    rejected = [r["id"] for r in records if unsuitable(r)]
+    if rejected:
+        raise UnsuitableIllustrations(rejected)
     if not candidates:
         raise ValueError("No eligible cover in this set")
     cover = max(candidates, key=lambda r: (r["score"], r["assessment"]["topic"], r["id"]))
@@ -194,7 +208,7 @@ def verify_cover(article, root):
     if len({r["id"] for r in rows}) != len(rows):
         raise ValueError("Duplicate illustration identifier")
     for i, (row, figure) in enumerate(zip(rows, figures)):
-        if (row["position"] != i or row["is_cover"] is not (i == 0)
+        if (unsuitable(row) or row["position"] != i or row["is_cover"] is not (i == 0)
                 or row["eligible"] is not eligible_cover(row["assessment"], row["size"])
                 or row["score"] != sum(row["assessment"][k] for k in CRITERIA)
                 or figure.get("data-editorial-image") != row["id"]

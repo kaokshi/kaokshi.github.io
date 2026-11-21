@@ -39,3 +39,21 @@ class PersistentExperience(unittest.TestCase):
         self.assertEqual(analyze()["status"],"authorized_export_not_connected")
         with self.assertRaises(ValueError):
             analyze([{"source":"export","permission":"authorized_metadata_export","body":"private"}])
+
+    def test_reviewed_field_leak_is_measured_on_the_next_raw_answer(self):
+        from editorial_memory import writer_experience_report
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            article = dict(slug="story", channel="legends", title="Станция", body_html="<p>start:1</p>")
+            case = {"versions": [{"stage": "original", "article": article, "text_sha256": article_digest(article)}]}
+            remember(root, case)
+            def writer(task, payload):
+                self.assertEqual(payload["genre_experience"][0]["observed"], "writer_field_in_prose")
+                return {"paragraphs": ["На станции зажгли свет.", "heading: Поезд"]}
+            provider = recalled_provider(root, "legends", writer)
+            reply = provider("write", {})
+            report = writer_experience_report(root, "legends", provider.last_reminders, reply)
+            self.assertEqual(report["outcome"], "defect_recurred")
+            self.assertEqual(report["prior_observations"][0]["text_sha256"], article_digest(article))
+            self.assertEqual(report["field_lines"], 1)
+            self.assertFalse(report["prompt_deployed"])

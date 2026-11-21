@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 
 from editorial_writer import private_path
+from editorial_ai_check import ROOT
 
 
 @contextmanager
@@ -30,6 +31,8 @@ def main():
     paths = [Path(os.environ["RESTIC_PASSWORD_FILE"]).resolve()]
     if ":" not in repo or repo.startswith("local:"):
         paths.append(Path(repo.removeprefix("local:")).resolve())
+    if any(p.is_relative_to(ROOT.resolve()) for p in paths):
+        parser.error("Keep the password and local vault outside the public checkout")
     if any(p.is_relative_to(root) or root.is_relative_to(p) for p in paths):
         parser.error("Keep the workspace, vault and password file separate")
     if args.operation == "restore":

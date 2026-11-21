@@ -84,8 +84,8 @@ class CoverTests(unittest.TestCase):
             def assess(article, image):
                 shade = image.getpixel((0, 0))[0]
                 calls.append(shade)
-                # Test oracle: the brightest candidate is visually attractive but off topic.
-                return {**dict.fromkeys(CRITERIA, 4), "topic": 0 if shade == 60 else 5,
+                # One relevant image has a poor thumbnail.
+                return {**dict.fromkeys(CRITERIA, 4), "topic": 5, "thumbnail": 0 if shade == 60 else 4,
                         "appeal": 5 if shade == 50 else 2, "defect": "", "reason": article["title"]}
 
             for channel in build.CHANNELS:

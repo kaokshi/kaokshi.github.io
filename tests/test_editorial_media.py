@@ -30,3 +30,33 @@ class MediaTests(unittest.TestCase):
     def test_unexplained_visual_ratings_cannot_select_cover(self):
         with self.assertRaises(ValueError):
             eligible_cover(dict.fromkeys(CRITERIA, 5) | {'reason':'none','defect':''}, (1200,900))
+
+    def test_verified_scene_is_reused_after_an_interruption(self):
+        from hashlib import sha256
+        from unittest.mock import patch
+        from editorial_media import produce
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = [{"id": str(i)} for i in range(7)]
+            calls = []
+            def provider(channel, row, root, endpoint):
+                calls.append(row["id"])
+                if len(calls) == 2:
+                    raise OSError("offline")
+                data = row["id"].encode()
+                name = "content/assets/" + row["id"]
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+                return dict(row, file=name, sha256=sha256(data).hexdigest())
+            with patch("editorial_media.produce_one", provider):
+                checkpoint = root / "progress.json"
+                with self.assertRaises(OSError):
+                    produce("legends", plan, root, "local", checkpoint=checkpoint)
+                self.assertEqual(len(produce("legends", plan, root, "local", checkpoint=checkpoint)), 7)
+                self.assertEqual(calls.count("0"), 1)
+
+    def test_disqualified_noncover_blocks_the_set(self):
+        from editorial_cover import unsuitable
+        self.assertTrue(unsuitable({"assessment": {"topic": 0, "genre": 5, "defect": ""}}))
+        self.assertTrue(unsuitable({"assessment": {"topic": 5, "genre": 5, "defect": "misleading"}}))

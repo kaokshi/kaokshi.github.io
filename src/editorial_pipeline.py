@@ -53,6 +53,10 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
                     and status.get("status") != "draft_rejected"):
                 return saved["response"]
             reply = provider(task, payload)
+            if task == "write":
+                from editorial_memory import writer_experience_report
+                report = writer_experience_report(root, channel, getattr(provider, "last_reminders", []), reply)
+                save_case(directory / "writer-experience.json", report)
             save_case(response_path, {"input_sha256": key, "response": reply})
             return reply
 
@@ -250,7 +254,9 @@ def run(args, parser, root):
             used = [load(p)["title"] for p in CONTENT.glob("*.json")]
             day = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
             try:
-                args.topic = choose_topic(root, args.channel, day, provider, used)
+                with (root / f".topic-{args.channel}.lock").open("a") as lock:
+                    flock(lock, LOCK_EX)
+                    args.topic = choose_topic(root, args.channel, day, provider, used)
             except (Pending, ValueError) as exc:
                 save_case(root / f"topic-{day}-{args.channel}.json",
                           {"status": "topic_selection_pending", "reason": str(exc)})
@@ -328,7 +334,7 @@ def run(args, parser, root):
             decision = execute(case, directory, provider, research, documents, reviews, response,
                                lambda draft, urls: check_draft(draft, grammar, source_urls=urls))
             remember(root, case)
-            from editorial_cover import cover_selection
+            from editorial_cover import UnsuitableIllustrations, cover_selection
             from editorial_local_llm import ProviderFailure
             assembled_path = directory / "assembled.json"
             assembled_path.unlink(missing_ok=True)
@@ -339,10 +345,22 @@ def run(args, parser, root):
                 production_root = private_path(args.asset_root)
                 save_case(selection_path, {"status": "producing_illustrations"})
                 try:
-                    plan = load(args.media_plan) if args.media_plan else plan_images(load(directory / "draft.json"),
-                        provider, query=args.photo_query, rights_basis=args.generator_rights)
-                    save_case(directory / "media-plan.json", plan)
-                    images = produce(args.channel, plan, production_root, args.image_generator)
+                    draft = load(directory / "draft.json")
+                    plan_path = directory / "media-plan.json"
+                    context_path = directory / "media-context.json"
+                    context = {"article": article_digest(draft), "title": draft["title"],
+                               "query": args.photo_query, "rights": args.generator_rights,
+                               "provider": getattr(provider, "identity", None)}
+                    if args.media_plan:
+                        plan = load(args.media_plan)
+                    elif context_path.exists() and plan_path.exists() and load(context_path) == context:
+                        plan = load(plan_path)
+                    else:
+                        plan = plan_images(draft, provider, query=args.photo_query, rights_basis=args.generator_rights)
+                    save_case(plan_path, plan)
+                    save_case(context_path, context if not args.media_plan else {"external": True})
+                    images = produce(args.channel, plan, production_root, args.image_generator,
+                                     checkpoint=directory / "media-progress.json")
                     images = replace_duplicates(load(directory / "draft.json"), plan, images, production_root,
                                                 root, args.image_generator, provider, query=args.photo_query)
                 except (OSError, ValueError, KeyError, Pending) as exc:
@@ -355,9 +373,31 @@ def run(args, parser, root):
             save_case(selection_path, {"status": "awaiting_illustrations"})
             if manifest_path.exists():
                 try:
-                    assembled = cover_selection(load(directory / "draft.json"), load(manifest_path), args.asset_root,
-                                                review=load(args.cover_review), checkpoint=lambda result: save_case(selection_path, result))
-                except (OSError, KeyError, ValueError, TypeError, ProviderFailure) as exc:
+                    draft = load(directory / "draft.json")
+                    images = load(manifest_path)
+                    budget_path = directory / "visual-replacements.json"
+                    basis = sha256(json.dumps([draft, images], sort_keys=True).encode()).hexdigest()
+                    budget = load(budget_path) if budget_path.exists() else {}
+                    if budget.get("basis") != basis:
+                        budget = {"basis": basis, "attempts": 0, "images": images}
+                    images = budget["images"]
+                    while True:
+                        try:
+                            assembled = cover_selection(draft, images, args.asset_root,
+                                review=load(args.cover_review), checkpoint=lambda result: save_case(selection_path, result))
+                            break
+                        except UnsuitableIllustrations as exc:
+                            if not (args.media_plan or args.produce_media) or args.cover_review or budget["attempts"] >= 2:
+                                raise
+                            from editorial_media import replace_unsuitable
+                            budget["attempts"] += 1
+                            budget["rejected"] = exc.identifiers
+                            save_case(budget_path, budget)
+                            images = replace_unsuitable(draft, plan, images, exc.identifiers, production_root,
+                                            root, args.image_generator, provider, args.photo_query)
+                            budget["images"] = images
+                            save_case(budget_path, budget)
+                except (OSError, KeyError, ValueError, TypeError, ProviderFailure, Pending) as exc:
                     remember_failure(root, slug, args.channel, "cover_selection_pending", str(exc))
                     save_case(selection_path, {**load(selection_path), "status": "cover_selection_pending",
                                                "reason": str(exc)})

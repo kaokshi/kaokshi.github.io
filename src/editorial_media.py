@@ -112,10 +112,24 @@ def plan_images(article, provider, *, query=None, rights_basis=None, exclude=())
     return [{**r, "id": f"image-{n}", "rights_basis": rights_basis} for n, r in enumerate(rows, 1)]
 
 
-def produce(channel, plan, root, endpoint):
+def produce(channel, plan, root, endpoint, *, checkpoint=None):
     if len(plan) not in (7, 8) or len({row["id"] for row in plan}) != len(plan):
         raise ValueError("Plan requires seven or eight unique scenes")
-    return [produce_one(channel, row, root, endpoint) for row in plan]
+    from editorial_cover import asset
+    key = sha256(json.dumps([channel, plan, endpoint], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    saved = json.loads(checkpoint.read_text()) if checkpoint and checkpoint.exists() else {}
+    prior = saved.get("images", {}) if saved.get("plan_sha256") == key else {}
+    images = {}
+    for row in plan:
+        cached = prior.get(row["id"])
+        if cached:
+            path = asset(root, cached["file"])
+            if not path.is_file() or sha256(path.read_bytes()).hexdigest() != cached["sha256"]:
+                cached = None
+        images[row["id"]] = cached or produce_one(channel, row, root, endpoint)
+        if checkpoint:
+            save_case(checkpoint, {"plan_sha256": key, "images": images})
+    return list(images.values())
 
 
 def produce_one(channel, row, root, endpoint):
@@ -139,6 +153,8 @@ def produce_one(channel, row, root, endpoint):
         if not credit["license"].strip():
             raise ValueError("Supply rights basis for the deployed model and its output")
     result = save_image(root, channel, row["id"], data, credit, row["caption"])
+    if "pageid" in row:
+        result["pageid"] = row["pageid"]
     if "section" in row:
         result["section"] = row["section"]
     return result
@@ -182,3 +198,17 @@ def replace_duplicates(article, plan, manifest, root, registry, endpoint, provid
                 if "pageid" in spec:
                     excluded.add(spec["pageid"])
                 changed[i] = produce_one(article["channel"], dict(spec,id=plan[i]["id"]), root, endpoint)
+
+def replace_unsuitable(article, plan, images, rejected, root, registry, endpoint, provider, query):
+    """Generate new scene bytes or acquire new Commons IDs, then repeat the corpus audit."""
+    excluded = {row["pageid"] for row in [*plan, *images] if "pageid" in row}
+    alternatives = iter(plan_images(article, provider, query=query, exclude=excluded)) if article["channel"] == "science" else None
+    by_id = {row["id"]: row for row in plan}
+    result = []
+    for current in images:
+        ident = current["id"]
+        if ident in rejected:
+            row = next(alternatives) if alternatives is not None else by_id[ident]
+            current = produce_one(article["channel"], dict(row, id=ident), root, endpoint)
+        result.append(current)
+    return replace_duplicates(article, plan, result, root, registry, endpoint, provider, query=query)
