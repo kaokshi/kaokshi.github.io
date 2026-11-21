@@ -68,6 +68,15 @@ jobs:
           print("VISION_STATUS="+evidence["status"])
           print("VISION_DEFECTS="+str(len(evidence.get("defects",[]))))
           Path("review/visual-audit.json").write_text(json.dumps(evidence,ensure_ascii=False,indent=2))
+          # Negative control: compare the same original to a different scene (return to hall).
+          wrong=Path("original/cloudflare-scene-3.jpg").read_bytes()
+          try:
+              negative=review_pair(original,wrong,c)
+          except VisionPending as exc:
+              negative={"status":"pilot_failed","reason":str(exc),"semantic_verified":False}
+          print("VISION_NEGATIVE_STATUS="+negative["status"])
+          print("VISION_NEGATIVE_CHECKS="+str(negative.get("checks",{})))
+          Path("review/visual-audit-negative.json").write_text(json.dumps(negative,ensure_ascii=False,indent=2))
           PY
       - name: Archive audit (no photos or secrets)
         uses: actions/upload-artifact@v4
