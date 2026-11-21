@@ -80,7 +80,8 @@ def discover_groq_access(env, opener=urlopen):
     if not key:
         raise KeyError("missing_api_key")
     request=Request("https://api.groq.com/openai/v1/models",
-                    headers={"Authorization":"Bearer "+key,"Accept":"application/json"})
+                    headers={"Authorization":"Bearer "+key,"Accept":"application/json",
+                             "User-Agent":"ZenEditorialAPIDiagnostic/1.0"})
     with opener(request,timeout=35) as response:
         data=json.load(response)
     return MODEL_IDS["groq"] in {x.get("id") for x in data.get("data",[])}
@@ -88,7 +89,8 @@ def discover_groq_access(env, opener=urlopen):
 
 def http_json(url, payload, headers, timeout=150):
     request=Request(url,method="POST",headers={
-        "Content-Type":"application/json",**headers
+        "Content-Type":"application/json",
+        "User-Agent":"ZenEditorialAPIDiagnostic/1.0",**headers
     },data=json.dumps(payload,ensure_ascii=False).encode("utf-8"))
     with urlopen(request,timeout=timeout) as response:
         raw=response.read(MAX_HTTP_BYTES+1)
