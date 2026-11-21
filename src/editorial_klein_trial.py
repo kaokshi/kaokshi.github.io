@@ -19,7 +19,7 @@ import requests
 
 MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
 
-def klein_edit(source: Path, dest: Path):
+def klein_edit(source: Path, dest: Path, instruction=None):
     if os.environ.get("ZEN_IMAGE_ALLOW_PAID", "false").lower() not in ("false", "0", "no"):
         raise RuntimeError("Paid usage prohibited")
     if os.environ.get("ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED") != "true":
@@ -45,6 +45,10 @@ def klein_edit(source: Path, dest: Path):
         "and realistic human proportions. Film still realism rather than digital art; "
         "no text, no lettering, no logos, no excessive sharpening."
     )
+    if instruction is not None:
+        if not isinstance(instruction, str) or not 10 <= len(instruction) <= 3500:
+            raise ValueError("Invalid editing instruction")
+        prompt = instruction
     url = ("https://api.cloudflare.com/client/v4/accounts/" + account
            + "/ai/run/" + MODEL)
     response = requests.post(
