@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"research"))
 from compare_editorial_models import TASKS, MODEL_IDS, metrics, run, generate
-from editorial_reader_quality import text_stats, quality_flags, review_checklist
+from editorial_reader_quality import text_stats, quality_flags, review_checklist, cross_article_diversity
 
 class BenchmarkTests(unittest.TestCase):
     def test_all_models_receive_same_three_channel_briefs(self):
@@ -122,6 +122,15 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(result["generated"],3)
         self.assertTrue(all(not x["automated_format_pass"] for x in result["channels"]))
         self.assertTrue(all(x["agent_revisions_used"]==2 for x in result["channels"]))
+
+    def test_cross_article_diversity_flags_recycled_template(self):
+        base="История началась тихим вечером. "*40
+        result=cross_article_diversity({"legends":base,"science":base,
+                                        "cinema":"Разные исследователи наблюдали природу."*40})
+        self.assertTrue(result["suspected_cross_article_template_reuse"])
+        self.assertEqual(len(result["pairs"]),3)
+        self.assertEqual(result["historical_topic_duplicate_check"],"separate_required")
+        self.assertNotIn("История",str(result))
 
     def test_header_and_length_metrics_are_mechanical_only(self):
         result=metrics("**Раздел**\nЗдравствуйте!\nПодписывайтесь.",0.3)
