@@ -1,0 +1,38 @@
+name: Independent genre calibration audit (read-only)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/editorial_calibration_audit.py'
+      - 'tests/test_editorial_calibration_audit.py'
+      - '.github/workflows/editorial-calibration-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Regression tests with synthetic data only
+        run: |
+          python -m compileall -q src/editorial_calibration_audit.py tests/test_editorial_calibration_audit.py
+          python -m unittest discover -s tests -p 'test_editorial_calibration_audit.py' -v
+      - name: Enforce hard publication safety flags remain disabled
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          cfg=json.loads(Path('config/ai_revision_policy.json').read_text())
+          site=json.loads(Path('config/site.json').read_text())
+          assert site['publication_enabled'] is False
+          assert cfg['publication_authorized'] is False
+          assert all(v is None for v in cfg['thresholds'].values())
+          print('CALIBRATION_ONLY: no live threshold, publication remains disabled')
+          PY
