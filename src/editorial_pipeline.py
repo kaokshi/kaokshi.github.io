@@ -14,6 +14,7 @@ from editorial_ai_check import CONTENT
 from editorial_factcheck import fact_check, valid_sources
 from editorial_quality import similarity_report
 from editorial_research import europe_pmc
+from movie_autonomous_research import movie_sources
 from editorial_revision import run_case, save_case, save_text
 from editorial_revision_checks import check_draft
 from editorial_semantic import diagnose, revise, resize_article
@@ -180,6 +181,7 @@ def main():
     researchers = parser.add_mutually_exclusive_group()
     researchers.add_argument("--research-provider", type=Path, help="Configured search and reading executable")
     researchers.add_argument("--europe-pmc", action="store_true", help="Retrieve public research abstracts")
+    researchers.add_argument("--movie-research", action="store_true", help="Find film identity and actual plot references via Wikidata/Wikipedia")
     parser.add_argument("--research-query", help="Public source discovery query for the topic")
     parser.add_argument("--source-documents", type=Path, help="JSON with retrieved documents")
     parser.add_argument("--review", type=Path, help="Operator review for specific text hashes")
@@ -192,6 +194,10 @@ def main():
             research = command_provider(args.research_provider)
         elif args.europe_pmc:
             research = europe_pmc
+        elif args.movie_research:
+            if args.channel != "cinema":
+                raise ValueError("--movie-research only supports cinema")
+            research = movie_sources
         docs = load(args.source_documents)
         documents = docs["documents"] if docs is not None else None
         reviews = {}
@@ -230,6 +236,36 @@ def main():
                                                          "claims": []})["documents"]
                     except Pending:
                         documents = None
+                if documents is None and args.topic and args.channel == "cinema" and args.movie_research:
+                    try:
+                        movie_evidence = movie_sources("discover", {"topic": args.topic})
+                        documents = movie_evidence["documents"]
+                        save_case(directory / "movie-source-status.json", {
+                            "status": movie_evidence["status"], "film": movie_evidence["film"],
+                            "plot_events_verified_against_film": False,
+                            "character_roles_verified": False, "publication_authorized": False,
+                        })
+                        # Reuse the existing Commons rights-aware API candidate finder.
+                        # Never assume a search result depicts a specific scene,
+                        # and never attach an image without separate inspection.
+                        try:
+                            from editorial_commons_images import search as commons_search
+                            film = movie_evidence["film"]
+                            candidates = commons_search(
+                                film["title"] + " film " +
+                                (str(film["years"][0]) if film["years"] else ""), limit=12)
+                            save_case(directory / "movie-image-candidates.json", candidates)
+                        except (OSError, ValueError, TypeError, KeyError) as exc:
+                            save_case(directory / "movie-image-candidates.json", {
+                                "status": "discovery_unavailable",
+                                "reason": type(exc).__name__,
+                                "candidates": [], "publication_authorized": False,
+                            })
+                    except Pending as exc:
+                        save_case(directory / "movie-source-status.json", {
+                            "status": exc.status, "reason": str(exc), "publication_authorized": False,
+                        })
+                        raise
                 if documents:
                     documents = list(valid_sources(documents).values())
                     save_case(saved_docs, {"documents": documents})
