@@ -1,0 +1,29 @@
+name: Editorial offline benchmark evidence
+on:
+  pull_request:
+    branches: [feature/editorial-cloudflare-free-image]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  recount:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {run: '44907087391', artifact: qwen-24-case-benchmark, file: benchmark.json, count: 24}
+          - {run: '44909886101', artifact: qwen-real-klein-and-science-benchmark, file: detail.json, count: 16}
+          - {run: '44912319713', artifact: qwen-new-documentary-photos-24, file: cases.json, count: 24}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          run-id: ${{ matrix.run }}
+          github-token: ${{ github.token }}
+          path: evidence
+      - run: python src/editorial_audit_replay.py evidence/${{ matrix.file }} ${{ matrix.count }} | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash
