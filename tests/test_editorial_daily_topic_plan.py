@@ -79,7 +79,7 @@ class TopicPlanTests(unittest.TestCase):
         self.assertEqual(diagnostics["channels"]["legends"]["invalid_topic"],1)
         self.assertEqual(diagnostics["channels"]["legends"]["attempts"],2)
         self.assertEqual(diagnostics["channels"]["cinema"]["accepted"],1)
-        self.assertNotIn("topic",str(diagnostics))
+        self.assertNotIn("Сторож",str(diagnostics))
 
     def test_pilot_still_rejects_bad_science_query(self):
         def provider(task,payload):
