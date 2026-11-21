@@ -181,12 +181,18 @@ def produce_one(channel, row, root, endpoint):
                     # Visual semantics cannot be confirmed by geometry/format checks.
                     # Preserve both candidates and stop before silently promoting a possible semantic regression.
                     from hashlib import sha256 as _sha256
-                    pending_name = "content/assets/legends/" + row["id"] + "-klein-review-" + _sha256(candidate).hexdigest()[:16] + ".jpg"
-                    review_path = root / pending_name
-                    review_path.parent.mkdir(parents=True, exist_ok=True)
-                    review_path.write_bytes(candidate)
+                    if not re.fullmatch(r"image-[1-8]", row["id"]):
+                        raise ValueError("Invalid illustration ID")
+                    prefix = "content/assets/legends/" + row["id"] + "-"
+                    source_name = prefix + "source-" + _sha256(data).hexdigest()[:16] + ".jpg"
+                    pending_name = prefix + "klein-review-" + _sha256(candidate).hexdigest()[:16] + ".jpg"
+                    for name, image_bytes in ((source_name, data), (pending_name, candidate)):
+                        path = root / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(image_bytes)
                     raise Pending("media_production_pending",
-                                  "Klein candidate saved for visual review; unverified semantics: " + pending_name)
+                                  "Original and Klein candidate saved for visual review; "
+                                  "semantic accuracy unverified: " + pending_name)
             except CloudflarePending as exc:
                 raise Pending("media_production_pending", str(exc)) from None
             credit["license"] = row["rights_basis"]
