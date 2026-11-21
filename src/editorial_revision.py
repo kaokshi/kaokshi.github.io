@@ -187,14 +187,8 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
             version["model_a_delta_from_previous"] = delta
             version["model_a_trend"] = ("increased" if delta > 1e-8
                                          else "decreased" if delta < -1e-8 else "plateau")
-            if version["stage"] == "agent" and delta > 1e-8:
-                # The owner asked for ChatGPT help whenever a revision raises the index.
-                # This is a diagnostic escalation, not proof that the edit is bad.
-                case["recommended_text_sha256"] = versions[-2]["text_sha256"]
-                handoff(case, "chatgpt", ["model_a_increased_after_agent_revision",
-                                        "score_is_uncalibrated_advisory_only"])
-                save(case)
-                return
+            # Model A is advisory: a rising index cannot alone force an
+            # assistant handoff before the five substantive local edits.
             if version["stage"] == "agent" and abs(delta) <= 1e-8:
                 # A plateau stops *score-driven* edits. Existing substantive
                 # checks may still motivate targeted, bounded corrections.
@@ -262,15 +256,29 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
             "short_article", "long_article", "fiction_claim_of_reality_review", "similar_article",
             "grammar_review", "style_review", "revision_introduced_new_findings", "semantic_issues", "open_claims",
         }.intersection(reasons))
-        if version["stage"] != "assistant" and unresolved_text:
+        assistant_count = sum(v["stage"] == "assistant" for v in versions)
+        open_review = (unresolved_text or
+                       facts.get("status") == "fact_check_pending" or
+                       semantic.get("status") != "completed")
+        if version["stage"] == "assistant":
+            if open_review and assistant_count < MAX_ASSISTANT:
+                handoff(case, "chatgpt", ["additional_assistant_revision_needed", *reasons])
+            else:
+                handoff(case, "owner", [
+                    "rework_requested_after_exhausted_revisions" if open_review
+                    else "editorial_review_ready",
+                    *reasons, *report["manual_checks_pending"]
+                ])
+        elif unresolved_text:
             handoff(case, "chatgpt", ["local_edits_exhausted", *reasons])
         elif semantic_editor is not None and (
             facts.get("status") == "fact_check_pending" or semantic.get("status") != "completed"
-        ) and version["stage"] != "assistant":
+        ):
             case["decision"] = ("fact_check_pending" if facts.get("status") == "fact_check_pending"
                                 else "semantic_review_pending")
         else:
-            handoff(case, "owner", [*reasons, *report["manual_checks_pending"]])
+            handoff(case, "owner", ["editorial_review_ready", *reasons,
+                                    *report["manual_checks_pending"]])
         save(case)
         return
 

@@ -36,19 +36,46 @@ class AgentTests(unittest.TestCase):
         a,r=data()
         self.assertEqual(agent.route(a,r,substantive_issues=[])["decision"],
                          "high_index_without_verified_defect_owner_review")
-    def test_two_agents_then_chatgpt_then_owner(self):
-        a,r=data("Итог третьей редакции")
-        first=hashlib.sha256(b"first").hexdigest()
-        second=hashlib.sha256(b"second").hexdigest()
-        current=agent.article_digest(a)
-        history=[attempt("agent",first,second),attempt("agent",second,current)]
-        x=agent.route(a,r,history,["Факт расходится с источником"])
-        self.assertEqual(x["decision"],"chatgpt_one_revision_handoff")
-        next_a,next_r=data("Итог четвертой редакции")
-        next_hash=agent.article_digest(next_a)
-        history.append(attempt("assistant",current,next_hash))
-        x=agent.route(next_a,next_r,history,["Факт всё ещё неверен"])
-        self.assertEqual(x["decision"],"owner_review_final")
+    def test_five_agent_then_two_assistant_attempts_then_owner(self):
+        hashes = [hashlib.sha256(f"draft-{i}".encode()).hexdigest() for i in range(8)]
+        a,r=data("Итог восьмой редакции")
+        hashes[-1] = agent.article_digest(a)
+        history = [attempt("agent", hashes[i], hashes[i+1]) for i in range(5)]
+        for n in range(5):
+            partial = history[:n]
+            text = f"Глава редакции {n}"
+            draft, report = data(text)
+            if partial:
+                partial[-1] = {**partial[-1], "after_text_sha256": agent.article_digest(draft)}
+            route = agent.route(draft, report, partial, ["Нужна проверка факта"])
+            self.assertEqual(route["decision"], "agent_targeted_revision")
+            self.assertEqual(route["next_agent_attempt"], n + 1)
+        # A full, correctly chained 5+2 history never offers an eighth edit.
+        partial = history[:]
+        result = agent.route({"slug":a["slug"],"channel":a["channel"],
+                              "body_html":"<p>Черновик после пяти правок</p>"},
+                             {**r,"text_sha256": hashes[5]}, partial,
+                             ["Нужна проверка факта"])
+        # A history pointing to a different text cannot be reused.
+        self.assertEqual(result["decision"], "history_text_digest_mismatch")
+        fifth, rep = data("Текст после пяти агентских исправлений")
+        history[-1] = {**history[-1], "after_text_sha256": agent.article_digest(fifth)}
+        self.assertEqual(agent.route(fifth, rep, history, ["Ошибка"])["decision"],
+                         "chatgpt_revision_handoff")
+        first_assistant, rep = data("Текст после первой правки ChatGPT")
+        history.append(attempt("assistant", agent.article_digest(fifth),
+                               agent.article_digest(first_assistant)))
+        self.assertEqual(agent.route(first_assistant, rep, history, ["Ошибка"])["decision"],
+                         "chatgpt_revision_handoff")
+        second_assistant, rep = data("Текст после второй правки ChatGPT")
+        history.append(attempt("assistant", agent.article_digest(first_assistant),
+                               agent.article_digest(second_assistant)))
+        self.assertEqual(agent.route(second_assistant, rep, history, ["Ошибка"])["decision"],
+                         "owner_review_final")
+        with self.assertRaises(ValueError):
+            agent.route(second_assistant, rep, history +
+                        [attempt("assistant", agent.article_digest(second_assistant),
+                                 hashlib.sha256(b"extra").hexdigest())], ["Ошибка"])
     def test_unmodified_attempt_rejected(self):
         a,r=data()
         h=agent.article_digest(a)
@@ -147,10 +174,18 @@ class RevisionTests(unittest.TestCase):
              "after": "Сторож остался у окна, чтобы разглядеть ключ в руке незнакомца.",
              "reason": "Объяснил решение сторожа."}]}
         revision.run_case(self.case, check, save, response)
-        self.assertEqual(self.case["decision"], "owner_review_pending")
+        self.assertEqual(self.case["decision"], "assistant_handoff_pending")
         self.assertEqual(len(checked), 4)
+        second = {"base_text_sha256": self.case["handoff"]["text_sha256"], "edits": [
+            {"paragraph": 1, "before": "Сторож остался у окна, чтобы разглядеть ключ в руке незнакомца.",
+             "after": "Сторож подошёл к окну, потому что увидел в руке незнакомца ключ.",
+             "reason": "Уточнил мотивацию персонажа."}]}
+        revision.run_case(self.case, check, save, second)
+        self.assertEqual(self.case["decision"], "owner_review_pending")
+        self.assertIn("rework_requested_after_exhausted_revisions", self.case["handoff"]["reasons"])
+        self.assertEqual(len(checked), 5)
         self.assertEqual([v["stage"] for v in self.case["versions"]],
-                         ["original", "agent", "agent", "assistant"])
+                         ["original", "agent", "agent", "assistant", "assistant"])
         for before, after in zip(self.case["versions"], self.case["versions"][1:]):
             self.assertEqual(before["text_sha256"], after["before_text_sha256"])
             self.assertEqual(after["report"]["text_sha256"], after["text_sha256"])
