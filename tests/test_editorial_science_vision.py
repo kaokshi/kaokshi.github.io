@@ -25,6 +25,16 @@ class Tests(unittest.TestCase):
         self.assertEqual(result["status"],"needs_independent_validation")
         self.assertIs(result["semantic_verified"],False)
 
+    def test_sun_context_label_is_not_a_planet(self):
+        sample=scientific_diagram("solar_inner_planets",
+                ["Mercury","Venus","Earth","Mars"])
+        record=score_transcription(json.dumps({
+            "observed_labels":["SUN","Mercury","Venus","Earth","Mars"],
+            "all_labels_legible":True}),sample,"solar_inner_planets")
+        self.assertEqual(record["status"],"needs_independent_validation")
+        self.assertEqual(record["observed_labels"][0],"SUN")
+        self.assertEqual(record["compared_labels"],["Mercury","Venus","Earth","Mars"])
+
     def test_false_label_is_rejected_even_if_visually_readable(self):
         image=scientific_diagram("solar_inner_planets",
                 ["Mercury","Earth","Venus","Mars"])
