@@ -97,9 +97,14 @@ def execute(plan, workspace, *, status_only=False, health_check=endpoint_ready,
         too_late = deadline is not None and (
             current_time + timedelta(minutes=reserve_minutes) >= deadline
         )
-        if status_only or health["status"]!="ready" or too_late:
+        if status_only:
+            row["execution"]={"status":"not_started","reason":"status_only"}
+        elif row["article_ready_for_owner"]:
+            # A current-SHA, fully checked owner-ready dossier is immutable for
+            # this queue run. Do not burn model time or rewrite a finished draft.
+            row["execution"]={"status":"already_ready","reason":"current_dossier_complete"}
+        elif health["status"]!="ready" or too_late:
             row["execution"]={"status":"not_started","reason":(
-                "status_only" if status_only else
                 "model_not_ready" if health["status"]!="ready" else
                 "review_deadline_reached"
             )}
@@ -155,7 +160,9 @@ def main():
                       "report":str(output)},ensure_ascii=False))
     return 0 if args.status_only or (
         report["model_health"]["status"]=="ready" and
-        all(row["execution"].get("exit_code")==0 for row in report["tasks"])
+        all(row["execution"].get("exit_code")==0 or
+            row["execution"].get("status")=="already_ready"
+            for row in report["tasks"])
     ) else 2
 
 
