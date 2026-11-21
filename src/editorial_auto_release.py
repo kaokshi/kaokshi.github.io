@@ -14,8 +14,16 @@ from editorial_ai_check import ROOT, CONTENT
 from editorial_auto_route import decide, digest_article
 
 
-def prepare_release(article, evidence, settings):
-    decision = decide(article, evidence, launched=settings.get("publication_enabled") is True)
+def officially_launched(settings, policy=None):
+    if policy is None:
+        policy = json.loads((ROOT / "config/ai_revision_policy.json").read_text())
+    rss = policy.get("future_rss_delivery", {})
+    return (settings.get("publication_enabled") is True and rss.get("project_launched") is True
+            and rss.get("currently_active") is True)
+
+
+def prepare_release(article, evidence, settings, *, policy=None):
+    decision = decide(article, evidence, launched=officially_launched(settings, policy))
     if decision["disposition"] != "automatic_release_candidate":
         return {"decision": decision, "article": None, "settings": None}
     if article.get("status") != "draft":

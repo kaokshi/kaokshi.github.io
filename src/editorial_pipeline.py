@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import re
 
-from editorial_agent_v1 import ACTIVE, article_digest
+from editorial_agent_v1 import ACTIVE, MAX_AGENT, article_digest
 from editorial_ai_check import CONTENT
 from editorial_factcheck import fact_check, valid_sources
 from editorial_quality import similarity_report
@@ -59,7 +59,8 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
         article = write_article(channel, topic, generate, titles, documents=tuple(documents),
                                 allow_length_repair=True)
         settings = load(CONTENT.parents[1] / "config" / "site.json")
-        if (settings.get("publication_enabled") is True and settings.get("auto_release_enabled") is True
+        from editorial_auto_release import officially_launched
+        if (officially_launched(settings) and settings.get("auto_release_enabled") is True
                 and channel in settings.get("auto_release_active_channels", [])):
             article.update(auto_release_candidate=True, release_hold=False)
     else:
@@ -152,6 +153,18 @@ def execute(case, directory, provider, research, documents, reviews, response, q
             report["semantic_edit_error"] = str(exc)
         return None
 
+    latest = case["versions"][-1]
+    review = reviews.get(latest["text_sha256"])
+    if (response is None and case.get("decision") == "assistant_handoff_pending"
+            and (case.get("handoff") or {}).get("transport_status") == "not_connected"
+            and review and review.get("issues") and review.get("edits")
+            and sum(v["stage"] == "agent" for v in case["versions"]) < MAX_AGENT):
+        # A newly supplied substantive review can use the remaining local attempt.
+        review_key = sha256(json.dumps(review, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        if case.get("resumed_review_sha256") != review_key:
+            case.setdefault("handoff_history", []).append(case["handoff"])
+            case.update(decision="checks_pending", handoff=None, resumed_review_sha256=review_key)
+            save(case)
     run_case(case, check, save, response, semantic_editor=semantic_editor)
     version = case["versions"][-1]
     if case.get("recommended_text_sha256"):
@@ -182,6 +195,7 @@ def main():
     parser.add_argument("--channel", required=True, choices=ACTIVE)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--topic")
+    group.add_argument("--auto-topic", action="store_true")
     group.add_argument("--article", type=Path)
     parser.add_argument("--output", required=True, type=Path, help="Private workspace outside the repository")
     parser.add_argument("--provider", type=Path, help="Configured local LLM executable")
@@ -220,6 +234,14 @@ def main():
         response = load(args.assistant_response)
         root = private_path(args.output)
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        from editorial_memory import choose_topic, recalled_provider, image_conflicts, remember
+        provider = recalled_provider(root, args.channel, provider)
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        if args.auto_topic:
+            used = [load(p)["title"] for p in CONTENT.glob("*.json")]
+            args.topic = choose_topic(root, args.channel, datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat(),
+                                      provider, used)
         existing = load(args.article)
         topic_digest = None
         if existing is not None:
@@ -290,6 +312,7 @@ def main():
 
             decision = execute(case, directory, provider, research, documents, reviews, response,
                                lambda draft, urls: check_draft(draft, grammar, source_urls=urls))
+            remember(root, case)
             from editorial_cover import cover_selection
             from editorial_local_llm import ProviderFailure
             assembled_path = directory / "assembled.json"
@@ -297,7 +320,7 @@ def main():
             manifest_path = directory / "illustrations.json"
             selection_path = directory / "cover-selection.json"
             if args.media_plan or args.produce_media:
-                from editorial_media import plan_images, produce
+                from editorial_media import plan_images, produce, replace_duplicates
                 production_root = private_path(args.asset_root)
                 save_case(selection_path, {"status": "producing_illustrations"})
                 try:
@@ -305,6 +328,8 @@ def main():
                         provider, query=args.photo_query, rights_basis=args.generator_rights)
                     save_case(directory / "media-plan.json", plan)
                     images = produce(args.channel, plan, production_root, args.image_generator)
+                    images = replace_duplicates(load(directory / "draft.json"), plan, images, production_root,
+                                                root, args.image_generator, provider, query=args.photo_query)
                 except (OSError, ValueError, KeyError, Pending) as exc:
                     save_case(selection_path, {"status": "media_production_pending", "reason": str(exc)})
                     parser.exit(2, f"media_production_pending: {exc}\n")
@@ -320,7 +345,7 @@ def main():
                     save_case(selection_path, {**load(selection_path), "status": "cover_selection_pending",
                                                "reason": str(exc)})
                     parser.exit(2, f"cover_selection_pending: {exc}\n")
-                from editorial_preview import export_preview
+                from editorial_preview import export_preview, verify_preview
                 with (root / ".media-lock").open("a") as media_lock:
                     flock(media_lock, LOCK_EX)
                     peers = [load(p) for p in root.glob("*/assembled.json") if p != assembled_path]
@@ -334,10 +359,14 @@ def main():
                         final_quality)
                     save_case(directory / "assembled-quality.json", report)
                     audit = report["image_corpus_audit"]
-                    if (report["image_similarity"]["duplicates"] or audit.get("unreadable")
+                    prior_matches = image_conflicts(root, assembled, args.asset_root)
+                    save_case(directory / "historical-image-conflicts.json", prior_matches)
+                    if (prior_matches or report["image_similarity"]["duplicates"] or audit.get("unreadable")
                             or audit["near_duplicate_status"] != "completed"):
                         parser.exit(2, "image_corpus_review_pending\n")
                     export_preview(assembled, args.asset_root, directory)
+                    save_case(directory / "format-report.json", verify_preview(assembled, args.asset_root, directory))
+                    remember(root, case, assembled, args.asset_root)
                     save_case(assembled_path, assembled)
             print(json.dumps({"status": decision, "directory": str(directory)}))
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:

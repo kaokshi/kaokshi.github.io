@@ -62,7 +62,7 @@ def save_image(root, channel, identifier, data, credit, caption):
             "sha256": digest, "rights_verified": True, "adaptation": "JPEG; масштабирование"}
 
 
-def plan_images(article, provider, *, query=None, rights_basis=None):
+def plan_images(article, provider, *, query=None, rights_basis=None, exclude=()):
     from editorial_length import extract_text
     inputs = {"title": article["title"], "text": extract_text(article["body_html"])}
     if article["channel"] == "legends":
@@ -74,7 +74,9 @@ def plan_images(article, provider, *, query=None, rights_basis=None):
                                  "иллюстрации. Сохрани героев, место и время; избегай надписей и спойлеров.")
     else:
         if not query or not query.strip():
-            raise ValueError("Supply a Commons photographic search query")
+            query = provider("photo_query", {**inputs, "instruction": "Give a concise English Wikimedia Commons search query for documentary photographs of this subject."})["query"]
+            if not query.strip():
+                raise ValueError("Empty Commons query")
         params = {"action": "query", "generator": "search", "gsrsearch": query, "gsrnamespace": 6,
                   "gsrlimit": 50, "prop": "imageinfo", "iiprop": "url|size|extmetadata", "format": "json"}
         data = json.loads(fetch("https://commons.wikimedia.org/w/api.php?" + urlencode(params), 4_000_000))
@@ -82,7 +84,7 @@ def plan_images(article, provider, *, query=None, rights_basis=None):
         for page in data.get("query", {}).get("pages", {}).values():
             info = page.get("imageinfo", [{}])[0]
             meta = info.get("extmetadata", {})
-            if (min(info.get("width", 0), info.get("height", 0)) < 600
+            if (page["pageid"] in exclude or min(info.get("width", 0), info.get("height", 0)) < 600
                     or not re.search(r"\.(jpe?g|png|webp)$", page["title"], re.I)
                     or not meta.get("LicenseUrl")):
                 continue
@@ -106,29 +108,31 @@ def plan_images(article, provider, *, query=None, rights_basis=None):
 def produce(channel, plan, root, endpoint):
     if len(plan) not in (7, 8) or len({row["id"] for row in plan}) != len(plan):
         raise ValueError("Plan requires seven or eight unique scenes")
-    rows = []
-    for row in plan:
-        if channel == "science":
-            data, credit = commons_photo(row["pageid"])
-        else:
-            # SD WebUI returns base64; send only to an explicitly configured loopback service.
-            payload = {"prompt": row["prompt"], "width": 1024, "height": 768, "steps": 25,
-                       "negative_prompt": "watermark, caption, text, collage", "batch_size": 1}
-            req = Request(local_endpoint(endpoint).geturl().rstrip("/") + "/sdapi/v1/txt2img",
-                          data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
-            with urlopen(req, timeout=900) as response:
-                raw = response.read(32_000_001)
-            if len(raw) > 32_000_000:
-                raise ValueError("Generator response too large")
-            result = json.loads(raw)
-            data = base64.b64decode(result["images"][0], validate=True)
-            credit = {"source": "Local Stable Diffusion WebUI", "artist": "ИИ-иллюстрация",
-                      "generation": json.loads(result["info"]), "prompt": row["prompt"],
-                      "license": row["rights_basis"]}
-            if not credit["license"].strip():
-                raise ValueError("Supply rights basis for the deployed model and its output")
-        rows.append(save_image(root, channel, row["id"], data, credit, row["caption"]))
-    return rows
+    return [produce_one(channel, row, root, endpoint) for row in plan]
+
+
+def produce_one(channel, row, root, endpoint):
+    if channel == "science":
+        data, credit = commons_photo(row["pageid"])
+    else:
+        # SD WebUI returns base64; send only to an explicitly configured loopback service.
+        payload = {"prompt": row["prompt"], "width": 1024, "height": 768, "steps": 25,
+                   "negative_prompt": "watermark, caption, text, collage", "batch_size": 1}
+        req = Request(local_endpoint(endpoint).geturl().rstrip("/") + "/sdapi/v1/txt2img",
+                      data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=900) as response:
+            raw = response.read(32_000_001)
+        if len(raw) > 32_000_000:
+            raise ValueError("Generator response too large")
+        result = json.loads(raw)
+        data = base64.b64decode(result["images"][0], validate=True)
+        credit = {"source": "Local Stable Diffusion WebUI", "artist": "ИИ-иллюстрация",
+                  "generation": json.loads(result["info"]), "prompt": row["prompt"],
+                  "license": row["rights_basis"]}
+        if not credit["license"].strip():
+            raise ValueError("Supply rights basis for the deployed model and its output")
+    return save_image(root, channel, row["id"], data, credit, row["caption"])
+
 
 
 if __name__ == "__main__":
@@ -141,3 +145,30 @@ if __name__ == "__main__":
     root = private_path(args.root)
     manifest = produce(args.channel, json.loads(args.plan.read_text()), root, args.generator)
     save_case(root / (args.channel + "-manifest.json"), manifest)
+
+
+def replace_duplicates(article, plan, manifest, root, registry, endpoint, provider, *, query=None):
+    from editorial_quality import image_hash_audit, CONTENT
+    from editorial_memory import image_conflicts
+    changed = list(manifest)
+    excluded = {r["pageid"] for r in plan if "pageid" in r}
+    for attempt in range(3):
+        temporary = dict(article, image_files=[r["file"] for r in changed], cover_selection={"images":changed})
+        audit = image_hash_audit(sorted(CONTENT.glob("*.json")), candidate=temporary, asset_root=root)
+        if audit["near_duplicate_status"] != "completed" or audit.get("unreadable"):
+            raise ValueError("Incomplete image corpus")
+        bad = {r["candidate"] for r in image_conflicts(registry, temporary, root)}
+        for pair in audit["duplicates"]:
+            if article["slug"] in pair["articles"]:
+                bad.add(pair["images"][pair["articles"].index(article["slug"])])
+        if not bad:
+            return changed
+        if attempt == 2:
+            raise ValueError("Image replacements still conflict with the shared corpus")
+        alternatives = iter(plan_images(article, provider, query=query, exclude=excluded)) if article["channel"]=="science" else None
+        for i, row in enumerate(changed):
+            if row["file"] in bad:
+                spec = next(alternatives) if alternatives is not None else plan[i]
+                if "pageid" in spec:
+                    excluded.add(spec["pageid"])
+                changed[i] = produce_one(article["channel"], dict(spec,id=plan[i]["id"]), root, endpoint)

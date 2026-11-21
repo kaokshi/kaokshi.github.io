@@ -74,6 +74,21 @@ def private_path(path):
     return path
 
 
+def recover_numbered_prose(blocks):
+    """Recognize Qwen's section-labelled multiline envelope; preserve every prose line."""
+    if not isinstance(blocks, list) or not all(isinstance(p, str) for p in blocks):
+        return blocks
+    rows = [p for p in blocks if p.strip().casefold() not in {"cta", "cta:"}]
+    if len(rows) != 1 or not re.match(r"^\s*start\s*:?\s*1\s*\nheading:", rows[0], re.I):
+        return blocks
+    pieces = re.split(r"(?im)^start\s*:?\s*(\d+)\s*\nheading:[^\n]*\n", rows[0].strip())
+    if pieces[0] or len(pieces) < 7 or [int(n) for n in pieces[1::2]] != list(range(1,len(pieces)//2+1)):
+        return blocks
+    if any(not text.strip() for text in pieces[2::2]):
+        return blocks
+    return [line.strip() for text in pieces[2::2] for line in text.splitlines() if line.strip()]
+
+
 def write_article(channel, topic, provider, existing_titles=(), *, documents=(), allow_length_repair=False):
     if channel not in ACTIVE or not topic_key(topic):
         raise ValueError("Use a nonempty topic for legends or science")
@@ -97,6 +112,7 @@ def write_article(channel, topic, provider, existing_titles=(), *, documents=(),
                        f"Не дублируй абзацы. Добавь sections: начало каждого смыслового блока (start от 1) и уникальный конкретный heading. Группируй связанные абзацы, оставь CTA в финальном блоке.",
     })
     title, blocks, cta = reply.get("title"), reply.get("paragraphs"), reply.get("cta")
+    blocks = recover_numbered_prose(blocks)
     if (not isinstance(title, str) or not title.strip() or not isinstance(blocks, list)
             or len(blocks) < 3 or not all(isinstance(p, str) and p.strip() for p in blocks)
             or not isinstance(cta, str) or channel_name.casefold() not in cta.casefold()

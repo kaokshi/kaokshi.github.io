@@ -56,7 +56,7 @@ def valid_evidence(report, digest):
 
 def decide(article, evidence, *, launched=False):
     """Fail closed; route to 'approval' unless everything necessary is evidenced."""
-    blockers = layout_findings(article, ROOT)
+    blockers = list(layout_findings(article, ROOT))
     slug = article.get("slug")
     channel = article.get("channel")
     if channel not in ACTIVE_CHANNELS:

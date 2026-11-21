@@ -27,7 +27,9 @@
     "no_secrets_or_personal_data": true,
     "preserve_failures": true,
     "never_assume_detector_score_is_ground_truth": true,
-    "prevent_train_holdout_leakage": true
+    "prevent_train_holdout_leakage": true,
+    "persistent_storage": "private SQLite per production workspace and immutable version dossiers",
+    "retrieval": "genre-specific verified findings before writing; shared topic and image history"
   },
   "proposal_workflow": {
     "collect_verified_cases": true,

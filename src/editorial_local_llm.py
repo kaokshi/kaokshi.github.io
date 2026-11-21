@@ -31,6 +31,8 @@ EVIDENCE = obj(url=STRING, quote=STRING)
 VERDICT = obj(id=STRING, verdict={"type": "string", "enum": ["confirmed", "disputed", "unconfirmed"]},
               reason=STRING, evidence=array(EVIDENCE))
 SCHEMAS = {
+    "photo_query": obj(query=STRING),
+    "topics": obj(topics=array(STRING)),
     "write": ARTICLE,
     "scene_plan": obj(images=array(obj(caption=STRING, prompt=STRING))),
     "photo_plan": obj(images=array(obj(caption=STRING, pageid=INTEGER))),
@@ -160,7 +162,7 @@ def complete(request, *, env=None, send=read_json_response):
         instruction += " Поле before не нужно, его восстановит адаптер из исходного абзаца. Пустой after удаляет абзац."
     messages = [{"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps(data, ensure_ascii=False)}]
-    tokens = {"scene_plan": 1650, "photo_plan": 900, "section_plan": 350, "write": 3400, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
+    tokens = {"photo_query": 60, "topics": 450, "scene_plan": 1650, "photo_plan": 900, "section_plan": 350, "write": 3400, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
               "compare_claims": 1800, "learning_proposals": 800}[task]
     temperature = 0.65 if task == "write" else 0.2
     if kind == "ollama":

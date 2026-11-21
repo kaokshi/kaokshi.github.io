@@ -65,9 +65,9 @@ def vision(article, image):
         properties = {k: {"type": "integer", "enum": list(range(6))} for k in CRITERIA}
         schema = obj(**properties, defect={"type": "string", "enum": [
             "none", "watermark", "text", "misleading", "blur", "spoiler", "artifact"]}, reason=STRING)
-        prompt = ("Rate this image and its thumbnail as a cover. Give a score from 0 (poor) to 5 (excellent) "
+        prompt = ("Rate the photograph or scene illustration for the lead image of an online article. The second view is a center crop of the same picture. No printed title or lettering is expected. Judge crop by subject visibility. Legitimate scale bars on microscopy are allowed. Give a score from 0 (poor) to 5 (excellent) "
                   "for each criterion. Identify any disqualifying defect; choose none if absent. "
-                  "Describe visible evidence in one short sentence. Article: " + article["title"] + ". " +
+                  "Name a concrete object you can see, describe how it relates to the subject, and why the crop works or fails. Article: " + article["title"] + ". " +
                   " ".join(s[0][0].text for s in parse_sections(article["body_html"])))
         content = [{"type": "text", "text": prompt}, *[
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + item}} for item in images]]

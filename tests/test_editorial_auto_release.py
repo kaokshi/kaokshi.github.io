@@ -60,7 +60,8 @@ class AutoReleaseTests(unittest.TestCase):
 
     def test_verified_article_after_official_launch(self):
         settings = {"publication_enabled": True, "auto_release_enabled": True}
-        result = release.prepare_release(self.article, self.evidence, settings)
+        self.assertIsNone(release.prepare_release(self.article, self.evidence, settings)["article"])
+        result = release.prepare_release(self.article, self.evidence, settings, policy={"future_rss_delivery":{"project_launched":True,"currently_active":True}})
         self.assertEqual(result["article"]["status"], "approved")
         self.assertEqual(result["settings"], settings)
         self.article["release_hold"] = True

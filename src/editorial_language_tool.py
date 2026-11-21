@@ -21,7 +21,7 @@ def serialize_match(m):
     if not isinstance(length, int) or length < 0 or not isinstance(offset, int) or offset < 0:
         raise ValueError("LanguageTool Match offset/length is unavailable; attributes="+str(sorted(vars(m)))[:240])
     return {
-        "rule_id": getattr(m, "rule_id", None),
+        "rule_id": getattr(m, "rule_id", None) or getattr(m, "ruleId", None),
         "message": str(getattr(m, "message", ""))[:200],
         "offset": offset,
         "length": length,
