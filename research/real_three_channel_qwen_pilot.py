@@ -32,8 +32,11 @@ def run(root, planner=create_plan, writer=run_one, image_search=commons_search):
               "articles_with_approved_images":0,"fully_ready":0,
               "owner_delivery":"not_connected","publication_authorized":False,
               "rss_authorized":False,"channels":[], "image_rights_review_completed":False}
+    planning_diagnostics = {}
+    manifest["planning_diagnostics"] = planning_diagnostics
     try:
-        plan=planner(date,root,command_provider(ROOT/"src/editorial_local_llm.py"),per_channel=1)
+        plan=planner(date,root,command_provider(ROOT/"src/editorial_local_llm.py"),
+                     per_channel=1, diagnostics=planning_diagnostics)
         manifest["planning"] = "validated_three_channel_topics"
     except (ValueError,KeyError,TypeError) as exc:
         # Only an error category is public. No owner prompts, topic names,
@@ -68,6 +71,7 @@ def run(root, planner=create_plan, writer=run_one, image_search=commons_search):
                        agent_revision_count=max(0,int(summary.get("versions") or 1)-1),
                        pending=summary.get("manual_checks_pending",[]),
                        execution=outcome.get("execution",{}).get("pipeline_status"),
+                       pipeline_exit_code=outcome.get("execution",{}).get("exit_code"),
                        case_dir=summary.get("case_dir"))
             if row["article_generated"]:
                 query=topic[:110]
@@ -91,7 +95,9 @@ def run(root, planner=create_plan, writer=run_one, image_search=commons_search):
     manifest["text_checks_complete"]=sum(int(row["text_checks_complete"]) for row in manifest["channels"])
     # Image discovery isn't licensing/selection/visual QA; no fabricated green flags.
     manifest["fully_ready"]=0
-    manifest["status"]="pipeline_attempted_no_fully_approved_illustrations"
+    manifest["status"]=("texts_generated_images_pending" if manifest["generated"] == 3
+                        else "partial_drafts" if manifest["generated"]
+                        else "no_drafts_generated")
     return manifest
 
 
