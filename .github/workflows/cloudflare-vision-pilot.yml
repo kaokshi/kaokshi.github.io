@@ -1,0 +1,78 @@
+name: Qwen Cloudflare visual inspector pilot
+on:
+  push:
+    branches:
+      - feature/editorial-cloudflare-free-image
+    paths:
+      - .github/workflows/cloudflare-vision-pilot.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  vision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: "true"
+      ZEN_IMAGE_ALLOW_PAID: "false"
+      ZEN_IMAGE_VISION_PILOT: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloudflare-scenes-2-and-3
+          run-id: 44900806627
+          github-token: ${{ github.token }}
+          path: original
+      - uses: actions/download-artifact@v4
+        with:
+          name: klein-one-image-before-after
+          run-id: 44902621864
+          github-token: ${{ github.token }}
+          path: candidate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check pillow requests
+      - name: Run offline visual schema tests
+        run: python -m unittest discover -s tests -p test_editorial_cloudflare_vision.py -v
+      - name: Single real Cloudflare vision audit
+        shell: bash
+        run: |
+          mkdir -p review
+          PYTHONPATH=src python - <<'PY'
+          from pathlib import Path
+          import json
+          from editorial_cloudflare_vision import review_pair, VisionPending
+          from editorial_scene_contract import make_contract
+          original=Path("original/cloudflare-scene-2.jpg").read_bytes()
+          candidate=Path("candidate/02-klein.jpg").read_bytes()
+          c=make_contract(
+             "Woman in dark green coat stands in snow near an OPEN doorway "
+             "connecting an abandoned apartment corridor to snowy pine forest at night.",
+             subject="dark-haired woman in forest green coat holding flashlight",
+             location="The door connects hallway to snowy fir forest",
+             action="She steps outside of the hall into snow",
+             must_keep=["passable door threshold", "same woman", "both forest and hall identifiable"],
+             fix="Remove the bench blocking doorway",
+             forbid=["Never move the doorway entirely into the forest"])
+          try:
+              evidence=review_pair(original,candidate,c)
+          except VisionPending as exc:
+              evidence={"status":"pilot_failed","reason":str(exc),"semantic_verified":False}
+          print("VISION_STATUS="+evidence["status"])
+          print("VISION_DEFECTS="+str(len(evidence.get("defects",[]))))
+          Path("review/visual-audit.json").write_text(json.dumps(evidence,ensure_ascii=False,indent=2))
+          PY
+      - name: Archive audit (no photos or secrets)
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-vision-one-scene-audit
+          path: review/visual-audit.json
+          retention-days: 2
+          if-no-files-found: error
