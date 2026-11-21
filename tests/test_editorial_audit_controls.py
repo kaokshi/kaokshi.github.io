@@ -89,6 +89,33 @@ class Controls(unittest.TestCase):
             generate.assert_called_once()
             refine.assert_called_once()
 
+    def test_rendered_diagram_is_private_candidate(self):
+        from editorial_science_asset import INNER_PLANETS, PLANETS_SOURCE
+        row = dict(id="image-3", section=1, media_type="explanatory_2d", claim=INNER_PLANETS,
+                   caption="Порядок планет", rationale="пространственная последовательность")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(Pending):
+                produce_one("science",row,root,None)
+            folder = root / ".science-reviews" / specification_hash(row)
+            record = json.loads((folder/"candidate.json").read_text())
+            self.assertEqual(record["scientific_source"], PLANETS_SOURCE)
+            self.assertEqual(record["sha256"],sha256((folder/"illustration.png").read_bytes()).hexdigest())
+            self.assertFalse((root/"content").exists())
+
+    def test_holdout_source_leakage_and_ambiguous_predictions(self):
+        from editorial_vision_holdout import score
+        with tempfile.TemporaryDirectory() as tmp:
+            labels, predictions = Path(tmp)/"labels", Path(tmp)/"predictions"
+            ids = ["1"*64, "2"*64]
+            labels.write_text(json.dumps([dict(case_sha256=key, human_reviewer="test",
+                source_group="private-set", accept=bool(i), defect_type="crop") for i,key in enumerate(ids)]))
+            predictions.write_text(json.dumps(dict(zip(ids, [False, None]))))
+            digest = sha256(labels.read_bytes()).hexdigest()
+            self.assertEqual(score(labels,predictions,set(),digest), {"crop":{"TN":1,"unavailable":1}})
+            with self.assertRaises(ValueError):
+                score(labels,predictions,{"private-set"},digest)
+
     def test_scientific_still_requires_review_and_visible_label(self):
         row = dict(id="image-1",section=2,media_type="explanatory_2d",claim="claim",caption="caption",rationale="mechanism")
         with tempfile.TemporaryDirectory() as tmp:
