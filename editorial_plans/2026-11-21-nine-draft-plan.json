@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-21",
+  "status": "topic_plan_only_not_articles",
+  "notes": "Research plan only; all nine article texts, images, rights and editorial checks remain pending. No publication or RSS.",
+  "tasks": [
+    {
+      "channel": "legends",
+      "topic": "Сторож, который каждую ночь находил в архиве мокрые следы"
+    },
+    {
+      "channel": "legends",
+      "topic": "Дверь в подземном переходе, появлявшаяся только во время дождя"
+    },
+    {
+      "channel": "legends",
+      "topic": "Старый радиоприёмник передавал прогноз для исчезнувшего города"
+    },
+    {
+      "channel": "science",
+      "topic": "Почему некоторые облака светятся ночью: физика серебристых облаков",
+      "research_query": "NASA noctilucent clouds mesospheric ice sunlight facts"
+    },
+    {
+      "channel": "science",
+      "topic": "Как осьминог меняет цвет кожи и почему это не просто маскировка",
+      "research_query": "Smithsonian octopus chromatophores iridophores neural control scientific review"
+    },
+    {
+      "channel": "science",
+      "topic": "Что такое подлёдные озёра Антарктиды и как их обнаруживают",
+      "research_query": "British Antarctic Survey subglacial lakes radar Antarctica evidence"
+    },
+    {
+      "channel": "cinema",
+      "topic": "«Прибытие» (2016): язык, время и цена понимания",
+      "research_query": "Arrival 2016 official synopsis Paramount screenplay plot verification"
+    },
+    {
+      "channel": "cinema",
+      "topic": "«Луна 2112» (2009): одиночество и тайна лунной базы",
+      "research_query": "Moon 2009 Sony Pictures Classics official synopsis plot"
+    },
+    {
+      "channel": "cinema",
+      "topic": "«Исходный код» (2011): восемь минут и парадокс выбора",
+      "research_query": "Source Code 2011 official synopsis Summit Entertainment plot"
+    }
+  ]
+}
