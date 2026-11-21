@@ -178,6 +178,10 @@ def produce_one(channel, row, root, endpoint):
                     result = structural_verdict(data, candidate)
                     if result["status"] == "reject":
                         raise Pending("media_production_pending", "Klein generated an unusable frame: " + result["reason"])
+                    from editorial_image_guardrails import detect_severe_crop
+                    crop_check = detect_severe_crop(data, candidate)
+                    if crop_check["status"] == "reject":
+                        raise Pending("media_production_pending", "Klein changed the camera framing too severely")
                     # Visual semantics cannot be confirmed by geometry/format checks.
                     # Preserve both candidates and stop before silently promoting a possible semantic regression.
                     from hashlib import sha256 as _sha256
