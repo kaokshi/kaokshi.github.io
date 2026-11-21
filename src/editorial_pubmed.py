@@ -52,8 +52,12 @@ def pubmed_sources(task, payload, *, open_url=urlopen):
     index = _read_xml(open_url, search)
     if index.tag != "eSearchResult":
         raise Pending("fact_check_pending", "PubMed ESearch result has unexpected format")
-    ids = [row.text for row in index.findall("./IdList/Id")
-           if row.text and re.fullmatch(r"[0-9]{1,12}", row.text)]
+    # Treat ESearch XML as untrusted: retmax is a request, not a response bound.
+    # Keep the first five valid unique IDs, in stable order, before EFetch.
+    ids = list(dict.fromkeys(
+        row.text for row in index.findall("./IdList/Id")
+        if row.text and re.fullmatch(r"[0-9]{1,12}", row.text)
+    ))[:MAX_RECORDS]
     if not ids:
         return {"documents": []}
     # Exactly two sequential requests; no parallelism or unbounded retries.
