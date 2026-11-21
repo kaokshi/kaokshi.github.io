@@ -42,7 +42,7 @@ jobs:
           filename="Qwen_Qwen3.5-9B-Q4_K_M.gguf"
           info=HfApi().model_info(repo,files_metadata=True)
           sibling=next((x for x in info.siblings if x.rfilename==filename),None)
-          if not sibling or not sibling.lfs or not sibling.lfs.get("sha256"):
+          if not sibling or not sibling.lfs:\n              raise SystemExit("Verified Qwen3.5 file metadata unavailable")\n          digest=(sibling.lfs.get("sha256") if isinstance(sibling.lfs,dict)\n                  else getattr(sibling.lfs,"sha256",None))\n          if not digest:
               raise SystemExit("Verified Qwen3.5 file metadata unavailable")
           path=hf_hub_download(repo_id=repo,filename=filename,revision=info.sha,
                                local_dir=os.environ["RUNNER_TEMP"]+"/qwen")
@@ -50,7 +50,7 @@ jobs:
           with open(path,"rb") as f:
               for chunk in iter(lambda:f.read(4*1024*1024),b""):
                   h.update(chunk)
-          if h.hexdigest()!=sibling.lfs["sha256"]:
+          if h.hexdigest()!=digest:
               raise SystemExit("Qwen3.5 GGUF SHA256 mismatch")
           open(os.environ["RUNNER_TEMP"]+"/model-path.txt","w").write(path)
           print("Model revision and file SHA verified; no user article text logged")
