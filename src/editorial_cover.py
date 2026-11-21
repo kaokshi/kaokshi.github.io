@@ -68,7 +68,8 @@ def vision(article, image):
         prompt = ("Rate the photograph or scene illustration for the lead image of an online article. The second view is a center crop of the same picture. No printed title or lettering is expected. Judge crop by subject visibility. Legitimate scale bars on microscopy are allowed. Give a score from 0 (poor) to 5 (excellent) "
                   "for each criterion. Identify any disqualifying defect; choose none if absent. "
                   "Name a concrete object you can see, describe how it relates to the subject, and why the crop works or fails. Article: " + article["title"] + ". " +
-                  " ".join(s[0][0].text for s in parse_sections(article["body_html"])))
+                  " ".join(s[0][0].text for s in parse_sections(article["body_html"])) +
+                  " Caption to verify against the pixels: " + article.get("candidate_caption", ""))
         content = [{"type": "text", "text": prompt}, *[
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + item}} for item in images]]
         response = read_json_response(endpoint, "/v1/chat/completions",
@@ -120,9 +121,9 @@ def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None, 
             raise ValueError("Illustration changed since rights verification")
         if any(r["id"] == ident or r["sha256"] == digest for r in records):
             raise ValueError("Duplicate illustration")
-        rating = assess(article, image) if review is None else review["scores"][digest]
+        rating = assess(dict(article, candidate_caption=row.get("caption", "")), image) if review is None else review["scores"][digest]
         eligible = eligible_cover(rating, image.size)
-        metadata = {k: row[k] for k in ("artist", "license", "license_url", "adaptation", "caption", "original_sha256")
+        metadata = {k: row[k] for k in ("artist", "license", "license_url", "adaptation", "caption", "original_sha256", "section")
                     if row.get(k)}
         records.append({**metadata, "id": ident, "file": name, "source": source, "rights_verified": True,
                         "original_position": i, "sha256": digest, "assessment": rating,
@@ -134,6 +135,10 @@ def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None, 
         raise ValueError("No eligible cover in this set")
     cover = max(candidates, key=lambda r: (r["score"], r["assessment"]["topic"], r["id"]))
     ordered = [cover, *(r for r in records if r is not cover)]
+    if any(r.get("section") is not None for r in ordered):
+        if any(type(r.get("section")) is not int or not 1 <= r["section"] <= len(body) for r in ordered):
+            raise ValueError("Illustrations need a consistent section plan")
+        ordered = [cover, *sorted(ordered[1:], key=lambda r:r["section"])]
     for i, row in enumerate(ordered):
         row.update(position=i, is_cover=(i == 0))
         if i == 0:
@@ -149,7 +154,8 @@ def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None, 
                 if row.get(key, "").startswith("https://"):
                     link = ET.SubElement(caption, "a", {"href": row[key]})
                     link.text = " " + label
-        section = body[i * len(body) // len(ordered)]
+        index = row.get("section", 1 + i * len(body) // len(ordered)) - 1
+        section = body[0 if i == 0 else index]
         section.append(figure)
     result = {**article, "layout_schema": SECTION_SCHEMA, "body_html": "\n".join(ET.tostring(s, encoding="unicode") for s in body),
               "image_files": [r["file"] for r in ordered], "cover_selection": {

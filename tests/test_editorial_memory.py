@@ -24,7 +24,7 @@ class PersistentExperience(unittest.TestCase):
             provider=recalled_provider(root,"legends",lambda t,p: captured.append(p))
             provider("write",{})
             self.assertIn("genre_experience",captured[0])
-            choose=lambda t,p: {"topics":["Ночной маяк на отмели", "Куда пропал сторож вокзала"]}
+            choose=lambda t,p: {"topics":["Проверяемый научный вопрос о движении теней", "Ночной маяк на отмели", "Куда пропал сторож вокзала"]}
             self.assertEqual(choose_topic(root,"legends","2026-11-21",choose,["Ночной маяк на отмели"]),"Куда пропал сторож вокзала")
             self.assertEqual(choose_topic(root,"legends","2026-11-21",None,[]),"Куда пропал сторож вокзала")
 

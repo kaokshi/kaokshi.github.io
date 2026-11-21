@@ -98,8 +98,9 @@ def choose_topic(root, channel, day, provider, corpus):
         used.update(v[0] for v in db.execute("SELECT DISTINCT title FROM versions"))
         used.update(v[0] for v in db.execute("SELECT topic FROM daily_topics"))
         result = provider("topics", {"channel":channel, "used":sorted(used)[-80:],
-            "experience":experience(root,channel),"instruction":"Предложи пять разных новых конкретных тем. "
-            "Учитывай использованные материалы всех жанров. Для науки предложи проверяемый вопрос, для мистики завязку."})
+            "experience":experience(root,channel),"instruction":(
+            "Предложи три разные завязки вымышленных мистических рассказов. В каждой нужен герой, место и конкретное происшествие. Никаких пояснений."
+            if channel=="legends" else "Предложи три конкретных научных вопроса, которые можно проверить по первичным исследованиям. Никаких вымышленных происшествий.")})
         db.execute("BEGIN IMMEDIATE")
         prior = reserved()
         if prior:
@@ -108,6 +109,8 @@ def choose_topic(root, channel, day, provider, corpus):
         for topic in result["topics"]:
             key = topic_key(topic)
             words = set(key.split())
+            if channel=="legends" and ("научный вопрос" in key or "научное исследование" in key):
+                continue
             if len(words)<3 or any(len(words & other)/len(words | other) >= .60
                                   for other in (set(topic_key(u).split()) for u in used)):
                 continue

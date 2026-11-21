@@ -33,10 +33,10 @@ VERDICT = obj(id=STRING, verdict={"type": "string", "enum": ["confirmed", "dispu
 SCHEMAS = {
     "photo_query": obj(query=STRING),
     "field_review": obj(positions=array(INTEGER)),
-    "topics": obj(topics=array(STRING)),
+    "topics": obj(topics={**array(STRING),"minItems":3,"maxItems":5}),
     "write": ARTICLE,
-    "scene_plan": obj(images=array(obj(caption=STRING, prompt=STRING))),
-    "photo_plan": obj(images=array(obj(caption=STRING, pageid=INTEGER))),
+    "scene_plan": obj(images=array(obj(caption=STRING, prompt=STRING, section=INTEGER))),
+    "photo_plan": obj(images=array(obj(caption=STRING, pageid=INTEGER, section=INTEGER))),
     "section_plan": obj(sections=SECTIONS),
     "diagnose": obj(issues=array(ISSUE)),
     "revise": obj(edits=array(EDIT)),

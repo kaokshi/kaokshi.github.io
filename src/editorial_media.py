@@ -64,7 +64,10 @@ def save_image(root, channel, identifier, data, credit, caption):
 
 def plan_images(article, provider, *, query=None, rights_basis=None, exclude=()):
     from editorial_length import extract_text
-    inputs = {"title": article["title"], "text": extract_text(article["body_html"])}
+    from editorial_layout import parse_sections
+    sections = parse_sections(article["body_html"])
+    inputs = {"title": article["title"], "text": extract_text(article["body_html"]),
+              "section_headings": [section[0][0].text for section in sections]}
     if article["channel"] == "legends":
         if not rights_basis or not rights_basis.strip():
             raise ValueError("Supply the rights basis for this local generator")
@@ -96,9 +99,13 @@ def plan_images(article, provider, *, query=None, rights_basis=None, exclude=())
         inputs.update(candidates=candidates, instruction="Выбери семь различных документальных фотографий, "
                       "соответствующих теме, по описаниям; приведи pageid и точную подпись на русском. "
                       "Исключи схемы, рисунки и изображения с недостоверным контекстом.")
+    inputs["instruction"] += " Укажи для каждого изображения номер подходящего смыслового раздела section, начиная с 1."
     rows = provider(task, inputs)["images"]
     if len(rows) not in (7, 8):
         raise ValueError("Model did not select seven or eight images")
+    count = len(sections)
+    if any(type(r.get("section")) is not int or not 1 <= r["section"] <= count for r in rows):
+        raise ValueError("Each planned image needs a valid article section")
     if task == "photo_plan" and (len({r["pageid"] for r in rows}) != len(rows)
                                 or any(r["pageid"] not in candidates for r in rows)):
         raise ValueError("Unknown or repeated Commons photograph")
@@ -131,7 +138,10 @@ def produce_one(channel, row, root, endpoint):
                   "license": row["rights_basis"]}
         if not credit["license"].strip():
             raise ValueError("Supply rights basis for the deployed model and its output")
-    return save_image(root, channel, row["id"], data, credit, row["caption"])
+    result = save_image(root, channel, row["id"], data, credit, row["caption"])
+    if "section" in row:
+        result["section"] = row["section"]
+    return result
 
 
 
