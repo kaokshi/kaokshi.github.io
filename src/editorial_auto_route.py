@@ -54,9 +54,9 @@ def valid_evidence(report, digest):
             and bool(report["report_ref"].strip()))
 
 
-def decide(article, evidence):
+def decide(article, evidence, *, launched=False):
     """Fail closed; route to 'approval' unless everything necessary is evidenced."""
-    blockers = layout_findings(article, ROOT)
+    blockers = list(layout_findings(article, ROOT))
     slug = article.get("slug")
     channel = article.get("channel")
     if channel not in ACTIVE_CHANNELS:
@@ -111,7 +111,9 @@ def decide(article, evidence):
             component_scores.append(value)
     model_a_index = round(sum(component_scores) / 3, 2) if len(component_scores) == 3 else None
     if model_a_index is not None and model_a_index > 80:
-        blockers.append("model_a_editorial_review_above_80")
+        review = evidence.get("editorial_review")
+        if not (valid_evidence(review, dg) and review.get("substantive_issues_resolved") is True):
+            blockers.append("model_a_editorial_review_above_80")
     if evidence.get("ai_editorial_escalation_unresolved") is True:
         blockers.append("unresolved_ai_editorial_escalation")
     quality = evidence.get("quality")
@@ -174,7 +176,8 @@ def decide(article, evidence):
     }
     # No calibrated AI threshold exists yet; a score-only decision cannot
     # authorize unattended publication, even when all quality counts are zero.
-    blockers.append("ai_auto_release_threshold_not_validated")
+    if not launched:
+        blockers.append("project_not_launched")
     risk = (round(sum(components.values()), 2)
             if all(isinstance(v, (int, float)) for v in components.values()) else None)
     if risk is not None and risk > RISK_THRESHOLD:

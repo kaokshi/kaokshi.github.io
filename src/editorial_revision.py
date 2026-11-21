@@ -125,6 +125,11 @@ def assistant_edit(article, response, *, allow_remove=False):
 
 
 def append_version(case, article, stage, changes, rule=None):
+    stages = [v["stage"] for v in case["versions"]]
+    if stage == "agent" and ("assistant" in stages or stages.count("agent") >= MAX_AGENT):
+        raise ValueError("Editorial agent revision limit exceeded")
+    if stage == "assistant" and stages.count("assistant") >= MAX_ASSISTANT:
+        raise ValueError("ChatGPT revision limit exceeded")
     digest = article_digest(article)
     previous = case["versions"][-1]
     if any(version["text_sha256"] == digest for version in case["versions"]):
@@ -170,6 +175,16 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
     while True:
         version = versions[-1]
         article = version["article"]
+        if len(versions) > 1 and not versions[-2].get("report"):
+            previous = versions[-2]
+            prior = check(previous["article"])
+            if (prior.get("text_sha256") != previous["text_sha256"]
+                    or prior.get("automated_checks_completed") is not True):
+                case["decision"] = "checks_pending"
+                save(case)
+                return
+            previous["report"] = prior
+            save(case)
         report = check(article)
         version["report"] = report
         case["decision"] = "checks_pending"

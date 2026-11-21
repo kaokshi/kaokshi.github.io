@@ -100,7 +100,8 @@ def inspect_article(path):
     return inspect_draft(article, fallback_slug=path.stem)
 
 
-def inspect_draft(article, *, fallback_slug=None):
+def inspect_draft(article, *, fallback_slug=None, asset_root=None):
+    asset_root = asset_root or ROOT
     channel = article.get("channel")
     text = extract_text(article.get("body_html", ""))
     chars = count_characters(article.get("body_html", ""))
@@ -108,7 +109,7 @@ def inspect_draft(article, *, fallback_slug=None):
     sources = article.get("image_sources") or []
     photo_refs = [item.get("file") for item in sources if isinstance(item, dict)]
     from editorial_layout import layout_findings
-    problems = layout_findings(article, ROOT)
+    problems = layout_findings(article, asset_root)
     if channel not in CHANNELS:
         problems.append("unknown_channel")
     issue = length_finding(chars)
@@ -118,7 +119,7 @@ def inspect_draft(article, *, fallback_slug=None):
         problems.append("fewer_than_seven_images")
     if len(set(imgs)) != len(imgs):
         problems.append("repeated_image_file")
-    missing = [s for s in imgs if not (ROOT / s).is_file()]
+    missing = [s for s in imgs if not (asset_root / s).is_file()]
     if missing:
         problems.append("missing_image_files")
     if imgs and (not article.get("rights_reviewed") or not article.get("rights_basis")):
@@ -180,26 +181,27 @@ def similarity_report(entries, *, candidate=None, drafts=()):
     return similar
 
 
-def image_hash_audit(paths, *, candidate=None):
-    """Exact hashes for all files; perceptual distance if Pillow is installed."""
+def image_hash_audit(paths, *, candidate=None, asset_root=None, peers=()):
+    """Compare every referenced image, including reuse of the same path across channels."""
     records = []
-    articles = []
-    for path in paths:
-        a = json.loads(path.read_text(encoding="utf-8"))
-        if candidate is None or a.get("slug", path.stem) != candidate.get("slug"):
-            articles.append((a, path.stem))
+    unreadable = []
+    articles = [(json.loads(path.read_text(encoding="utf-8")), ROOT) for path in paths]
+    articles.extend((peer, asset_root or ROOT) for peer in peers)
     if candidate is not None:
-        articles.append((candidate, None))
-    for a, fallback_slug in articles:
-        for filename in a.get("image_files", []):
-            f = ROOT / filename
-            if f.is_file():
-                records.append((a.get("slug", fallback_slug), filename, f))
+        articles = [(article, base) for article, base in articles if article.get("slug") != candidate["slug"]]
+        articles.append((candidate, asset_root or ROOT))
+    for article, base in articles:
+        for name in article.get("image_files", []):
+            f = (base / name).resolve()
+            if not f.is_relative_to(base.resolve()) or not f.is_file():
+                unreadable.append({"slug": article["slug"], "file": name})
+                continue
+            records.append((article["slug"], name, f))
     duplicates = []
     seen = {}
     for slug, name, path in records:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if digest in seen and seen[digest][1] != name:
+        if digest in seen:
             duplicates.append({"method": "sha256", "articles": [seen[digest][0], slug],
                                "images": [seen[digest][1], name]})
         seen[digest] = (slug, name)
@@ -209,7 +211,6 @@ def image_hash_audit(paths, *, candidate=None):
     except ImportError:
         return {"sha256_duplicates": duplicates, "near_duplicate_status": "unavailable (Pillow/imagehash not installed)"}
     hashes = []
-    unreadable = []
     for slug, name, path in records:
         try:
             with Image.open(path) as img:
@@ -221,7 +222,7 @@ def image_hash_audit(paths, *, candidate=None):
             if candidate is not None and candidate["slug"] not in (slug, slug2):
                 continue
             dist = h - h2
-            if name != name2 and dist <= 5:
+            if dist <= 5:
                 duplicates.append({"method": "perceptual_hash", "distance": dist,
                                    "articles": [slug, slug2], "images": [name, name2]})
     return {"duplicates": duplicates, "near_duplicate_status": "completed", "scanned_images": len(hashes),

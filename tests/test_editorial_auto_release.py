@@ -54,9 +54,18 @@ class AutoReleaseTests(unittest.TestCase):
         result=release.prepare_release(self.article,self.evidence,
                     {"auto_release_enabled":True,"publication_enabled":False})
         self.assertEqual(result["decision"]["disposition"],"send_for_owner_review")
-        self.assertIn("ai_auto_release_threshold_not_validated",result["decision"]["blockers"])
+        self.assertIn("project_not_launched",result["decision"]["blockers"])
         self.assertIsNone(result["article"])
         self.assertIsNone(result["settings"])
+
+    def test_verified_article_after_official_launch(self):
+        settings = {"publication_enabled": True, "auto_release_enabled": True}
+        self.assertIsNone(release.prepare_release(self.article, self.evidence, settings)["article"])
+        result = release.prepare_release(self.article, self.evidence, settings, policy={"future_rss_delivery":{"project_launched":True,"currently_active":True}})
+        self.assertEqual(result["article"]["status"], "approved")
+        self.assertEqual(result["settings"], settings)
+        self.article["release_hold"] = True
+        self.assertIsNone(release.prepare_release(self.article, self.evidence, settings)["article"])
 
     def test_disabled_feature_leaves_everything_unchanged(self):
         result=release.prepare_release(self.article,self.evidence,

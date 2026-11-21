@@ -190,6 +190,24 @@ class FactTests(unittest.TestCase):
                                                 "title": "Measurement", "kind": "primary",
                                                 "scope": "abstract", "text": SOURCE}])
 
+    def test_source_reader_retries_timeout_only_within_budget(self):
+        calls = []
+        def unavailable(url, timeout):
+            calls.append(url)
+            raise TimeoutError()
+        with self.assertRaises(Pending):
+            europe_pmc("discover", {"topic": "forest phenology"}, open_url=unavailable)
+        self.assertEqual(len(calls), 2)
+
+    def test_primary_results_require_matching_article_id_and_type(self):
+        from editorial_research import read_primary
+        def reader(pmcid, kind):
+            data = f'<article article-type="{kind}"><front><article-meta><article-id pub-id-type="pmc">{pmcid}</article-id></article-meta></front><body><sec><title>Results</title><p>First <i>measurement</i>.</p></sec></body></article>'
+            return lambda url, timeout: BytesIO(data.encode())
+        self.assertEqual(read_primary("PMC123", reader("123", "research-article")), "First measurement.")
+        self.assertIsNone(read_primary("PMC123", reader("456", "research-article")))
+        self.assertIsNone(read_primary("PMC123", reader("123", "review-article")))
+
 
 class HoldoutTests(unittest.TestCase):
     def test_paired_qualitative_metrics_and_no_overlap(self):
@@ -277,14 +295,16 @@ class LocalLlmTests(unittest.TestCase):
         def send(endpoint, path, payload, timeout):
             calls.append(path)
             self.assertEqual(endpoint.hostname, "127.0.0.1")
-            self.assertEqual(payload["response_format"]["type"], "json_schema")
-            return {"choices": [{"message": {"content": json.dumps(
-                {} if len(calls) == 1 else {"title": "Тест", "sections": [], "paragraphs": ["Абзац"], "cta": "Подписаться"}
-            )}, "finish_reason": "stop"}]}
+            if path == "/apply-template":
+                return {"prompt": "Rendered by the server"}
+            self.assertEqual(payload["prompt"], "Rendered by the server")
+            self.assertIn("paragraphs", payload["json_schema"]["properties"])
+            return {"content": json.dumps({} if len(calls) == 2 else
+                    {"title": "Тест", "paragraphs": ["Один", "Два", "Три"]})}
 
         result = complete(request, env={"ZEN_LLM_MODEL": "test"}, send=send)
         self.assertEqual(result["title"], "Тест")
-        self.assertEqual(calls, ["/v1/chat/completions"] * 2)
+        self.assertEqual(calls, ["/apply-template", "/completion", "/completion"])
         with self.assertRaisesRegex(ProviderFailure, "loopback"):
             complete(request, env={"ZEN_LLM_MODEL": "test", "ZEN_LLM_URL": "http://example.org:8093"}, send=send)
 

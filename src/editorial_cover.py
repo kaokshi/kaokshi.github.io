@@ -61,25 +61,93 @@ def vision(article, image):
               "или спойлер. Если препятствий нет, оставь пустую строку. В reason обоснуй выбор "
               "по видимому содержанию. " + GENRES[article["channel"]] + " Материал: " +
               article["title"] + "\n" + " ".join(parse_sections(article["body_html"]).itertext()))
+    if os.environ.get("ZEN_VISION_BACKEND") == "llama.cpp":
+        properties = {k: {"type": "integer", "enum": list(range(6))} for k in CRITERIA}
+        schema = obj(**properties, defect={"type": "string", "enum": [
+            "none", "watermark", "text", "misleading", "blur", "spoiler", "artifact"]}, reason={**STRING, "maxLength": 210})
+        prompt = ("Rate the photograph or scene illustration for the lead image of an online article. The second view is a center crop of the same picture. No printed title or lettering is expected. Judge crop by subject visibility. Legitimate scale bars on microscopy are allowed. Give a score from 0 (poor) to 5 (excellent) "
+                  "for each criterion. Identify any disqualifying defect; choose none if absent. "
+                  "In one short sentence identify the visible subject, its relevance, and the crop. A mismatch between pixels and caption disqualifies the image. Article: " + article["title"] + ". " +
+                  " ".join(s[0][0].text for s in parse_sections(article["body_html"])) +
+                  " Caption to verify against the pixels: " + article.get("candidate_caption", ""))
+        content = [{"type": "text", "text": prompt}, *[
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + item}} for item in images]]
+        response = read_json_response(endpoint, "/v1/chat/completions",
+            {"model": model, "temperature": 0, "max_tokens": 360,
+             "messages": [{"role": "user", "content": content}],
+             "response_format": {"type": "json_schema", "schema": schema}}, request_timeout())
+        choice = response["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise ValueError("Incomplete visual assessment at token limit")
+        rating = json.loads(choice["message"]["content"])
+        if rating["defect"] == "none":
+            rating["defect"] = ""
+        return rating
     reply = read_json_response(endpoint, "/api/chat", {"model": model, "format": ASSESSMENT,
         "stream": False, "messages": [{"role": "user", "content": prompt, "images": images}]}, request_timeout())
     return json.loads(reply["message"]["content"])
 
 
 def eligible_cover(rating, size):
-    if (not matches_schema(rating, ASSESSMENT) or not rating["reason"].strip()
+    if (not matches_schema(rating, ASSESSMENT) or rating["reason"].strip().casefold() in {"", "none", "null", "n/a"}
             or any(not 0 <= rating[k] <= 5 for k in CRITERIA)):
         raise ValueError("Invalid visual assessment")
     return (min(size) >= 600 and not rating["defect"].strip()
             and min(rating[k] for k in ("topic", "genre", "thumbnail", "crop", "sharpness")) >= 4)
 
 
-def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None):
+class UnsuitableIllustrations(ValueError):
+    def __init__(self, identifiers):
+        self.identifiers = identifiers
+        super().__init__("Illustrations require replacement: " + ", ".join(identifiers))
+
+
+def unsuitable(row):
+    rating = row["assessment"]
+    return bool(rating["defect"].strip()) or min(rating["topic"], rating["genre"]) == 0
+
+
+def check_visual_controls(manifest_path, assess=vision):
+    """Require a real accepted cover and a real off-topic image for the same article."""
+    from PIL import Image, ImageOps
+    if not manifest_path:
+        raise ValueError("Visual controls not connected (ZEN_VISION_CONTROLS)")
+    from editorial_writer import private_path
+    path = private_path(Path(manifest_path))
+    manifest = json.loads(path.read_text())
+    article = manifest["article"]
+    if manifest["article_sha256"] != identity(article):
+        raise ValueError("Stale visual control article")
+    rows = manifest["controls"]
+    if (len(rows) != 2 or {row["expected"] for row in rows} != {"cover", "off_topic"}
+            or len({row["sha256"] for row in rows}) != 2):
+        raise ValueError("Expected two distinct labelled control images")
+    for row in rows:
+        source = asset(path.parent, row["file"])
+        if sha256(source.read_bytes()).hexdigest() != row["sha256"]:
+            raise ValueError("Stale visual control image")
+        with Image.open(source) as original:
+            image = ImageOps.exif_transpose(original).convert("RGB")
+            rating = assess(dict(article, candidate_caption=row["caption"]), image)
+            accepted = eligible_cover(rating, image.size)
+        if row["expected"] == "cover" and not accepted:
+            raise ValueError("Visual model rejected the independently selected reference cover")
+        if row["expected"] == "off_topic" and not (rating["topic"] == 0 or rating["defect"] == "misleading"):
+            raise ValueError("Visual model failed to recognize an off-topic control")
+
+
+def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None, review=None):
     from PIL import Image, ImageOps
     body = parse_sections(article["body_html"])
     remove_figures(body)
+    if review is None and assess is vision:
+        check_visual_controls(os.environ.get("ZEN_VISION_CONTROLS"))
     if not isinstance(manifest, list) or len(manifest) not in (7, 8):
         raise ValueError("Compare a complete set of seven or eight illustrations")
+    if review is not None and (review.get("article_sha256") != identity(article)
+            or not isinstance(review.get("reviewer"), str) or not review["reviewer"].strip()
+            or set(review.get("scores", {})) != {row["sha256"] for row in manifest}):
+        raise ValueError("Cover review must identify the reviewer and the exact article and images")
     records = []
     for i, row in enumerate(manifest):
         name, ident, source = (row[key] for key in ("file", "id", "source"))
@@ -98,18 +166,27 @@ def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None):
             raise ValueError("Illustration changed since rights verification")
         if any(r["id"] == ident or r["sha256"] == digest for r in records):
             raise ValueError("Duplicate illustration")
-        rating = assess(article, image)
+        rating = assess(dict(article, candidate_caption=row.get("caption", "")), image) if review is None else review["scores"][digest]
         eligible = eligible_cover(rating, image.size)
-        records.append({"id": ident, "file": name, "source": source, "rights_verified": True,
+        metadata = {k: row[k] for k in ("artist", "license", "license_url", "adaptation", "caption", "original_sha256", "original_url", "section")
+                    if row.get(k)}
+        records.append({**metadata, "id": ident, "file": name, "source": source, "rights_verified": True,
                         "original_position": i, "sha256": digest, "assessment": rating,
                         "size": list(image.size), "eligible": eligible, "score": sum(rating[k] for k in CRITERIA)})
     candidates = [r for r in records if r["eligible"]]
     if checkpoint:
         checkpoint({"status": "assessed", "article_sha256": identity(article), "images": records})
+    rejected = [r["id"] for r in records if unsuitable(r)]
+    if rejected:
+        raise UnsuitableIllustrations(rejected)
     if not candidates:
         raise ValueError("No eligible cover in this set")
     cover = max(candidates, key=lambda r: (r["score"], r["assessment"]["topic"], r["id"]))
     ordered = [cover, *(r for r in records if r is not cover)]
+    if any(r.get("section") is not None for r in ordered):
+        if any(type(r.get("section")) is not int or not 1 <= r["section"] <= len(body) for r in ordered):
+            raise ValueError("Illustrations need a consistent section plan")
+        ordered = [cover, *sorted(ordered[1:], key=lambda r:r["section"])]
     for i, row in enumerate(ordered):
         row.update(position=i, is_cover=(i == 0))
         if i == 0:
@@ -117,11 +194,31 @@ def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None):
         figure = ET.Element("figure", {"data-editorial-image": row["id"]})
         ET.SubElement(figure, "img", {"src": "/" + row["file"].removeprefix("content/"),
                                       "alt": row["assessment"]["reason"]})
-        section = body[i * len(body) // len(ordered)]
+        if row.get("caption"):
+            credit = " · ".join(row[k] for k in ("artist", "license", "adaptation") if row.get(k))
+            caption = ET.SubElement(figure, "figcaption")
+            caption.text = row["caption"] + (" — " + credit if credit else "")
+            for key, label in (("source", "Источник"), ("license_url", "Лицензия")):
+                if row.get(key, "").startswith("https://"):
+                    link = ET.SubElement(caption, "a", {"href": row[key]})
+                    link.text = " " + label
+        index = row.get("section", 1 + i * len(body) // len(ordered)) - 1
+        section = body[0 if i == 0 else index]
         section.append(figure)
     result = {**article, "layout_schema": SECTION_SCHEMA, "body_html": "\n".join(ET.tostring(s, encoding="unicode") for s in body),
               "image_files": [r["file"] for r in ordered], "cover_selection": {
                   "article_sha256": identity(article), "images": ordered}}
+    result["cover_selection"]["origin"] = "editor_review_of_images" if review is not None else "vision"
+    if review is not None:
+        result["cover_selection"]["reviewer"] = review["reviewer"]
+    if all(r.get("artist") and r.get("license") for r in ordered):
+        result["rights_basis"] = "Источники, лицензии и редакционные оригиналы указаны для каждого файла."
+        result["rights_reviewed"] = True
+        result["image_sources"] = [{"file": r["file"], "source_page": r["source"],
+                                    "license": r["license"].upper().replace(" ", "-"),
+                                    "artist": r["artist"], "license_url": r.get("license_url"),
+                                    "license_verified": r["rights_verified"], "sha256": r["sha256"]}
+                                   for r in ordered]
     verify_cover(result, root)
     if checkpoint:
         checkpoint({"status": "selected", **result["cover_selection"]})
@@ -145,12 +242,12 @@ def verify_cover(article, root):
     if len({r["id"] for r in rows}) != len(rows):
         raise ValueError("Duplicate illustration identifier")
     for i, (row, figure) in enumerate(zip(rows, figures)):
-        if (row["position"] != i or row["is_cover"] is not (i == 0)
+        if (unsuitable(row) or row["position"] != i or row["is_cover"] is not (i == 0)
                 or row["eligible"] is not eligible_cover(row["assessment"], row["size"])
                 or row["score"] != sum(row["assessment"][k] for k in CRITERIA)
                 or figure.get("data-editorial-image") != row["id"]
                 or row.get("rights_verified") is not True or not row.get("source")
-                or len(figure) != 1 or figure[0].tag != "img"
+                or [node.tag for node in figure] not in (["img"], ["img", "figcaption"])
                 or figure[0].get("src") != "/" + row["file"].removeprefix("content/")
                 or sha256(asset(root, row["file"]).read_bytes()).hexdigest() != row["sha256"]):
             raise ValueError("Image changed; rerun cover_selection")

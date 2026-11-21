@@ -14,8 +14,16 @@ from editorial_ai_check import ROOT, CONTENT
 from editorial_auto_route import decide, digest_article
 
 
-def prepare_release(article, evidence, settings):
-    decision = decide(article, evidence)
+def officially_launched(settings, policy=None):
+    if policy is None:
+        policy = json.loads((ROOT / "config/ai_revision_policy.json").read_text())
+    rss = policy.get("future_rss_delivery", {})
+    return (settings.get("publication_enabled") is True and rss.get("project_launched") is True
+            and rss.get("currently_active") is True)
+
+
+def prepare_release(article, evidence, settings, *, policy=None):
+    decision = decide(article, evidence, launched=officially_launched(settings, policy))
     if decision["disposition"] != "automatic_release_candidate":
         return {"decision": decision, "article": None, "settings": None}
     if article.get("status") != "draft":
@@ -48,11 +56,7 @@ def prepare_release(article, evidence, settings):
             for provider in ("modernbert", "lightgbm", "transformer", "ai_accent_detector")
         ],
     })
-    # If publication is currently off, turn it on in the same verified release
-    # transaction, never on mere installation of this tool.
-    cfg = dict(settings)
-    cfg["publication_enabled"] = True
-    return {"decision": decision, "article": new, "settings": cfg}
+    return {"decision": decision, "article": new, "settings": dict(settings)}
 
 
 def main():
@@ -82,7 +86,7 @@ def main():
         json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.apply and prepared["article"] is not None:
         path.write_text(json.dumps(prepared["article"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        settings_path.write_text(json.dumps(prepared["settings"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
         print("RELEASE_ELIGIBLE", args.slug, "risk", decision["risk_score"])
     else:
         print("ROUTE", args.slug, decision["disposition"], json.dumps(decision["blockers"], ensure_ascii=False))

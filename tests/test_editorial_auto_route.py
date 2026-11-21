@@ -63,7 +63,7 @@ class RoutingTests(unittest.TestCase):
     def test_passes_all_evidence_as_candidate_without_authorizing(self):
         result = route.decide(self.article, self.evidence)
         self.assertEqual(result["disposition"], "send_for_owner_review")
-        self.assertIn("ai_auto_release_threshold_not_validated", result["blockers"])
+        self.assertIn("project_not_launched", result["blockers"])
         self.assertLess(result["risk_score"], 20)
         self.assertFalse(result["publication_authorized"])
 
@@ -78,7 +78,7 @@ class RoutingTests(unittest.TestCase):
         result = route.decide(self.article, self.evidence)
         self.assertIn("model_a_editorial_review_above_80", result["blockers"])
         self.assertFalse(result["ai_rewrite_required_by_detector"])
-        self.assertIn("ai_auto_release_threshold_not_validated", result["blockers"])
+        self.assertIn("project_not_launched", result["blockers"])
 
     def test_missing_evidence_never_passes(self):
         result = route.decide(self.article, {})
@@ -114,7 +114,7 @@ class RoutingTests(unittest.TestCase):
             "no_unresolved_factual_contradictions": True,
             "verified_claim_ids": ["c1"],
         }
-        self.assertIn("ai_auto_release_threshold_not_validated",
+        self.assertIn("project_not_launched",
                       route.decide(self.article, self.evidence)["blockers"])
         self.evidence["factual"]["verified_claim_ids"] = []
         self.assertIn("science_claim_coverage_missing",

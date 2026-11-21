@@ -9,6 +9,14 @@ SECTION_SCHEMA = "zen-sections-v1"
 GENERIC = re.compile(r"(?:введение|вступление|заключение|основная часть|итоги|(?:блок|раздел|глава|часть)\s*[\divx]*)", re.I)
 
 
+FIELD_LINE = re.compile(r"""^\s*["']?(?:(?:heading|sections?|paragraphs?|title|cta)["']?\s*[:=]|start["']?\s*[:=]?\s*\d+\b|cta\s*$)""", re.I)
+
+
+def assert_reader_text(text):
+    if not isinstance(text, str) or not text.strip() or any(FIELD_LINE.match(line) for line in text.splitlines()):
+        raise ValueError("Missing reader text or structural field in prose")
+
+
 def subscription_heading(name):
     return re.match(r"(?:призыв к |подпи(?:сывай|шис|шите|ска\b))", name.casefold().strip())
 
@@ -41,6 +49,8 @@ def parse_sections(body):
         prose = [node for node in section if node.tag == "p"]
         if not prose or any(not "".join(p.itertext()).strip() for p in prose):
             raise ValueError("Section needs prose")
+        for node in [heading, *prose]:
+            assert_reader_text("".join(node.itertext()))
         paragraphs += len(prose)
     if len(root) > (paragraphs + 1) // 2:
         raise ValueError("Group related paragraphs into sections")
@@ -96,6 +106,11 @@ def docx_body(doc, article, assets):
                 from docx.shared import Inches
                 file = node.find("img").attrib["src"]
                 doc.add_picture(str(assets / ("content" + file)), width=Inches(5.8))
+                caption = node.find("figcaption")
+                if caption is not None:
+                    doc.add_paragraph(caption.text or "", style="Caption")
+                    for link in caption.findall("a"):
+                        doc.add_paragraph(link.attrib["href"], style="Caption")
             else:
                 doc.add_paragraph("".join(node.itertext()))
 
