@@ -2,6 +2,9 @@
 from hashlib import sha256
 from io import BytesIO
 import json
+import math
+import os
+from tempfile import NamedTemporaryFile
 from urllib.parse import urlsplit
 
 from PIL import Image, ImageDraw, ImageFont
@@ -18,42 +21,75 @@ INNER_PLANETS = "Первые четыре планеты от Солнца — 
 PLANETS_SOURCE = "https://science.nasa.gov/solar-system/planets/"
 
 
-def inner_planets_diagram(folder, row, digest):
-    """Render only the ordering claim. Distances, radii and colors carry no data."""
-    if row["media_type"] != "explanatory_2d" or row["claim"].strip() != INNER_PLANETS:
-        return
+MOON_PHASES = "Вне лунного затмения Солнце освещает половину Луны, а с Земли видна разная часть освещённой поверхности."
+MOON_SOURCE = "https://science.nasa.gov/moon/moon-phases/"
+
+
+def inner_planets_diagram():
+    """Illustrate ordering only. Neither distances nor radii are to scale."""
+    image = Image.new("RGB", (1280, 720), "#f7f7f2")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.truetype("DejaVuSans.ttf", 34)
+    heading = ImageFont.truetype("DejaVuSans.ttf", 48)
+    draw.text((60, 65), "Первые четыре планеты от Солнца", font=heading, fill="#122634")
+    draw.text((60, 190), "Направление от Солнца", font=font, fill="#122634")
+    draw.line((68, 273, 1175, 273), fill="#425968", width=6)
+    draw.polygon([(1175,259),(1202,273),(1175,287)], fill="#425968")
+    for n, label in enumerate(("Меркурий","Венера","Земля","Марс"), 1):
+        x = 155 + (n-1)*310
+        draw.ellipse((x-40,340,x+40,420), fill="#286280")
+        draw.text((x,380), str(n), font=font, anchor="mm", fill="white")
+        draw.text((x,465), label, font=font, anchor="mm", fill="#122634")
+    draw.text((60,600), "Условная схема. Размеры и расстояния вне масштаба.", font=font, fill="#425968")
+    return image
+
+
+def moon_phase_model():
+    """Orthographic projection of a sphere with directional Lambertian lighting."""
+    image = Image.new("RGB", (1280, 720), "#122634")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.truetype("DejaVuSans.ttf", 31)
+    heading = ImageFont.truetype("DejaVuSans.ttf", 47)
+    draw.text((65, 65), "Какая часть освещённой стороны видна?", font=heading, fill="white")
+    radius = 125
+    for center, angle, label in [(225, 135, "Серп"), (640, 90, "Четверть"), (1055, 0, "Полнолуние")]:
+        angle = math.radians(angle)
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                z_squared = 1 - (dx*dx + dy*dy) / radius**2
+                if z_squared < 0:
+                    continue
+                light = dx / radius * math.sin(angle) + math.sqrt(z_squared) * math.cos(angle)
+                luminance = round(29 + 209 * max(light, 0))
+                image.putpixel((center + dx, 345 + dy), (luminance,) * 3)
+        draw.text((center, 512), label, font=font, anchor="mm", fill="white")
+    draw.text((65, 620), "3D-модель освещения сферы. Рельеф Луны не показан.", font=font, fill="white")
+    return image
+
+
+def render_candidate(folder, row, digest):
     from editorial_scene_review import scene_lock
+    renderers = {("explanatory_2d", INNER_PLANETS): (inner_planets_diagram, PLANETS_SOURCE),
+                 ("explanatory_3d", MOON_PHASES): (moon_phase_model, MOON_SOURCE)}
+    renderer = renderers.get((row["media_type"], row["claim"].strip()))
+    if renderer is None:
+        return
+    make_image, source = renderer
     with scene_lock(folder):
         target = folder / "illustration.png"
         if target.exists():
             return
-        image = Image.new("RGB", (1280, 720), "#f7f7f2")
-        draw = ImageDraw.Draw(image)
-        font = ImageFont.truetype("DejaVuSans.ttf", 34)
-        heading = ImageFont.truetype("DejaVuSans.ttf", 48)
-        draw.text((60, 65), "Первые четыре планеты от Солнца", font=heading, fill="#122634")
-        draw.text((60, 190), "Направление от Солнца", font=font, fill="#122634")
-        draw.line((68, 273, 1175, 273), fill="#425968", width=6)
-        draw.polygon([(1175,259),(1202,273),(1175,287)], fill="#425968")
-        for n, label in enumerate(("Меркурий","Венера","Земля","Марс"), 1):
-            x = 155 + (n-1)*310
-            draw.ellipse((x-40,340,x+40,420), fill="#286280")
-            draw.text((x,380), str(n), font=font, anchor="mm", fill="white")
-            draw.text((x,465), label, font=font, anchor="mm", fill="#122634")
-        draw.text((60,600), "Условная схема. Размеры и расстояния вне масштаба.", font=font, fill="#425968")
-        from tempfile import NamedTemporaryFile
-        from pathlib import Path
         with NamedTemporaryFile(dir=folder) as stream:
-            image.save(stream, format="PNG")
+            make_image().save(stream, format="PNG")
             stream.flush()
-            data = Path(stream.name).read_bytes()
-            from os import link
-            link(stream.name, target)
+            stream.seek(0)
+            digest_image = sha256(stream.read()).hexdigest()
+            os.link(stream.name, target)
         save_case(folder / "candidate.json", {"specification_sha256": digest,
-                  "sha256": sha256(data).hexdigest(), "scientific_source": PLANETS_SOURCE,
-                  "scientific_basis": INNER_PLANETS, "status": "awaiting_review",
-                  "provenance": "editorial_science_asset.inner_planets_diagram",
-                  "media_type": "explanatory_2d"})
+                  "sha256": digest_image, "scientific_source": source,
+                  "scientific_basis": row["claim"], "status": "awaiting_review",
+                  "provenance": "editorial_science_asset." + make_image.__name__,
+                  "media_type": row["media_type"]})
 
 
 def reviewed_still(root, row):
@@ -62,7 +98,7 @@ def reviewed_still(root, row):
     reason = "Требуется проверка научной иллюстрации " + str(folder)
     if row["media_type"] == "animation":
         raise Pending("science_visual_review_pending", "Для анимации требуется подтверждение поддержки формата")
-    inner_planets_diagram(folder, row, digest)
+    render_candidate(folder, row, digest)
     review_path = folder / "review.json"
     image_path = folder / "illustration.png"
     if not review_path.is_file() or not image_path.is_file() or image_path.stat().st_size > 15_000_000:

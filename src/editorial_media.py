@@ -95,15 +95,15 @@ def plan_images(article, provider, *, query=None, rights_basis=None, exclude=())
             candidates[page["pageid"]] = {"name": page["title"], "description":
                 unescape(re.sub("<[^>]+>", "", str(meta.get("ImageDescription", {}).get("value", ""))))[:400]}
 
+        from editorial_science_asset import INNER_PLANETS, MOON_PHASES
         task = "photo_plan"
         inputs.update(candidates=candidates, instruction="Планируй смешанный комплект. Для наблюдаемых объектов выбирай documentary_photo, "
                       "соответствующих теме, по описаниям; приведи pageid и точную подпись на русском. "
                       "Для механизма допускай explanatory_2d или explanatory_3d, для существенного движения animation. "
                       "Для каждого элемента укажи media_type и caption, для схемы или анимации обоснуй выбор в rationale "
                       "и укажи проверяемое утверждение claim. Указывай pageid только для фото. "
-                      "Для схемы порядка внутренних планет доступен точный контракт "
-                      "«Первые четыре планеты от Солнца — Меркурий, Венера, Земля и Марс.» "
-                      "Выбирай его только для раздела, который объясняет этот порядок.")
+                      f"Доступны точные контракты схем: 2D «{INNER_PLANETS}» и 3D «{MOON_PHASES}». "
+                      "Выбирай их только при прямом соответствии разделу.")
     inputs["instruction"] += " Укажи для каждого изображения номер подходящего смыслового раздела section, начиная с 1."
     rows = provider(task, inputs)["images"]
     if len(rows) not in (7, 8):

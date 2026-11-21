@@ -103,6 +103,15 @@ class Controls(unittest.TestCase):
             self.assertEqual(record["sha256"],sha256((folder/"illustration.png").read_bytes()).hexdigest())
             self.assertFalse((root/"content").exists())
 
+    def test_moon_phase_3d_has_distinct_projected_lit_areas(self):
+        from editorial_science_asset import moon_phase_model
+        image = moon_phase_model()
+        areas = [sum(image.getpixel((x,y))[0] > 35 for x in range(c-125,c+126) for y in range(220,471))
+                 for c in (225,640,1055)]
+        self.assertLess(areas[0], areas[1])
+        self.assertLess(areas[1], areas[2])
+        self.assertAlmostEqual(areas[1] / areas[2], 0.5, delta=0.04)
+
     def test_holdout_source_leakage_and_ambiguous_predictions(self):
         from editorial_vision_holdout import score
         with tempfile.TemporaryDirectory() as tmp:
