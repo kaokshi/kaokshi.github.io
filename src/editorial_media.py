@@ -39,7 +39,7 @@ def commons_photo(pageid):
     if not meta.get("Artist") or urlsplit(info["url"]).hostname != "upload.wikimedia.org":
         raise ValueError("Missing photographer or unsupported file host")
     data = fetch(info["url"], 45_000_000)
-    return data, {"source": info["descriptionurl"], "artist": meta["Artist"],
+    return data, {"source": info["descriptionurl"], "original_url": info["url"], "artist": meta["Artist"],
                   "license": meta["LicenseShortName"], "license_url": license_url,
                   "original_sha256": sha256(data).hexdigest()}
 

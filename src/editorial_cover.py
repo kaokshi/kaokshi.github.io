@@ -107,10 +107,41 @@ def unsuitable(row):
     return bool(rating["defect"].strip()) or min(rating["topic"], rating["genre"]) == 0
 
 
+def check_visual_controls(manifest_path, assess=vision):
+    """Require a real accepted cover and a real off-topic image for the same article."""
+    from PIL import Image, ImageOps
+    if not manifest_path:
+        raise ValueError("Visual controls not connected (ZEN_VISION_CONTROLS)")
+    from editorial_writer import private_path
+    path = private_path(Path(manifest_path))
+    manifest = json.loads(path.read_text())
+    article = manifest["article"]
+    if manifest["article_sha256"] != identity(article):
+        raise ValueError("Stale visual control article")
+    rows = manifest["controls"]
+    if (len(rows) != 2 or {row["expected"] for row in rows} != {"cover", "off_topic"}
+            or len({row["sha256"] for row in rows}) != 2):
+        raise ValueError("Expected two distinct labelled control images")
+    for row in rows:
+        source = asset(path.parent, row["file"])
+        if sha256(source.read_bytes()).hexdigest() != row["sha256"]:
+            raise ValueError("Stale visual control image")
+        with Image.open(source) as original:
+            image = ImageOps.exif_transpose(original).convert("RGB")
+            rating = assess(dict(article, candidate_caption=row["caption"]), image)
+            accepted = eligible_cover(rating, image.size)
+        if row["expected"] == "cover" and not accepted:
+            raise ValueError("Visual model rejected the independently selected reference cover")
+        if row["expected"] == "off_topic" and not (rating["topic"] == 0 or rating["defect"] == "misleading"):
+            raise ValueError("Visual model failed to recognize an off-topic control")
+
+
 def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None, review=None):
     from PIL import Image, ImageOps
     body = parse_sections(article["body_html"])
     remove_figures(body)
+    if review is None and assess is vision:
+        check_visual_controls(os.environ.get("ZEN_VISION_CONTROLS"))
     if not isinstance(manifest, list) or len(manifest) not in (7, 8):
         raise ValueError("Compare a complete set of seven or eight illustrations")
     if review is not None and (review.get("article_sha256") != identity(article)
@@ -137,7 +168,7 @@ def cover_selection(article, manifest, root, assess=vision, *, checkpoint=None, 
             raise ValueError("Duplicate illustration")
         rating = assess(dict(article, candidate_caption=row.get("caption", "")), image) if review is None else review["scores"][digest]
         eligible = eligible_cover(rating, image.size)
-        metadata = {k: row[k] for k in ("artist", "license", "license_url", "adaptation", "caption", "original_sha256", "section")
+        metadata = {k: row[k] for k in ("artist", "license", "license_url", "adaptation", "caption", "original_sha256", "original_url", "section")
                     if row.get(k)}
         records.append({**metadata, "id": ident, "file": name, "source": source, "rights_verified": True,
                         "original_position": i, "sha256": digest, "assessment": rating,

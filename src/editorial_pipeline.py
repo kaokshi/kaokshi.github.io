@@ -66,6 +66,9 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
                         validate_prose_reply(reply)
                     except (ValueError, Pending) as exc:
                         attempt.update(status="rejected", reason=str(exc))
+                        from editorial_memory import remember_failure
+                        remember_failure(root, directory.name, channel, "draft_rejected", str(exc),
+                                         reply if isinstance(exc, ValueError) else None)
                         save_case(attempts_path, attempts)
                         continue
                     attempt["status"] = "accepted"
@@ -122,7 +125,8 @@ def assemble_report(article, provider, research, documents, reviewed, checkpoint
     checkpoint("semantic_review", semantic)
     facts = saved.get("fact_check")
     if not facts or facts["status"] not in {"completed", "not_applicable"}:
-        facts = fact_check(article, provider, research, documents, reviewed)
+        facts = fact_check(article, provider, research, documents, reviewed, previous=facts,
+                           checkpoint=lambda partial: checkpoint("fact_check", partial))
     checkpoint("fact_check", facts)
     if facts["status"] == "completed":
         disputed = [c for c in facts["claims"] if c["verdict"] == "disputed"]

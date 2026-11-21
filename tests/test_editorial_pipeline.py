@@ -190,6 +190,15 @@ class FactTests(unittest.TestCase):
                                                 "title": "Measurement", "kind": "primary",
                                                 "scope": "abstract", "text": SOURCE}])
 
+    def test_source_reader_retries_timeout_only_within_budget(self):
+        calls = []
+        def unavailable(url, timeout):
+            calls.append(url)
+            raise TimeoutError()
+        with self.assertRaises(Pending):
+            europe_pmc("discover", {"topic": "forest phenology"}, open_url=unavailable)
+        self.assertEqual(len(calls), 2)
+
     def test_primary_results_require_matching_article_id_and_type(self):
         from editorial_research import read_primary
         def reader(pmcid, kind):

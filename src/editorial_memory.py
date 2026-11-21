@@ -7,6 +7,7 @@ import sqlite3
 
 from editorial_agent_v1 import article_digest
 from editorial_writer import topic_key
+from editorial_layout import FIELD_LINE
 
 
 def connect(root):
@@ -85,6 +86,13 @@ def experience(root, channel):
             "GROUP BY defect ORDER BY n DESC,defect LIMIT 10", (channel,))]
 
 
+def distinctive_terms(title):
+    # Compare Russian inflections in short prior titles against longer proposed briefs.
+    common = {"почему", "котор", "этого", "какие", "когда", "можно", "внутр", "загля",
+              "этой", "своей", "через", "такое", "явлен", "влиян", "иссле", "научн"}
+    return {word[:5] for word in topic_key(title).split() if len(word) >= 5 and word[:5] not in common}
+
+
 def choose_topic(root, channel, day, provider, corpus):
     if channel not in {"legends","science"}:
         raise ValueError("Paused or unknown channel")
@@ -110,6 +118,10 @@ def choose_topic(root, channel, day, provider, corpus):
             key = topic_key(topic)
             words = set(key.split())
             if channel=="legends" and ("научный вопрос" in key or "научное исследование" in key):
+                continue
+            terms = distinctive_terms(topic)
+            if channel == "science" and any(len(terms & old) >= 2 and len(terms & old) * 2 >= len(old)
+                                            for old in (distinctive_terms(title) for title in used) if old):
                 continue
             if len(words)<3 or any(len(words & other)/len(words | other) >= .60
                                   for other in (set(topic_key(u).split()) for u in used)):
@@ -193,6 +205,11 @@ def remember_failure(root, slug, channel, status, reason, raw=None):
                    "PRIMARY KEY(slug,digest))")
         db.execute("INSERT OR IGNORE INTO failures VALUES(?,?,?,?)",(slug,key,channel,data))
         db.execute("INSERT OR IGNORE INTO observations VALUES(?,?,?,?)",(slug,key,channel,status))
+        if isinstance(raw, dict) and isinstance(raw.get("paragraphs"), list):
+            if any(FIELD_LINE.match(line) for para in raw["paragraphs"] if isinstance(para, str)
+                   for line in para.splitlines()):
+                db.execute("INSERT OR IGNORE INTO observations VALUES(?,?,?,?)",
+                           (slug, key, channel, "writer_field_in_prose"))
 
 
 def proposal_report(root, channel):
@@ -208,7 +225,6 @@ def proposal_report(root, channel):
 
 def writer_experience_report(root, channel, prior, response):
     """Measure the known field leak on the raw model output before any repairs."""
-    marker = re.compile(r"^\s*(?:start\s*:?\s*\d+|heading\s*:.*|cta\s*:?)\s*$", re.I)
     lines = [line for paragraph in response.get("paragraphs", []) if isinstance(paragraph, str)
              for line in paragraph.splitlines()]
     previous = []
@@ -217,7 +233,7 @@ def writer_experience_report(root, channel, prior, response):
                 "SELECT slug,digest FROM observations WHERE channel=? AND defect='writer_field_in_prose'",
                 (channel,)):
             previous.append({"article": slug, "text_sha256": digest})
-    seen = sum(bool(marker.fullmatch(line)) for line in lines)
+    seen = sum(bool(FIELD_LINE.match(line)) for line in lines)
     return {"channel": channel, "prior_observations": previous, "applied_reminders": prior,
             "raw_output_sha256": sha256(json.dumps(response, sort_keys=True).encode()).hexdigest(),
             "field_lines": seen, "measured_lines": len(lines),
