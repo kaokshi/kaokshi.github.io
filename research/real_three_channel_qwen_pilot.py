@@ -32,7 +32,21 @@ def run(root, planner=create_plan, writer=run_one, image_search=commons_search):
               "articles_with_approved_images":0,"fully_ready":0,
               "owner_delivery":"not_connected","publication_authorized":False,
               "rss_authorized":False,"channels":[], "image_rights_review_completed":False}
-    plan=planner(date,root,command_provider(ROOT/"src/editorial_local_llm.py"))
+    try:
+        plan=planner(date,root,command_provider(ROOT/"src/editorial_local_llm.py"))
+        manifest["planning"] = "validated_nine_topics"
+    except (ValueError,KeyError,TypeError) as exc:
+        # Only an error category is public. No owner prompts, topic names,
+        # untrusted source text or model responses leave this private runner.
+        manifest.update(status="planner_validation_failed",
+                        error_type=type(exc).__name__,
+                        error_code=("planner_rejected_after_three_attempts"
+                                    if "planner_rejected_after_three_attempts" in str(exc)
+                                    else "planner_invalid_or_duplicate_topics"))
+        return manifest
+    except Exception as exc:
+        manifest.update(status="planner_provider_failed",error_type=type(exc).__name__)
+        return manifest
     selected=[next(task for task in plan["tasks"] if task["channel"]==channel)
               for channel in CHANNELS]
     for task in selected:
@@ -74,6 +88,7 @@ def run(root, planner=create_plan, writer=run_one, image_search=commons_search):
     manifest["text_checks_complete"]=sum(int(row["text_checks_complete"]) for row in manifest["channels"])
     # Image discovery isn't licensing/selection/visual QA; no fabricated green flags.
     manifest["fully_ready"]=0
+    manifest["status"]="pipeline_attempted_no_fully_approved_illustrations"
     return manifest
 
 
