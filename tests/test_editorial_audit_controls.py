@@ -127,6 +127,13 @@ class Controls(unittest.TestCase):
             self.assertEqual(record["sha256"],sha256((folder/"illustration.png").read_bytes()).hexdigest())
             self.assertFalse((root/"content").exists())
 
+    def test_writer_schema_accepts_both_science_media_types(self):
+        from editorial_local_llm import matches_schema, SCHEMAS
+        photo = dict(caption="a", pageid=32, section=1, media_type="documentary_photo")
+        diagram = dict(caption="b", section=2, media_type="explanatory_3d", claim="c", rationale="r")
+        self.assertTrue(matches_schema({"images": [photo, diagram]}, SCHEMAS["photo_plan"]))
+        self.assertFalse(matches_schema({"images": [dict(diagram, pageid=32)]}, SCHEMAS["photo_plan"]))
+
     def test_moon_phase_3d_has_distinct_projected_lit_areas(self):
         from editorial_science_asset import moon_phase_model
         image = moon_phase_model()

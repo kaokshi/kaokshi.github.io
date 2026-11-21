@@ -41,8 +41,8 @@ SCHEMAS = {
                           cta={**STRING, "minLength": 1, "maxLength": 260}),
     "scene_plan": obj(images=array(obj(caption=STRING, prompt=STRING, section=INTEGER))),
     "photo_plan": obj(images=array({"anyOf": [
-        obj(caption=STRING, pageid=INTEGER, section=INTEGER, media_type={"enum": ["documentary_photo"]}),
-        obj(caption=STRING, section=INTEGER, media_type={"enum": ["explanatory_2d", "explanatory_3d", "animation"]},
+        obj(caption=STRING, pageid=INTEGER, section=INTEGER, media_type={"type": "string", "enum": ["documentary_photo"]}),
+        obj(caption=STRING, section=INTEGER, media_type={"type": "string", "enum": ["explanatory_2d", "explanatory_3d", "animation"]},
             claim=STRING, rationale=STRING),
     ]})),
     "section_plan": obj(sections=SECTIONS),
@@ -109,6 +109,8 @@ def unique_fields(pairs):
 
 
 def matches_schema(value, schema):
+    if "anyOf" in schema:
+        return any(matches_schema(value, variant) for variant in schema["anyOf"])
     kind = schema["type"]
     if kind == "object":
         return (isinstance(value, dict) and value.keys() == schema["properties"].keys()
@@ -117,7 +119,7 @@ def matches_schema(value, schema):
         return (isinstance(value, list) and schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", len(value))
                 and all(matches_schema(v, schema["items"]) for v in value))
     if kind == "integer":
-        return type(value) is int
+        return type(value) is int and schema.get("minimum", value) <= value <= schema.get("maximum", value)
     return (isinstance(value, str) and ("enum" not in schema or value in schema["enum"])
             and schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", len(value)))
 
@@ -139,6 +141,12 @@ def complete(request, *, env=None, send=read_json_response):
     task = request["task"]
     resize = task == "revise" and request.get("mode") == "resize"
     schema = SCHEMAS[task]
+    if task == "article_layout":
+        count = len(request["paragraphs"])
+        bounded_sections = array(obj(start={"type": "integer", "minimum": 1, "maximum": count},
+                                     heading={**STRING, "minLength": 2, "maxLength": 65}))
+        schema = obj(sections={**bounded_sections, "minItems": 2, "maxItems": max(2, min(4, count // 2))},
+                     cta={**STRING, "minLength": 12, "maxLength": 180})
     if task == "section_plan":
         limit = max(2, min(4, len(request["paragraphs"]) // 2))
         schema = obj(sections={**SECTIONS, "minItems": 2, "maxItems": limit})
@@ -186,7 +194,7 @@ def complete(request, *, env=None, send=read_json_response):
         instruction += " Поле before не нужно, его восстановит адаптер из исходного абзаца. Пустой after удаляет абзац."
     messages = [{"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps(data, ensure_ascii=False)}]
-    tokens = {"field_review": 40, "photo_query": 60, "research_query": 80, "topics": 450, "scene_plan": 1650, "photo_plan": 1650, "section_plan": 350, "article_layout": 450, "write": 3400, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
+    tokens = {"field_review": 40, "photo_query": 60, "research_query": 80, "topics": 450, "scene_plan": 1650, "photo_plan": 1650, "section_plan": 350, "article_layout": 600, "write": 3400, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
               "compare_claims": 1800, "learning_proposals": 800}[task]
     temperature = 0.65 if task == "write" else 0.2
     native = kind == "llama.cpp" and task in {"write", "compare_claims", "article_layout"}
