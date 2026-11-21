@@ -22,8 +22,8 @@ def review_photo_claim(image_data, expected, *, env=None, post=None):
     if not re.fullmatch("[0-9a-fA-F]{32}",account) or not token:
         raise VisionPending("Missing Cloudflare credentials")
     if post is None:
-        import requests
-        post=requests.post
+        from editorial_cloud_budget import bounded_post
+        post = bounded_post(env, 1_000_000)
     claim=expected["claim"]
     prompt=("Assess ONLY the clearly visible objects in the attached real photograph. "
             "Does this specific claim correctly describe the visually identifiable MAIN SUBJECT? "
@@ -61,7 +61,8 @@ def review_photo_claim(image_data, expected, *, env=None, post=None):
             raise VisionPending("Vision response not JSON") from None
         if (not isinstance(obj,dict) or type(obj.get("claim_matches_visible_subject")) is not bool
                 or type(obj.get("uncertain")) is not bool or not isinstance(obj.get("observable_evidence"),str)
-                or len(obj["observable_evidence"])>500):
+                or set(obj) != {"claim_matches_visible_subject", "uncertain", "observable_evidence"}
+                or not obj["observable_evidence"].strip() or len(obj["observable_evidence"])>500):
             raise VisionPending("Missing visual verdict fields")
         accepted=obj["claim_matches_visible_subject"] and not obj["uncertain"]
         return {"status":"needs_independent_validation" if accepted else "reject_candidate",

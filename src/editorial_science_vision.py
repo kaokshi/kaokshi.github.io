@@ -68,8 +68,8 @@ def review_science_diagram(image_data,contract_key,*,env=None,post=None):
     if not re.fullmatch("[a-fA-F0-9]{32}",account) or not token:
         raise VisionPending("Missing Cloudflare credentials")
     if post is None:
-        import requests
-        post=requests.post
+        from editorial_cloud_budget import bounded_post
+        post = bounded_post(env, 1_000_000)
     title=CONTRACTS[contract_key]["claim"]
     instruction=(
         "Read the actual visible text printed on this educational diagram. "

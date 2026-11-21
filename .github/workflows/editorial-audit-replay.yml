@@ -25,5 +25,22 @@ jobs:
           run-id: ${{ matrix.run }}
           github-token: ${{ github.token }}
           path: evidence
-      - run: python src/editorial_audit_replay.py evidence/${{ matrix.file }} ${{ matrix.count }} | tee -a "$GITHUB_STEP_SUMMARY"
+      - id: replay
         shell: bash
+        run: |
+          result=$(python src/editorial_audit_replay.py evidence/${{ matrix.file }} ${{ matrix.count }})
+          echo "$result" >> "$GITHUB_STEP_SUMMARY"
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+      - name: Recount • ${{ steps.replay.outputs.result }}
+        run: echo "Recount complete"
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pillow requests
+      - run: python -m unittest discover -s tests

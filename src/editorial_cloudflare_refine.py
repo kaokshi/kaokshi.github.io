@@ -54,8 +54,8 @@ def refine_image(original, prompt, *, env=None, post=None, style_reference=None)
         except (ValueError, OSError):
             raise CloudflarePending("Style reference image unreadable") from None
     if post is None:
-        import requests
-        post = requests.post
+        from editorial_cloud_budget import bounded_post
+        post = bounded_post(env, 32_000_000)
     width, height = expected_size()
     url = "https://api.cloudflare.com/client/v4/accounts/" + account + "/ai/run/" + MODEL
     try:
