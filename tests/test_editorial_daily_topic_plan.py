@@ -41,6 +41,20 @@ class TopicPlanTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"repeats"):
                 create_plan("2026-11-21",Path(t),lambda *_:sample())
 
+    def test_invalid_first_plan_recovers_with_fresh_proposal(self):
+        invalid = sample()
+        invalid["tasks"].pop()
+        seen = []
+        def provider(task, payload):
+            seen.append(payload)
+            return invalid if len(seen) == 1 else sample()
+        with TemporaryDirectory() as t:
+            result = create_plan("2026-11-21", Path(t), provider)
+        self.assertEqual(len(validate_plan(result)), 9)
+        self.assertEqual(len(seen), 2)
+        self.assertIn("ОТКЛОНЁН", seen[1]["instruction"])
+        self.assertFalse(result["article_generation_completed"])
+
     def test_rejects_incomplete_three_by_three(self):
         data=sample()
         data["tasks"].pop()
