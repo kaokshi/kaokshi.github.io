@@ -1,0 +1,168 @@
+name: EXPERIMENT - remaining editorial tools (no publication)
+on:
+  pull_request:
+    paths:
+      - 'experiments/remaining_smoke.py'
+      - 'experiments/clip_caption_review.py'
+      - 'experiments/reviewdog_editorial.py'
+      - 'experiments/approval_preview.html'
+      - '.github/workflows/remaining-tools-experiment.yml'
+  workflow_dispatch:
+concurrency:
+  group: experimental-editorial-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  clip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU-only CLIP requirements
+        run: |
+          python -m pip install 'torch==2.4.1' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'open_clip_torch==2.32.0' 'Pillow'
+      - name: Regression tests for ranking and review rules
+        run: python -m unittest discover -s experiments -p 'test_remaining_tools.py' -v
+      - name: Rank caption alternatives for all eight film images
+        run: python experiments/clip_caption_review.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clip-smoke
+          path: editorial-remaining-tests/*.json
+          if-no-files-found: warn
+  playwright:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser test runtime
+        run: |
+          python -m pip install 'playwright==1.55.0'
+          command -v google-chrome
+          google-chrome --version
+      - name: Check automated interaction on local non-public test form
+        run: python experiments/remaining_smoke.py Playwright
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-smoke
+          path: editorial-remaining-tests/*.json
+          if-no-files-found: warn
+  reviewdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Create real line-mapped paragraph diagnostics for all three editorial channels
+        run: python experiments/reviewdog_editorial.py
+      - name: Verify reviewdog parsing without posting PR comments
+        uses: reviewdog/action-setup@v1
+        with:
+          reviewdog_version: v0.20.3
+      - name: Run reviewdog with local reporter only
+        run: |
+          reviewdog -efm='%f:%l:%c:%m' -reporter=local -fail-level=none < editorial-remaining-tests/reviewdog/diagnostics.txt > editorial-remaining-tests/reviewdog.txt
+          cat editorial-remaining-tests/reviewdog.txt
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          r=json.loads(Path('editorial-remaining-tests/reviewdog/diagnostics.json').read_text())
+          print('EDITORIAL_REVIEWDOG_DIAGNOSTICS', r['total'])
+          print('ARTICLE_SLUGS', sorted(set(x['slug'] for x in r['notes'])))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reviewdog-smoke
+          path: editorial-remaining-tests/
+          if-no-files-found: warn
+  service-feasibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe service dependencies only, no server startup or credentials
+        run: |
+          mkdir -p editorial-remaining-tests
+          python - <<'PY'
+          import json, pathlib
+          result={"services":{
+            "n8n":{"status":"architecture_assessment_only","persistent_host_required":True,
+                   "test":"Will not enable unapproved external workflows or start persistent cloud services."},
+            "changedetection.io":{"status":"architecture_assessment_only","persistent_host_required":True,
+                   "test":"Cannot guarantee continuous monitoring in a short-lived GitHub Actions job."},
+            "peter-evans/create-pull-request":{"status":"permission_assessment_only","write_access_required":True,
+                   "test":"Use the human-created draft PR as proof of workflow review, not as proof that this Action ran."}},
+            "publication_authorized":False}
+          pathlib.Path("editorial-remaining-tests/services.json").write_text(json.dumps(result,indent=2))
+          print(json.dumps(result))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: service-feasibility
+          path: editorial-remaining-tests/services.json
+
+  n8n-ephemeral:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Start disposable n8n with no credentials or external access
+        run: |
+          docker run -d --name editorial-n8n -p 127.0.0.1:5678:5678 \
+            -e N8N_DIAGNOSTICS_ENABLED=false -e N8N_PERSONALIZATION_ENABLED=false \
+            -e N8N_SECURE_COOKIE=false -e N8N_TEMPLATES_ENABLED=false \
+            docker.n8n.io/n8nio/n8n:latest
+          echo "n8n container started"
+      - name: Verify localhost UI responds
+        run: |
+          ok=0
+          for _ in $(seq 1 40); do
+            if curl -fsS --max-time 3 http://127.0.0.1:5678/ -o /tmp/n8n-ui.html; then
+              ok=1; break
+            fi
+            sleep 3
+          done
+          echo "n8n_local_http_ready=$ok"
+          test "$ok" -eq 1
+      - name: Remove disposable service
+        if: always()
+        run: docker rm -f editorial-n8n || true
+  changedetection-ephemeral:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Start disposable changedetection.io container
+        run: |
+          docker run -d --name editorial-changedetection -p 127.0.0.1:5000:5000 \
+            -e BASE_URL=http://localhost:5000 \
+            ghcr.io/dgtlmoon/changedetection.io:latest
+          echo "changedetection container started"
+      - name: Verify localhost UI responds
+        run: |
+          ok=0
+          for _ in $(seq 1 40); do
+            if curl -fsS --max-time 3 http://127.0.0.1:5000/ -o /tmp/change-ui.html; then
+              ok=1; break
+            fi
+            sleep 3
+          done
+          echo "changedetection_local_http_ready=$ok"
+          test "$ok" -eq 1
+      - name: Remove disposable service
+        if: always()
+        run: docker rm -f editorial-changedetection || true
