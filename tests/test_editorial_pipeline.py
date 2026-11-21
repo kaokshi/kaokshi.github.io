@@ -157,7 +157,7 @@ class SemanticTests(unittest.TestCase):
             self.assertEqual([r["stage"] for r in case["versions"]], ["original", "agent", "agent", "assistant"])
             assistant_two = {"base_text_sha256": case["handoff"]["text_sha256"], "edits": [
                 {"paragraph": 1, "before": "По результатам опыта скорость достигла двух метров в секунду.",
-                 "after": "По данным опыта скорость составила два метра в секунду.",
+                 "after": "По результатам проведённого полевого опыта установили, что скорость частиц составила ровно два метра в секунду.",
                  "reason": "Уточнена формулировка опыта."}]}
             self.assertEqual(execute(case, path, command_provider(None), None, None, reviews, assistant_two, quality),
                              "owner_review_pending")
