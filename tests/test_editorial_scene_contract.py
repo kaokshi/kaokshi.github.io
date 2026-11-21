@@ -9,7 +9,7 @@ from PIL import Image
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 
 from editorial_scene_contract import (make_contract, validate_contract, controlled_edit_prompt,
-                                      structural_verdict, fingerprint)
+                                      structural_verdict, fingerprint, select_reviewed_variant)
 from editorial_cloudflare_refine import refine_image
 from editorial_cloudflare import CloudflarePending
 
@@ -61,6 +61,24 @@ class SceneContractTests(unittest.TestCase):
         self.assertEqual(verdict["status"],"needs_visual_review")
         self.assertIs(verdict["semantic_verified"],False)
         self.assertEqual(structural_verdict(jpeg((100,100)),jpeg((1024,1024)))["status"],"reject")
+
+    def test_visual_review_must_match_exact_candidate(self):
+        from hashlib import sha256
+        source, edited = b"original pixels", b"edited pixels"
+        evidence = {"reviewer_kind": "human",
+                    "original_sha256": sha256(source).hexdigest(),
+                    "edited_sha256": sha256(edited).hexdigest(),
+                    "decision": "approve",
+                    "same_story": True, "same_character": True,
+                    "same_location": True, "same_visual_style": True,
+                    "targeted_fix_successful": True, "no_new_defects": True}
+        chosen, record = select_reviewed_variant(source, edited, evidence)
+        self.assertEqual(chosen, edited)
+        rejected = dict(evidence, same_story=False)
+        chosen, record = select_reviewed_variant(source, edited, rejected)
+        self.assertEqual(chosen, source)
+        with self.assertRaisesRegex(ValueError, "stale"):
+            select_reviewed_variant(source, b"unexpected output", evidence)
 
     def test_extra_reference_separate_and_small(self):
         def post(url,headers,files,data,timeout):
