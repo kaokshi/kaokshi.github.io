@@ -87,9 +87,12 @@ class BenchmarkTests(unittest.TestCase):
 
     def test_hybrid_repairs_failing_draft_until_format_passes(self):
         short="Название\\n\\n**Часть**\\nСлишком короткий текст."
+        def unique_word(index):
+            return "событие"+chr(1072+index%32)+chr(1072+(index//32)%32)
         sections=[
             "**Раздел "+str(i)+"**\\n"+
-            ("Необычные события развивались постепенно и вели к новым вопросам. "*14)
+            " ".join("Разные наблюдения открывали "+unique_word(i*25+j)+"."
+                     for j in range(25))
             for i in range(1,6)]
         expanded="Название\\n\\n"+"\\n\\n".join(sections)+"\\n\\nПодписывайтесь на канал."
         # Ensure test fixture itself meets the format gate instead of relying
