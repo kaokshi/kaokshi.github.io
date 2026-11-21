@@ -33,16 +33,19 @@ def run(root, planner=create_plan, writer=run_one, image_search=commons_search):
               "owner_delivery":"not_connected","publication_authorized":False,
               "rss_authorized":False,"channels":[], "image_rights_review_completed":False}
     try:
-        plan=planner(date,root,command_provider(ROOT/"src/editorial_local_llm.py"))
-        manifest["planning"] = "validated_nine_topics"
+        plan=planner(date,root,command_provider(ROOT/"src/editorial_local_llm.py"),per_channel=1)
+        manifest["planning"] = "validated_three_channel_topics"
     except (ValueError,KeyError,TypeError) as exc:
         # Only an error category is public. No owner prompts, topic names,
         # untrusted source text or model responses leave this private runner.
         manifest.update(status="planner_validation_failed",
                         error_type=type(exc).__name__,
-                        error_code=("planner_rejected_after_three_attempts"
-                                    if "planner_rejected_after_three_attempts" in str(exc)
-                                    else "planner_invalid_or_duplicate_topics"))
+                        error_code=(str(exc).split(":", 2)[0]
+                                    if str(exc).startswith("planner_channel_incomplete:")
+                                    else "planner_invalid_or_duplicate_topics"),
+                        failed_channel=(str(exc).split(":")[1]
+                                        if str(exc).startswith("planner_channel_incomplete:")
+                                        else None))
         return manifest
     except Exception as exc:
         manifest.update(status="planner_provider_failed",error_type=type(exc).__name__)
