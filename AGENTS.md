@@ -4,7 +4,7 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 
 ## Operating rules
 
-- The owner has three channels; only `legends` and `science` are currently active for drafts. `cinema` stays paused.
+- The owner has three channels; `legends`, `science`, and `cinema` are all active for DRAFT PREPARATION (three distinct articles per channel per day, nine total). No channel has publication authorization.
 - Do not change `publication_enabled=false`, publish content, activate RSS delivery, or remove release holds without an explicit owner launch instruction. A successful check is not publication authorization.
 - Articles: natural original Russian prose, 3000–6000 visible body characters without whitespace, meaningful source checks, original channel CTA, usually 7–8 verified rights-cleared illustrations.
 - The current diagnostic Model A is `modernbert + lightgbm + transformer`; the reported index is the arithmetic mean of three 0–100 classifier scores. `ai_accent_detector` remains a separate style score. The **owner-recommended nonbinding review flag** is strictly >85 on this **uncalibrated index**, NOT 80% of AI authorship. Never claim detector scores prove origin or optimize prose to evade classifiers.
@@ -15,6 +15,10 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 - Use `src/editorial_reader_interest.py` on the exact SHA-256 text version. With optional `ruts` installed, this provides real readability and lexical diversity metrics; missing dependency is `not_installed`, never a fake numeric score. Advisory findings in `reader_interest` do NOT block releases, count as confirmed defects, or trigger detector-driven rewriting.
 - Follow custom editorial prompts in `src/editorial_semantic.py` to check an engaging opening, pacing, concrete details, unnecessary repetition, and natural Russian. Cite exact problematic snippets before proposing a substantive edit, respecting the 2+1 limits.
 - `ru-text` and `russian-editor-skill` are third-party instruction skills. The project currently references them as guides and implements *its own* narrow rules; it does not claim they were installed. Their optional external installation requires separate rights/instruction review. See `docs/EDITORIAL_READER_INTEREST.md`.
+
+## Nine-article daily preparation
+
+- Latest owner instruction: **three new drafts each for legends, science and cinema every day**, total NINE. `config/ai_revision_policy.json` tracks the target. Use `src/editorial_nine_draft_queue.py` with nine distinct owner/editorial topics and research queries for all three science articles. Never fabricate texts, source documents or completed Qwen executions. Cinema plot accuracy and spoiler selection require explicit review. These are preparation goals, not proof of runtime capacity.
 
 ## Two-channel model pilot
 
