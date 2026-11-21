@@ -58,7 +58,7 @@ def load_photo(spec):
     url=info.get("thumburl") or info["url"]
     host=urlsplit(url).hostname
     if (urlsplit(url).scheme!="https" or host not in
-            ("upload.wikimedia.org","commons.wikimedia.org")):
+            ("upload.wikimedia.org","commons.wikimedia.org","thumb.wikimedia.org")):
         raise ValueError("Unapproved image host: "+str(host))
     print("IMAGE_HOST "+spec["key"]+" "+host,flush=True)
     img_resp=requests.get(url,headers=headers,timeout=60)
