@@ -13,8 +13,8 @@ from editorial_ai_check import MODEL_A, REQUIRED_CHECKS, REVIEW_THRESHOLD, extra
 
 THRESHOLD = REVIEW_THRESHOLD
 ACTIVE = ("legends", "science", "cinema")
-MAX_AGENT = 2
-MAX_ASSISTANT = 1
+MAX_AGENT = 5
+MAX_ASSISTANT = 2
 
 def article_digest(article):
     raw = extract_text(article.get("body_html", ""))
@@ -100,11 +100,8 @@ def route(article, report, history=None, substantive_issues=None):
                 and math.isfinite(previous_index) and 0 <= previous_index <= 100):
             raise ValueError("Invalid previous Model A index")
         common["model_a_delta"] = index - previous_index
-        if stages[-1] == "agent" and index > previous_index:
-            return {**common, "decision": "chatgpt_one_revision_handoff",
-                    "reason": "model_a_increased_after_agent_revision",
-                    "transport_status": "not_connected",
-                    "requires_new_text_and_fresh_all_checks": True}
+        # Index increases are diagnostic, not grounds to bypass the
+        # five-revision local budget or force a ChatGPT handoff.
     if index <= THRESHOLD and not substantive_issues:
         return {**common, "decision": "other_editorial_checks_required"}
     if substantive_issues is None:
@@ -119,11 +116,11 @@ def route(article, report, history=None, substantive_issues=None):
                 "next_agent_attempt": stages.count("agent")+1,
                 "requires_new_text_and_fresh_all_checks": True}
     if stages.count("assistant") < MAX_ASSISTANT:
-        return {**common, "decision": "chatgpt_one_revision_handoff",
+        return {**common, "decision": "chatgpt_revision_handoff",
                 "transport_status": "not_connected", "requires_new_text_and_fresh_all_checks": True}
     return {**common, "decision": "owner_review_final",
             "transport_status": "not_connected",
-            "reason": "two_agent_and_one_chatgpt_attempts_exhausted"}
+            "reason": "five_agent_and_two_chatgpt_attempts_exhausted"}
 
 def main():
     p=argparse.ArgumentParser()
