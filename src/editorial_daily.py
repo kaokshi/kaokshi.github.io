@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -41,8 +42,10 @@ def main():
         except (IndexError, KeyError, TypeError, ValueError):
             status = "pipeline_error"
         record = {"status": status, "exit_code": run.returncode, "stderr": run.stderr[-4000:]}
-        if status == "pipeline_error" and run.stderr.strip().endswith("topic_selection_pending"):
-            record["status"] = "topic_selection_pending"
+        if status == "pipeline_error" and run.stderr.strip():
+            match = re.fullmatch(r"([a-z_]+_pending)(?:: .*)?", run.stderr.strip().splitlines()[-1])
+            if match:
+                record["status"] = match.group(1)
         save_case(root / f"daily-{day}-{ch}.json", record)
         statuses[ch] = {"status": record["status"], "exit_code": run.returncode}
     print(json.dumps(statuses))

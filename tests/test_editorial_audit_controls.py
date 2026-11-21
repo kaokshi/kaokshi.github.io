@@ -61,7 +61,7 @@ class Controls(unittest.TestCase):
         edited = encoded(Image.effect_noise((1280,720),40).convert("RGB"))
         contract = make_contract("Girl opens wooden door", subject="girl", location="hall", action="opens door",
                                  must_keep=["green coat"], fix="remove artifact on knob")
-        row = {"id":"image-1","prompt":contract["scene"],"scene_contract":contract}
+        row = {"id":"image-1","prompt":contract["scene"],"scene_contract":contract,"edit_original_sha256":sha256(original).hexdigest()}
         with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"ZEN_IMAGE_FINAL_KLEIN":"true",
                 "ZEN_IMAGE_VISION_PILOT":"false"}), patch("editorial_scene_review.generate_scene",
                 return_value=(original, {})) as generate, patch("editorial_scene_review.refine_image",

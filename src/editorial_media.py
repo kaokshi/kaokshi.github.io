@@ -70,7 +70,7 @@ def plan_images(article, provider, *, query=None, rights_basis=None, exclude=())
     inputs = {"title": article["title"], "text": extract_text(article["body_html"]),
               "section_headings": [section[0][0].text for section in sections]}
     if article["channel"] == "legends":
-        if not rights_basis or not rights_basis.strip():
+        if os.getenv("ZEN_IMAGE_PROVIDER", "sd-webui") != "cloudflare" and (not rights_basis or not rights_basis.strip()):
             raise ValueError("Supply the rights basis for this local generator")
         task = "scene_plan"
         inputs["instruction"] = ("Выбери семь разных конкретных сцен из рассказа. Для каждой дай "

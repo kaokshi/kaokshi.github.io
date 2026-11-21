@@ -492,6 +492,15 @@ def run(args, parser, root):
                         lambda stage, result: save_case(directory / f"assembled-{stage}.json", result),
                         final_quality)
                     save_case(directory / "assembled-quality.json", report)
+                    semantic, facts = report["semantic"], report["facts"]
+                    digest = article_digest(assembled)
+                    facts_ok = (facts.get("status") == "not_applicable" and args.channel == "legends") or (
+                        facts.get("status") == "completed" and facts.get("text_sha256") == digest
+                        and bool(facts.get("claims")) and all(c["verdict"] == "confirmed" for c in facts["claims"]))
+                    if (not facts_ok or semantic.get("status") != "completed" or semantic.get("issues")
+                            or semantic.get("text_sha256") != digest):
+                        print(json.dumps({"status": "assembled_review_pending", "directory": str(directory)}))
+                        raise SystemExit(2)
                     audit = report["image_corpus_audit"]
                     prior_matches = image_conflicts(root, assembled, args.asset_root)
                     save_case(directory / "historical-image-conflicts.json", prior_matches)

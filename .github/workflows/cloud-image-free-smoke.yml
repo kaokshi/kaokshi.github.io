@@ -2,6 +2,11 @@
 name: Cloud image providers safe smoke
 on:
   workflow_dispatch:
+    inputs:
+      request_limit:
+        description: 'Maximum requests for this run after checking remaining Workers Free quota (1–32)'
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -17,9 +22,9 @@ jobs:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: ${{ vars.ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED }}
-      ZEN_CF_APPROVED_RUN: ${{ vars.ZEN_CF_APPROVED_RUN }}
+      ZEN_CF_APPROVED_RUN: ${{ github.run_id }}
       ZEN_CF_BUDGET_DATE: ${{ vars.ZEN_CF_BUDGET_DATE }}
-      ZEN_CF_MAX_REQUESTS: ${{ vars.ZEN_CF_MAX_REQUESTS }}
+      ZEN_CF_MAX_REQUESTS: ${{ inputs.request_limit }}
       ZEN_CF_LEDGER: /tmp/workers-ai.sqlite3
       ZEN_IMAGE_ALLOW_PAID: "false"
     steps:

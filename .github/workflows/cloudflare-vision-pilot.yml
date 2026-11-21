@@ -1,6 +1,11 @@
 name: Qwen Cloudflare visual inspector pilot
 on:
   workflow_dispatch:
+    inputs:
+      request_limit:
+        description: 'Maximum requests for this run after checking remaining Workers Free quota (1–32)'
+        type: string
+        required: true
 permissions:
   contents: read
   actions: read
@@ -13,9 +18,9 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: ${{ vars.ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED }}
-      ZEN_CF_APPROVED_RUN: ${{ vars.ZEN_CF_APPROVED_RUN }}
+      ZEN_CF_APPROVED_RUN: ${{ github.run_id }}
       ZEN_CF_BUDGET_DATE: ${{ vars.ZEN_CF_BUDGET_DATE }}
-      ZEN_CF_MAX_REQUESTS: ${{ vars.ZEN_CF_MAX_REQUESTS }}
+      ZEN_CF_MAX_REQUESTS: ${{ inputs.request_limit }}
       ZEN_CF_LEDGER: /tmp/workers-ai.sqlite3
       ZEN_IMAGE_ALLOW_PAID: "false"
       ZEN_IMAGE_VISION_PILOT: "true"

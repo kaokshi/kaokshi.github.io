@@ -4,7 +4,7 @@ import fcntl
 from hashlib import sha256
 import json
 import os
-from pathlib import Path
+import re
 
 from editorial_cloudflare import MODEL, generate_scene
 from editorial_cloudflare_refine import MODEL as KLEIN, refine_image
@@ -49,6 +49,24 @@ def checkpoint_call(directory, state, stage, call):
     return data, metadata
 
 
+def style_anchor(root, digest):
+    if digest is None:
+        return None
+    if not isinstance(digest, str) or not re.fullmatch("[a-f0-9]{64}", digest):
+        pending("Недопустимый SHA-256 эталона")
+    directory = root / ".scene-anchors" / digest
+    path = directory / "reference"
+    record = directory / "review.json"
+    if not record.is_file() or not path.is_file() or path.stat().st_size > 15_000_000:
+        pending("Отсутствует проверенный эталон персонажа или стиля")
+    permission = json.loads(record.read_text())
+    data = path.read_bytes()
+    if not (permission.get("upload_to_cloudflare") is True and permission.get("reviewer")
+            and permission.get("rights_basis") and permission.get("sha256") == digest == sha256(data).hexdigest()):
+        pending("Права и SHA-256 эталона требуют проверки")
+    return data
+
+
 def prepare_scene(row, root):
     root = private_path(root)
     prompt = scene_prompt(row["prompt"])
@@ -61,6 +79,8 @@ def prepare_scene(row, root):
         ):
             pending("Для Klein нужен полный контракт именно этой сцены")
         edit_prompt = controlled_edit_prompt(contract)
+    anchor_digest = row.get("style_reference_sha256") if edit_prompt else None
+    anchor = style_anchor(root, anchor_digest)
     rights = root / "model-rights.json"
     if not rights.is_file():
         pending("Отсутствует частный реестр проверенных прав model-rights.json")
@@ -71,17 +91,32 @@ def prepare_scene(row, root):
         if not (entry.get("approved") is True and entry.get("reviewer") and
                 str(entry.get("source_url", "")).startswith("https://") and entry.get("license")):
             pending("Отсутствует подтверждение лицензии для " + model)
-    key = sha256(json.dumps([row, prompt, models], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    # The same source remains available when a reviewer adds or corrects a defect contract.
+    source_key = sha256(json.dumps([MODEL, row["id"], prompt, row.get("replaces")],
+                                   ensure_ascii=False).encode()).hexdigest()
+    source_dir = root / ".scene-originals" / source_key
+    with scene_lock(source_dir):
+        path = source_dir / "state.json"
+        state = json.loads(path.read_text()) if path.exists() else {"id": row["id"], "scene": row["prompt"]}
+        original, metadata = checkpoint_call(source_dir, state, "original", lambda: generate_scene(prompt))
+    credit = {**metadata, "visual_style": "zen-legends-visual-profile-v1",
+              "license": entries[MODEL]["license"], "model_rights": {m: entries[m] for m in models}}
+    credit["original_sha256"] = sha256(original).hexdigest()
+    if not edit_prompt:
+        return original, credit
+    if row.get("edit_original_sha256") != credit["original_sha256"]:
+        pending("Привяжите дефект к SHA-256 просмотренного оригинала " + credit["original_sha256"])
+    key = sha256(json.dumps([source_key, sha256(original).hexdigest(), fingerprint(contract), KLEIN,
+                             edit_prompt, anchor_digest], ensure_ascii=False).encode()).hexdigest()
     directory = root / ".scene-reviews" / key
     with scene_lock(directory):
         path = directory / "state.json"
-        state = json.loads(path.read_text()) if path.exists() else {"id": row["id"], "scene": row["prompt"]}
-        original, metadata = checkpoint_call(directory, state, "original", lambda: generate_scene(prompt))
-        credit = {**metadata, "visual_style": "zen-legends-visual-profile-v1",
-                  "license": entries[MODEL]["license"], "model_rights": {m: entries[m] for m in models}}
-        if not edit_prompt:
-            return original, credit
-        candidate, meta = checkpoint_call(directory, state, "candidate", lambda: refine_image(original, edit_prompt))
+        state = json.loads(path.read_text()) if path.exists() else {"original_sha256": sha256(original).hexdigest(),
+                                                                   "scene_contract": contract}
+        if not (directory / "original").exists():
+            os.link(source_dir / "original", directory / "original")
+        candidate, meta = checkpoint_call(directory, state, "candidate", lambda: refine_image(original, edit_prompt, style_reference=anchor))
+        state["style_reference_sha256"] = anchor_digest
         state["scene_contract_sha256"] = fingerprint(contract)
         state["structure"] = structural_verdict(original, candidate)
         state["crop"] = detect_severe_crop(original, candidate)
