@@ -121,7 +121,8 @@ def cross_article_diversity(articles):
                 "shared_fivegrams":common,
                 "shared_fivegram_min_share":round(common/denom,3),
                 "opening_token_jaccard":round(opening_overlap,3),
-                "suspected_template_reuse":common>=12 and common/denom>.12,
+                "suspected_template_reuse":(common>=12 and common/denom>.12) or
+                    (common>=3 and common/denom>=.75),
             })
     return {"pairs":pairs,
             "suspected_cross_article_template_reuse":
