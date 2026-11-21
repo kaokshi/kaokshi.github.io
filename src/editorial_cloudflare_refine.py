@@ -17,7 +17,7 @@ from editorial_visual_style import expected_size
 MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
 
 
-def refine_image(original, prompt, *, env=None, post=None):
+def refine_image(original, prompt, *, env=None, post=None, style_reference=None):
     env = os.environ if env is None else env
     if env.get("ZEN_IMAGE_ALLOW_PAID", "false").lower() not in {"false", "0", "no"}:
         raise CloudflarePending("Paid mode is forbidden")
@@ -39,6 +39,20 @@ def refine_image(original, prompt, *, env=None, post=None):
             img.save(ref, "PNG")
     except (ValueError, OSError) as exc:
         raise CloudflarePending("Reference image is not readable") from None
+    files = {"input_image_0": ("reference.png", ref.getvalue(), "image/png")}
+    if style_reference is not None:
+        if not isinstance(style_reference, bytes) or len(style_reference) > 15_000_000:
+            raise ValueError("Invalid optional style reference")
+        try:
+            with Image.open(BytesIO(style_reference)) as style:
+                style.load()
+                style = style.convert("RGB")
+                style.thumbnail((480, 480))
+                out = BytesIO()
+                style.save(out, "PNG")
+            files["input_image_1"] = ("style.png", out.getvalue(), "image/png")
+        except (ValueError, OSError):
+            raise CloudflarePending("Style reference image unreadable") from None
     if post is None:
         import requests
         post = requests.post
@@ -46,7 +60,7 @@ def refine_image(original, prompt, *, env=None, post=None):
     url = "https://api.cloudflare.com/client/v4/accounts/" + account + "/ai/run/" + MODEL
     try:
         response = post(url, headers={"Authorization": "Bearer " + token},
-                        files={"input_image_0": ("reference.png", ref.getvalue(), "image/png")},
+                        files=files,
                         data={"prompt": prompt, "width": str(width), "height": str(height)},
                         timeout=150)
         if response.status_code != 200:
@@ -70,4 +84,4 @@ def refine_image(original, prompt, *, env=None, post=None):
         raise CloudflarePending("Klein image service unavailable") from None
     return data, {"model": MODEL, "final_width": width, "final_height": height,
                   "visual_style": "zen-legends-visual-profile-v1",
-                  "reference_image": True}
+                  "reference_image": True, "style_reference_used": style_reference is not None}
