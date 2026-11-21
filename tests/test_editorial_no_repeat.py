@@ -29,6 +29,46 @@ class NoRepeatPolicy(unittest.TestCase):
                 with self.subTest(channel=channel,topic=title):
                     self.assertIsNotNone(topic_duplicate_reason(channel,title))
 
+    def test_remaining_archival_articles_and_pilots_are_not_reused(self):
+        # These titles exist in content/articles but were absent from the
+        # original five-per-channel no-repeat seed.
+        known = {
+            "legends": [
+                "Ночная аптека у реки: лекарства, которые не продают днём",
+                "Ключ от закрытого кинотеатра: последний сеанс для одного зрителя",
+                "Девочка на мосту: почему прохожие не запоминали её лица",
+                "Телефонная будка на площади: звонок на номер, которого не существовало",
+                "Зеркало в подземном переходе: отражение, которое выходило раньше",
+                "Кто считает ступеньки после двух ночи",
+                "Автобус, который приходит после последнего рейса",
+                "Фотография, на которой завтра уже наступило",
+            ],
+            "science": [
+                "Ледяные пальцы под морем: как возникают бриниклы",
+                "Камни, которые сами оставляют следы в пустыне: разгадка Долины Смерти",
+                "Синее пламя вулкана Иджен: почему горы горят не тем цветом",
+                "Почему у ледника Тейлора красные потёки: загадка антарктического рассола",
+                "Почему космический объект присылает нам сигналы через равные интервалы",
+                "Ледяные волосы: почему мёртвая ветка покрывается белой шевелюрой",
+                "Озеро, из которого вышло невидимое облако",
+                "Облака, которые светятся, когда небо уже потемнело",
+            ],
+        }
+        for channel, titles in known.items():
+            for title in titles:
+                with self.subTest(channel=channel, title=title):
+                    self.assertIsNotNone(topic_duplicate_reason(channel, title))
+
+    def test_missing_titles_caught_by_subject_not_just_same_title(self):
+        for channel, topic in [
+            ("legends", "Старая телефонная будка у вокзала"),
+            ("legends", "Последний автобус за полночь"),
+            ("science", "Опасные ледяные пальцы под морем"),
+            ("science", "Пульсары: космические маяки"),
+        ]:
+            with self.subTest(channel=channel, topic=topic):
+                self.assertIsNotNone(topic_duplicate_reason(channel, topic))
+
     def test_new_unique_topics_are_not_flagged(self):
         for channel,topic in [
             ("legends","Отражение возле старого киоска"),
