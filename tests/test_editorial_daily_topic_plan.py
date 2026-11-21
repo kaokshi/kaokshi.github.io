@@ -40,13 +40,21 @@ def proposals(channel, start=0, count=3):
         for i, topic in enumerate(topics[channel][start:start+count], start)
     ]}
 
+def provider_proposals(task, channel, start=0, count=3):
+    if task == "plan_cinema_titles":
+        films = [("Матрица", 1999), ("Контакт", 1997),
+                 ("Марсианин", 2015), ("Гравитация", 2013), ("Аватар", 2009)]
+        return {"films": [{"title": title, "year": year}
+                          for title, year in films[start:start+count]]}
+    return proposals(channel, start=start, count=count)
+
 
 class TopicPlanTests(unittest.TestCase):
     def test_one_per_channel_pilot_needs_only_three_topics(self):
         calls=[]
         def provider(task,payload):
             calls.append((payload["channel"],payload["needed"]))
-            return proposals(payload["channel"],count=1)
+            return provider_proposals(task,payload["channel"],count=1)
         with TemporaryDirectory() as tmp:
             plan=create_plan("2026-11-22",Path(tmp),provider,per_channel=1)
         self.assertEqual(len(plan["tasks"]),3)
@@ -68,13 +76,13 @@ class TopicPlanTests(unittest.TestCase):
         calls=[]
         def provider(task,payload):
             calls.append((task,payload["channel"],payload["needed"]))
-            return proposals(payload["channel"])
+            return provider_proposals(task,payload["channel"])
         with TemporaryDirectory() as tmp:
             plan=create_plan("2026-11-22",Path(tmp),provider)
         self.assertEqual(calls,[
             ("plan_channel_topics","legends",3),
             ("plan_channel_topics","science",3),
-            ("plan_channel_topics","cinema",3)])
+            ("plan_cinema_titles","cinema",3)])
         self.assertEqual(len(validate_plan(plan)),9)
         self.assertEqual({c:sum(t["channel"]==c for t in plan["tasks"])
                           for c in ("legends","science","cinema")},
@@ -88,11 +96,11 @@ class TopicPlanTests(unittest.TestCase):
             ch=payload["channel"]
             calls[ch]=calls.get(ch,0)+1
             if ch=="science" and calls[ch]==1:
-                return proposals(ch,count=2)
+                return provider_proposals(task,ch,count=2)
             if ch=="science":
                 self.assertEqual(payload["needed"],1)
-                return proposals(ch,start=2,count=1)
-            return proposals(ch)
+                return provider_proposals(task,ch,start=2,count=1)
+            return provider_proposals(task,ch)
         with TemporaryDirectory() as tmp:
             plan=create_plan("2026-11-22",Path(tmp),provider)
         self.assertEqual(calls,{"legends":1,"science":2,"cinema":1})
@@ -113,7 +121,7 @@ class TopicPlanTests(unittest.TestCase):
                      "research_query":""},
                     {"topic":"Коротко","research_query":""}
                 ]}
-            return proposals("legends",start=1,count=2)
+            return provider_proposals(task,"legends",start=1,count=2)
         with TemporaryDirectory() as tmp:
             plan=create_plan("2026-11-22",Path(tmp),provider)
         self.assertEqual(calls,2)
@@ -142,11 +150,19 @@ class TopicPlanTests(unittest.TestCase):
                 create_plan("2026-11-22",Path(tmp),provider)
         self.assertEqual(len(calls),4)
 
+    def test_cinema_typed_model_titles_are_canonicalized(self):
+        def provider(task, payload):
+            return provider_proposals(task, payload["channel"], count=1)
+        with TemporaryDirectory() as tmp:
+            result = create_plan("2026-11-22", Path(tmp), provider, per_channel=1)
+        self.assertEqual(result["tasks"][-1]["topic"],
+                         "«Матрица» (1999) — обзор без спойлеров")
+
     def test_cinema_requires_year_and_quoted_title(self):
         with TemporaryDirectory() as tmp:
             def provider(task,payload):
                 if payload["channel"]=="cinema":
-                    return {"tasks":[{"topic":"Обзор неизвестного фильма","research_query":""}]}
+                    return {"films":[{"title":"Обзор неизвестного фильма","year":0}]}
                 return proposals(payload["channel"])
             with self.assertRaisesRegex(ValueError,"planner_channel_incomplete:cinema"):
                 create_plan("2026-11-22",Path(tmp),provider)
