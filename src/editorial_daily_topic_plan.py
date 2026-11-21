@@ -34,7 +34,7 @@ def existing_topics(workspace):
     return titles
 
 
-def create_plan(day, workspace, provider):
+def create_plan(day, workspace, provider, *, per_channel=3):
     """Ask for three topics per channel, salvaging valid rows across retries.
 
     Do not make a weak local model generate nine simultaneous constrained rows.
@@ -43,6 +43,8 @@ def create_plan(day, workspace, provider):
     date.fromisoformat(day)
     if not (day.startswith("20") and len(day) == 10):
         raise ValueError("Expected a calendar date YYYY-MM-DD")
+    if type(per_channel) is not int or per_channel not in (1, 3):
+        raise ValueError("per_channel must be 1 for pilot or 3 for daily production")
     archive = existing_topics(workspace)
     selected = []
     instructions = {
@@ -67,7 +69,7 @@ def create_plan(day, workspace, provider):
     for channel in ("legends", "science", "cinema"):
         accepted = []
         for attempt in range(4):
-            missing = 3 - len(accepted)
+            missing = per_channel - len(accepted)
             if not missing:
                 break
             try:
@@ -87,8 +89,8 @@ def create_plan(day, workspace, provider):
                 raise
             if not isinstance(reply, dict) or not isinstance(reply.get("tasks"), list):
                 continue
-            for item in reply["tasks"][:max(3, missing)]:
-                if len(accepted) >= 3:
+            for item in reply["tasks"][:max(per_channel, missing)]:
+                if len(accepted) >= per_channel:
                     break
                 if not isinstance(item, dict):
                     continue
@@ -115,14 +117,21 @@ def create_plan(day, workspace, provider):
                 if channel == "science":
                     record["research_query"] = query.strip()
                 accepted.append(record)
-        if len(accepted) != 3:
-            raise ValueError(f"planner_channel_incomplete:{channel}:{len(accepted)}/3")
+        if len(accepted) != per_channel:
+            raise ValueError(f"planner_channel_incomplete:{channel}:{len(accepted)}/{per_channel}")
         selected.extend(accepted)
     plan = {"date": day, "tasks": selected,
             "generation_provenance": "local_llm_per_channel_topic_proposal",
+            "per_channel": per_channel,
             "article_generation_completed": False, "sources_verified": False,
             "film_facts_verified": False, "publication_authorized": False}
-    validate_plan(plan)
+    if per_channel == 3:
+        validate_plan(plan)
+    else:
+        # The three-article smoke test must not require an unrelated nine-item
+        # production plan; all topic-level guards above remain mandatory.
+        assert len(plan["tasks"]) == 3
+        assert {x["channel"] for x in plan["tasks"]} == {"legends", "science", "cinema"}
     return plan
 
 def main():
