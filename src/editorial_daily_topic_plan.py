@@ -34,7 +34,7 @@ def existing_topics(workspace):
     return titles
 
 
-def create_plan(day, workspace, provider, *, per_channel=3):
+def create_plan(day, workspace, provider, *, per_channel=3, diagnostics=None):
     """Ask for three topics per channel, salvaging valid rows across retries.
 
     Do not make a weak local model generate nine simultaneous constrained rows.
@@ -47,6 +47,8 @@ def create_plan(day, workspace, provider, *, per_channel=3):
         raise ValueError("per_channel must be 1 for pilot or 3 for daily production")
     archive = existing_topics(workspace)
     selected = []
+    if diagnostics is not None:
+        diagnostics["channels"] = {}
     instructions = {
         "legends": (
             "Предложи до ТРЁХ новых самобытных тем для канала городских "
@@ -68,10 +70,16 @@ def create_plan(day, workspace, provider, *, per_channel=3):
     }
     for channel in ("legends", "science", "cinema"):
         accepted = []
+        counts = {"attempts": 0, "accepted": 0, "invalid_response": 0,
+                  "bad_shape": 0, "invalid_topic": 0, "missing_query": 0,
+                  "duplicate_topic": 0, "duplicate_archive": 0}
+        if diagnostics is not None:
+            diagnostics["channels"][channel] = counts
         for attempt in range(4):
             missing = per_channel - len(accepted)
             if not missing:
                 break
+            counts["attempts"] += 1
             try:
                 instruction = (
                     instructions[channel] +
@@ -119,35 +127,45 @@ def create_plan(day, workspace, provider, *, per_channel=3):
             except Pending:
                 raise
             if not isinstance(reply, dict) or not isinstance(reply.get("tasks"), list):
+                counts["invalid_response"] += 1
                 continue
             for item in reply["tasks"][:max(per_channel, missing)]:
                 if len(accepted) >= per_channel:
                     break
                 if not isinstance(item, dict):
+                    counts["bad_shape"] += 1
                     continue
                 topic, query = item.get("topic"), item.get("research_query")
                 if not isinstance(topic, str) or not 8 <= len(topic.strip()) <= 180:
+                    counts["invalid_topic"] += 1
                     continue
                 topic = topic.strip()
                 if not isinstance(query, str):
+                    counts["bad_shape"] += 1
                     continue
                 if channel == "science" and not query.strip():
+                    counts["missing_query"] += 1
                     continue
                 if channel != "science" and query.strip():
+                    counts["bad_shape"] += 1
                     continue
                 if channel == "cinema":
                     import re
                     if not re.search(r"«[^»]{2,100}»\s*\((?:19|20)\d{2}\)", topic):
+                        counts["invalid_topic"] += 1
                         continue
                 old = archive + [x["topic"] for x in selected + accepted]
                 if topic_key(topic) in {topic_key(x) for x in old}:
+                    counts["duplicate_archive"] += 1
                     continue
                 if topic_duplicate_reason(channel, topic, old):
+                    counts["duplicate_topic"] += 1
                     continue
                 record = {"channel": channel, "topic": topic}
                 if channel == "science":
                     record["research_query"] = query.strip()
                 accepted.append(record)
+                counts["accepted"] += 1
         if len(accepted) != per_channel:
             raise ValueError(f"planner_channel_incomplete:{channel}:{len(accepted)}/{per_channel}")
         selected.extend(accepted)
