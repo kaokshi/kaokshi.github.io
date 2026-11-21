@@ -22,7 +22,7 @@
     "science": null,
     "cinema": null
   },
-  "decision_rule": "Owner 2026-11-20 latest: Model A >85/100 is a NON-BINDING RECOMMENDED review baseline, never a hard release or authenticity threshold. Revise only identified substantive defects; compare complete per-version Model A results. A rising score after an agent edit triggers a ChatGPT assistance handoff with full SHA256-bound evidence. A falling score permits another quality-improving revision if verified defects remain, subject to bounded attempts; plateau stops score-driven revisions. On failed local recovery or exhausted attempts, escalate to ChatGPT; handoff transport must be marked not_connected unless delivery is confirmed. Never chase detector scores or publish automatically.",
+  "decision_rule": "Owner 2026-11-22: Agent independently chooses topics and prepares articles for all three channels; real editorial defects can receive up to FIVE model-agent revisions, followed when necessary by up to TWO ChatGPT paragraph revisions with new per-version SHA256 checks. If approved by checks at any earlier stage, deliver to owner; if unresolved after the budget, deliver to owner flagged for rework. Model A >85 is advisory, not an authorship verdict or a reason to skip the agent budget. No automatic publication before explicit launch. ChatGPT/owner transport must be marked not_connected unless actual delivery was verified.",
   "validation_requirements": {
     "minimum_human_holdout": 120,
     "minimum_ai_holdout": 120,
@@ -60,8 +60,8 @@
   "planned_ensemble_review_cutoff_status": "owner_recommended_nonblocking_diagnostic_baseline_unvalidated",
   "editorial_escalation": {
     "schema": "editorial-three-tier-escalation-v1",
-    "agent_revision_limit": 2,
-    "assistant_revision_limit": 1,
+    "agent_revision_limit": 5,
+    "assistant_revision_limit": 2,
     "assistant_review_required_after_agent_exhaustion": true,
     "assistant_handoff_transport": "not_yet_connected_to_chatgpt_work_or_automations",
     "reevaluate_all_checks_after_any_text_change": true,
@@ -70,8 +70,9 @@
     "owner_approval_required_for_publication": "before_global_project_launch; after launch owner explicitly authorizes automated RSS for fully checked articles",
     "automatic_publication_authorized": false,
     "recovery": "attempt_local_diagnosis_and_retry_transient_service_failures_with_bounded_retries_then_prepare_chatgpt_handoff_on_unresolved_problem",
-    "on_model_a_increase": "chatgpt_handoff_pending_not_delivered",
-    "on_model_a_plateau": "stop_detector_trend_revision_without_claiming_approval"
+    "on_model_a_increase": "record_advisory_trend_and_continue_only_substantive_edits_within_agent_budget",
+    "on_model_a_plateau": "stop_detector_trend_revision_without_claiming_approval",
+    "owner_receives_successful_drafts_for_review": true
   },
   "future_rss_delivery": {
     "schema": "post-launch-fully-checked-rss-v1",
@@ -99,9 +100,10 @@
     "no_fabricated_authorship_or_detector_results": true,
     "require_real_editing_and_source_checks": true,
     "require_substantive_quality_and_non_template_content": true,
-    "confirmed_editorial_problems_trigger_two_agent_then_one_chatgpt_revision": true,
+    "confirmed_editorial_problems_trigger_two_agent_then_one_chatgpt_revision": false,
     "keep_unvalidated_thresholds_disabled": true,
-    "no_publication_before_explicit_launch": true
+    "no_publication_before_explicit_launch": true,
+    "confirmed_editorial_problems_trigger_five_agent_then_two_chatgpt_revision": true
   },
   "optional_detector_trend_experiment": {
     "schema": "editorial-detector-trend-experiment-v1",
@@ -114,8 +116,8 @@
     "preserve_original_and_each_candidate_sha256": true,
     "repeat_all_editorial_checks_after_changes": true,
     "count_changes_against_agent_revision_limit": true,
-    "agent_revision_limit": 2,
-    "assistant_revision_limit": 1,
+    "agent_revision_limit": 5,
+    "assistant_revision_limit": 2,
     "never_exceed_existing_escalation_limits": true,
     "no_unbounded_edit_loop": true,
     "model_score_not_proof_of_authorship": true,
@@ -140,7 +142,7 @@
       "tracked_across_sha256_versions": true,
       "decreasing": "continue_only_if_substantive_defects_remain_and_revision_budget_available",
       "plateau": "stop_score_driven_revisions",
-      "increasing": "prepare_chatgpt_handoff_with_evidence",
+      "increasing": "record_advisory_increase_no_early_assistant_handoff",
       "no_detector_only_rewrite": true
     }
   },
@@ -150,5 +152,28 @@
     "cinema": 3,
     "total": 9
   },
-  "daily_draft_targets_status": "owner_requested_target_not_proven_live_capacity"
+  "daily_draft_targets_status": "owner_requested_target_not_proven_live_capacity",
+  "autonomous_draft_production": {
+    "schema": "zen-autonomous-three-channel-drafting-v1",
+    "channels": [
+      "legends",
+      "science",
+      "cinema"
+    ],
+    "daily_draft_targets": {
+      "legends": 3,
+      "science": 3,
+      "cinema": 3,
+      "total": 9
+    },
+    "requires_owner_topic_selection": false,
+    "requires_owner_film_selection": false,
+    "requires_owner_image_upload": false,
+    "topic_source": "independent_model_planner_with_duplicate_guard",
+    "verification": "all_applicable_existing_editorial_checks_and_real_retrieved_evidence",
+    "learning": "record_feedback_for_evaluated_editorial_improvements_not_autonomous_model_retraining",
+    "owner_receives": "ready_or_needs_rework",
+    "owner_delivery_transport": "not_connected_until_verified",
+    "publication_authorized": false
+  }
 }
