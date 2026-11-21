@@ -48,6 +48,12 @@ def diagnostic_error(exc):
         value=error.get(key)
         if isinstance(value,str) and value in KNOWN_CODES:
             report["error_code" if key=="code" else "error_type"]=value
+    if report["error_code"] == "model_permission_blocked_org":
+        report["classification"]="organization_permission"
+        return report
+    if report["error_code"] == "model_permission_blocked_project":
+        report["classification"]="project_permission"
+        return report
     msg=error.get("message","")
     if isinstance(msg,str):
         lower=msg.lower()
