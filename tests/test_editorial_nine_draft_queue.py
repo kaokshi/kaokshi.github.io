@@ -87,6 +87,43 @@ class NineDraftTests(unittest.TestCase):
         self.assertEqual(result["ready_for_owner"],0)
         self.assertEqual(result["completed_for_publication"],0)
 
+    def test_completed_owner_dossier_is_not_regenerated(self):
+        from unittest.mock import patch
+        p = plan()
+        calls = []
+        def existing_status(workspace, task):
+            return {"article_ready_for_owner": task["channel"] == "legends"
+                    and task["topic"].endswith("номер 0"), "status": "owner_review_pending"}
+        def fake_runner(workspace, channel, topic, **kwargs):
+            calls.append((channel, topic))
+            return {"execution": {"exit_code": 0, "pipeline_status": "exited"}}
+        with TemporaryDirectory() as td, patch(
+            "editorial_nine_draft_queue.report_status", side_effect=existing_status
+        ):
+            result = execute(p, Path(td),
+                             health_check=lambda url, backend: {"status": "ready"},
+                             runner=fake_runner)
+        self.assertEqual(len(calls), 8)
+        self.assertEqual(result["ready_for_owner"], 1)
+        self.assertEqual(result["tasks"][0]["execution"]["status"], "already_ready")
+        self.assertFalse(result["publication_authorized"])
+
+    def test_existing_complete_dossier_survives_unavailable_model(self):
+        from unittest.mock import patch
+        def existing_status(workspace, task):
+            return {"article_ready_for_owner": task["channel"] == "cinema",
+                    "status": "owner_review_pending" if task["channel"] == "cinema" else "not_created"}
+        with TemporaryDirectory() as td, patch(
+            "editorial_nine_draft_queue.report_status", side_effect=existing_status
+        ):
+            result = execute(plan(), Path(td),
+                             health_check=lambda url, backend: {"status": "not_ready"})
+        self.assertEqual(result["ready_for_owner"], 3)
+        self.assertTrue(all(row["execution"]["status"] == "already_ready"
+                            for row in result["tasks"] if row["channel"] == "cinema"))
+        self.assertTrue(all(row["execution"]["reason"] == "model_not_ready"
+                            for row in result["tasks"] if row["channel"] != "cinema"))
+
     def test_naive_deadline_rejected(self):
         with TemporaryDirectory() as td:
             with self.assertRaisesRegex(ValueError,"timezone"):
