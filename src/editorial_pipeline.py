@@ -219,6 +219,13 @@ def main():
     parser.add_argument("--review", type=Path, help="Operator review for specific text hashes")
     parser.add_argument("--assistant-response", type=Path)
     args = parser.parse_args()
+    root = private_path(args.output)
+    from editorial_storage import workspace_lock
+    with workspace_lock(root, exclusive=False):
+        run(args, parser, root)
+
+
+def run(args, parser, root):
     try:
         provider = command_provider(args.provider)
         research = None
@@ -235,16 +242,19 @@ def main():
                 raise ValueError("Use one review per valid text SHA-256")
             reviews[digest] = row
         response = load(args.assistant_response)
-        root = private_path(args.output)
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
         from editorial_memory import choose_topic, recalled_provider, image_conflicts, remember, remember_failure
         provider = recalled_provider(root, args.channel, provider)
         from datetime import datetime
         from zoneinfo import ZoneInfo
         if args.auto_topic:
             used = [load(p)["title"] for p in CONTENT.glob("*.json")]
-            args.topic = choose_topic(root, args.channel, datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat(),
-                                      provider, used)
+            day = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
+            try:
+                args.topic = choose_topic(root, args.channel, day, provider, used)
+            except (Pending, ValueError) as exc:
+                save_case(root / f"topic-{day}-{args.channel}.json",
+                          {"status": "topic_selection_pending", "reason": str(exc)})
+                parser.exit(2, "topic_selection_pending\n")
         existing = load(args.article)
         topic_digest = None
         if existing is not None:
@@ -336,6 +346,7 @@ def main():
                     images = replace_duplicates(load(directory / "draft.json"), plan, images, production_root,
                                                 root, args.image_generator, provider, query=args.photo_query)
                 except (OSError, ValueError, KeyError, Pending) as exc:
+                    remember_failure(root, slug, args.channel, "media_production_pending", str(exc))
                     save_case(selection_path, {"status": "media_production_pending", "reason": str(exc)})
                     parser.exit(2, f"media_production_pending: {exc}\n")
                 save_case(manifest_path, images)
