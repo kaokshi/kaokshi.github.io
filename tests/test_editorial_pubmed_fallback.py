@@ -76,7 +76,7 @@ class ResearchFallbackTests(unittest.TestCase):
         self.assertEqual(result["documents"][0]["kind"],"secondary")
 
     def test_bad_id_does_not_make_request(self):
-        def open_url(url,timeout):return Download(b"<eSearchResult><IdList><Id>12345<script></Id></IdList></eSearchResult>")
+        def open_url(url,timeout):return Download(b"<eSearchResult><IdList><Id>123abc</Id></IdList></eSearchResult>")
         self.assertEqual(pubmed_sources("discover",{"topic":"study"},open_url=open_url)["documents"],[])
 
 if __name__=="__main__":
