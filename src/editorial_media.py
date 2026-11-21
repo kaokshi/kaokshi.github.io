@@ -169,9 +169,24 @@ def produce_one(channel, row, root, endpoint):
                 # Klein refinement is opt-in until the user approves real 16:9 trial and quota.
                 if os.environ.get("ZEN_IMAGE_FINAL_KLEIN", "false").lower() == "true":
                     from editorial_cloudflare_refine import refine_image
-                    data, final = refine_image(data, final_edit_prompt(row["prompt"]))
-                    credit["base_model"] = credit["model"]
-                    credit.update(final)
+                    from editorial_scene_contract import make_contract, validate_contract, controlled_edit_prompt, structural_verdict, fingerprint
+                    # Optional structured, reviewer-supplied contract; legacy plans get a conservative contract.
+                    supplied = row.get("scene_contract")
+                    contract = validate_contract(supplied) if supplied is not None else make_contract(
+                        row["prompt"], must_keep=["the source scene's subjects, objects, architecture and exact camera viewpoint"])
+                    candidate, final = refine_image(data, controlled_edit_prompt(contract))
+                    result = structural_verdict(data, candidate)
+                    if result["status"] == "reject":
+                        raise Pending("media_production_pending", "Klein generated an unusable frame: " + result["reason"])
+                    # Visual semantics cannot be confirmed by geometry/format checks.
+                    # Preserve both candidates and stop before silently promoting a possible semantic regression.
+                    from hashlib import sha256 as _sha256
+                    pending_name = "content/assets/legends/" + row["id"] + "-klein-review-" + _sha256(candidate).hexdigest()[:16] + ".jpg"
+                    review_path = root / pending_name
+                    review_path.parent.mkdir(parents=True, exist_ok=True)
+                    review_path.write_bytes(candidate)
+                    raise Pending("media_production_pending",
+                                  "Klein candidate saved for visual review; unverified semantics: " + pending_name)
             except CloudflarePending as exc:
                 raise Pending("media_production_pending", str(exc)) from None
             credit["license"] = row["rights_basis"]
