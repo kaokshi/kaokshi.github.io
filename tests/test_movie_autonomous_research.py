@@ -25,7 +25,7 @@ MOVIE = {
         "P31": [claim("Q11424")],
         "P577": [premiere(2024)],
         "P57": [claim("Q201")],
-        "P161": [claim("Q202")],
+        "P161": [{**claim("Q202"), "qualifiers": {"P453": [claim("Q203")["mainsnak"]]}}],
     },
     "sitelinks": {"ruwiki": {"title": "Тестовый фильм (фильм, 2024)"}},
 }
@@ -49,6 +49,7 @@ def mocked_api(endpoint, params):
         return {"entities": {
             "Q201": {"labels": {"ru": {"value": "Режиссёр Проверенный"}}},
             "Q202": {"labels": {"ru": {"value": "Актёр Подтверждённый"}}},
+            "Q203": {"labels": {"ru": {"value": "Персонаж По Источнику"}}},
         }}
     if params["action"] == "query":
         return {"query": {"pages": [{"title": "Тестовый фильм (фильм, 2024)", "extract": PLOT}]}}
@@ -66,6 +67,8 @@ class CinemaResearchTests(unittest.TestCase):
         self.assertEqual(result["film"]["qid"], "Q100")
         self.assertEqual(result["film"]["directors"], ["Режиссёр Проверенный"])
         self.assertEqual(result["film"]["cast"], ["Актёр Подтверждённый"])
+        self.assertEqual(result["film"]["cast_roles"], [{"actor": "Актёр Подтверждённый",
+                                                        "character": "Персонаж По Источнику"}])
         self.assertEqual(len(result["documents"]), 2)
         self.assertTrue(all(r["kind"] == "secondary" for r in result["documents"]))
         self.assertIn("загадочным письмом", result["documents"][1]["text"])
