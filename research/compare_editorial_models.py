@@ -21,7 +21,7 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 from editorial_encrypted_review import encrypt
-from editorial_reader_quality import text_stats, quality_flags, review_checklist
+from editorial_reader_quality import text_stats, quality_flags, review_checklist, cross_article_diversity
 
 MODEL_IDS={"gemini":"gemini-2.5-flash",
            "groq":"openai/gpt-oss-120b",
@@ -294,6 +294,9 @@ def run(backend,root,*,generator=generate,env=None):
                          http_status=(exc.code if isinstance(exc,HTTPError) else None),
                          elapsed_seconds=round(monotonic()-start,2))
         manifest["channels"].append(entry)
+    drafts={channel: (root/(channel+".md")).read_text(encoding="utf-8")
+            for channel in TASKS if (root/(channel+".md")).is_file()}
+    manifest["cross_article_diversity"]=cross_article_diversity(drafts)
     manifest["status"]="drafts_generated_not_publish_ready" if manifest["generated"]==3 else "partial_or_failed"
     return manifest
 
