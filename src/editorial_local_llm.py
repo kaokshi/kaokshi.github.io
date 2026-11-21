@@ -174,7 +174,12 @@ def complete(request, *, env=None, send=read_json_response):
         data["sentences"] = [{"sentence": n, "paragraph": row["paragraph"], "text": prose}
                              for n, (row, prose) in numbered.items()]
         if task == "diagnose":
-            schema = obj(issues=array(obj(id=STRING, category=STRING, sentence=INTEGER, reason=STRING)))
+            from editorial_semantic import CATEGORIES
+            finding = obj(id={**STRING, "minLength": 1, "maxLength": 28},
+                          category={**STRING, "enum": sorted(CATEGORIES)},
+                          sentence={**INTEGER, "minimum": 1, "maximum": len(numbered)},
+                          reason={**STRING, "minLength": 3, "maxLength": 240})
+            schema = obj(issues={**array(finding), "maxItems": 4})
             instruction += (" Вместо paragraph и quote верни номер sentence из данных. "
                             "Отмечай до четырёх проверяемых дефектов, пустой список допустим.")
         else:
@@ -236,7 +241,9 @@ def complete(request, *, env=None, send=read_json_response):
                 raise ValueError("Response does not match the task schema")
             if task in {"diagnose", "extract_claims"}:
                 rows = answer["issues"] if task == "diagnose" else answer["claims"]
-                for result in rows:
+                for index, result in enumerate(rows, 1):
+                    if task == "diagnose":
+                        result["id"] = f"finding-{index}"
                     row, prose = numbered[result.pop("sentence")]
                     result.update(paragraph=row["paragraph"], quote=prose)
             if task == "compare_claims":

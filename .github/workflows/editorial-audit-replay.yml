@@ -1,12 +1,18 @@
 name: Editorial offline benchmark evidence
 on:
   pull_request:
-    branches: [feature/editorial-cloudflare-free-image]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'docs/CODEX_INDEPENDENT_AUDIT.md'
+      - '.github/workflows/editorial-audit-replay.yml'
 permissions:
   contents: read
   actions: read
 jobs:
   recount:
+    if: github.head_ref == 'audit/editorial-cloudflare-48'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -47,6 +53,7 @@ jobs:
       - run: pip install -r requirements-quality.txt requests
       - run: python -m unittest discover -s tests
   archived-klein-pairs:
+    if: github.head_ref == 'audit/editorial-cloudflare-48'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
