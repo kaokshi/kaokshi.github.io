@@ -86,15 +86,15 @@ class BenchmarkTests(unittest.TestCase):
         self.assertTrue(len(review_checklist("legends"))>=8)
 
     def test_hybrid_repairs_failing_draft_until_format_passes(self):
-        short="Название\\n\\n**Часть**\\nСлишком короткий текст."
+        short="Название\n\n**Часть**\nСлишком короткий текст."
         def unique_word(index):
             return "событие"+chr(1072+index%32)+chr(1072+(index//32)%32)
         sections=[
-            "**Раздел "+str(i)+"**\\n"+
+            "**Раздел "+str(i)+"**\n"+
             " ".join("Разные наблюдения открывали "+unique_word(i*25+j)+"."
                      for j in range(25))
             for i in range(1,6)]
-        expanded="Название\\n\\n"+"\\n\\n".join(sections)+"\\n\\nПодписывайтесь на канал."
+        expanded="Название\n\n"+"\n\n".join(sections)+"\n\nПодписывайтесь на канал."
         # Ensure test fixture itself meets the format gate instead of relying
         # on a model's subjective response.
         self.assertFalse(quality_flags(text_stats(expanded,"legends")),
