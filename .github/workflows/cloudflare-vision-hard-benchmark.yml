@@ -1,0 +1,58 @@
+name: Qwen hard visual and science label benchmark
+on:
+  push:
+    branches:
+      - feature/editorial-cloudflare-free-image
+    paths:
+      - .github/workflows/cloudflare-vision-hard-benchmark.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  hard-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: "true"
+      ZEN_IMAGE_ALLOW_PAID: "false"
+      ZEN_IMAGE_VISION_PILOT: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: klein-opencv-three-scenes-results
+          run-id: 44902867759
+          github-token: ${{ github.token }}
+          path: old
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependencies
+        run: python -m pip install --disable-pip-version-check pillow requests
+      - name: Run deterministic science and crop-guard tests
+        run: |
+          python -m unittest discover -s tests -p test_editorial_science_vision.py -v
+          python -m unittest discover -s tests -p test_editorial_image_guardrails.py -v
+      - name: Prepare original and genuine Klein pairs
+        run: |
+          mkdir -p scenes
+          for n in 1 2 3; do
+            cp "old/scene-$n/01-original.jpg" "scenes/cloudflare-scene-$n.jpg"
+          done
+      - name: Audit true Klein edits and scientific label swaps
+        run: |
+          PYTHONPATH=src python src/editorial_vision_hard_benchmark.py \
+            --old scenes --refined old --out qa-report
+      - name: Preserve audit evidence without photo publication
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-real-klein-and-science-benchmark
+          path: qa-report/*.json
+          retention-days: 3
+          if-no-files-found: warn
