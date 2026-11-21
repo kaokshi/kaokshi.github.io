@@ -15,6 +15,8 @@ from editorial_factcheck import fact_check, valid_sources
 from editorial_quality import similarity_report
 from editorial_research import europe_pmc
 from movie_autonomous_research import movie_sources
+from movie_claim_evidence import audit_claims
+from movie_image_alignment import match_images
 from editorial_revision import run_case, save_case, save_text
 from editorial_revision_checks import check_draft
 from editorial_semantic import diagnose, revise, resize_article
@@ -90,6 +92,12 @@ def assemble_report(article, provider, research, documents, reviewed, checkpoint
     if not facts or facts["status"] not in {"completed", "not_applicable"}:
         facts = fact_check(article, provider, research, documents, reviewed)
     checkpoint("fact_check", facts)
+    cinema_claims = None
+    if article["channel"] == "cinema":
+        cinema_claims = saved.get("cinema_claim_audit")
+        if not cinema_claims or cinema_claims.get("status") != "source_comparison_completed_not_film_verified":
+            cinema_claims = audit_claims(article, documents, provider)
+        checkpoint("cinema_claim_audit", cinema_claims)
     if facts["status"] == "completed":
         disputed = [c for c in facts["claims"] if c["verdict"] == "disputed"]
         semantic["issues"] = [*semantic["issues"], *[
@@ -98,6 +106,18 @@ def assemble_report(article, provider, research, documents, reviewed, checkpoint
              "evidence": claim["evidence"]} for claim in disputed
         ]]
     report = quality(article, [source["url"] for source in facts["sources"]])
+    if cinema_claims is not None:
+        report["cinema_claim_audit"] = cinema_claims
+        report["manual_checks_pending"] = sorted(set(report.get("manual_checks_pending", [])) | {
+            "cinema_independent_plot_and_character_review"})
+        if cinema_claims["status"] != "source_comparison_completed_not_film_verified":
+            report["findings"].append("cinema_claim_source_check_pending")
+        elif any(row["status"] == "source_disagreement_needs_review"
+                 for row in cinema_claims["claims"]):
+            report["findings"].append("cinema_source_disagreement")
+        elif any(row["status"] == "no_direct_source_support"
+                 for row in cinema_claims["claims"]):
+            report["findings"].append("cinema_unconfirmed_plot_claims")
     return {**report, "semantic": semantic, "facts": facts, "llm": getattr(provider, "identity", None)}
 
 
@@ -166,7 +186,19 @@ def execute(case, directory, provider, research, documents, reviews, response, q
     })
     save_case(directory / "sources.json", {
         "draft_sha256": draft["text_sha256"], "facts": draft.get("report", {}).get("facts"),
+        "cinema_claim_audit": draft.get("report", {}).get("cinema_claim_audit"),
     })
+    if article["channel"] == "cinema":
+        candidate_path = directory / "movie-image-candidates.json"
+        if candidate_path.is_file():
+            try:
+                alignment = match_images(article, load(candidate_path))
+                save_case(directory / "movie-image-alignment.json", alignment)
+            except (ValueError, TypeError, KeyError, OSError):
+                save_case(directory / "movie-image-alignment.json", {
+                    "status": "alignment_pending", "text_sha256": article_digest(article),
+                    "publication_authorized": False,
+                })
     return case["decision"]
 
 
