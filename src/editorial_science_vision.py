@@ -41,9 +41,16 @@ def score_transcription(raw, image_data, contract_key):
     if type(certainty) is not bool:
         raise VisionPending("Missing visibility check")
     expected=CONTRACTS[contract_key]["expected"]
-    matched=certainty and labels==expected
+    # The SUN is a visible diagram anchor, NOT one of the four planet labels.
+    # Preserve the exact observed transcript for audit; normalize only this
+    # explicitly allowed context label when it appears before the planets.
+    compared=list(labels)
+    if contract_key=="solar_inner_planets" and compared and compared[0].strip().upper() in ("SUN","THE SUN"):
+        compared=compared[1:]
+    matched=certainty and compared==expected
     return {"status":"needs_independent_validation" if matched else "reject_candidate",
-            "observed_labels":labels,"expected_labels":expected,"all_labels_legible":certainty,
+            "observed_labels":labels,"compared_labels":compared,
+            "expected_labels":expected,"all_labels_legible":certainty,
             "source":CONTRACTS[contract_key]["source"],"model":MODEL,
             "image_sha256":sha256(image_data).hexdigest(),"semantic_verified":False,
             "reason":"matching_labels_only" if matched else "label_mismatch_or_unreadable"}
