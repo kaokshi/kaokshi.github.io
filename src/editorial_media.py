@@ -128,7 +128,15 @@ def produce(channel, plan, root, endpoint, *, checkpoint=None):
     if len(plan) not in (7, 8) or len({row["id"] for row in plan}) != len(plan):
         raise ValueError("Plan requires seven or eight unique scenes")
     from editorial_cover import asset
-    key = sha256(json.dumps([channel, plan, endpoint, generation_settings() if channel == "legends" else None], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    provider_name = os.environ.get("ZEN_IMAGE_PROVIDER", "sd-webui")
+    visual_profile = None
+    if channel == "legends" and provider_name == "cloudflare":
+        from editorial_visual_style import PROFILE_FILE
+        visual_profile = sha256(PROFILE_FILE.read_bytes()).hexdigest()
+    key = sha256(json.dumps([channel, plan, endpoint, provider_name, visual_profile,
+                             os.environ.get("ZEN_IMAGE_FINAL_KLEIN", "false"),
+                             generation_settings() if channel == "legends" and provider_name == "sd-webui" else None],
+                            ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     saved = json.loads(checkpoint.read_text()) if checkpoint and checkpoint.exists() else {}
     prior = saved.get("images", {}) if saved.get("plan_sha256") == key else {}
     images = {}
@@ -148,20 +156,67 @@ def produce_one(channel, row, root, endpoint):
     if channel == "science":
         data, credit = commons_photo(row["pageid"])
     else:
-        # SD WebUI returns base64; send only to an explicitly configured loopback service.
-        payload = {"prompt": row["prompt"], **generation_settings(),
-                   "negative_prompt": "watermark, caption, text, collage", "batch_size": 1}
-        req = Request(local_endpoint(endpoint).geturl().rstrip("/") + "/sdapi/v1/txt2img",
-                      data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
-        with urlopen(req, timeout=900) as response:
-            raw = response.read(32_000_001)
-        if len(raw) > 32_000_000:
-            raise ValueError("Generator response too large")
-        result = json.loads(raw)
-        data = base64.b64decode(result["images"][0], validate=True)
-        credit = {"source": "Local Stable Diffusion WebUI", "artist": "ИИ-иллюстрация",
-                  "generation": json.loads(result["info"]), "prompt": row["prompt"],
-                  "license": row["rights_basis"]}
+        image_provider = os.environ.get("ZEN_IMAGE_PROVIDER", "sd-webui")
+        if image_provider == "cloudflare":
+            from editorial_cloudflare import CloudflarePending, generate_scene
+            from editorial_visual_style import scene_prompt, final_edit_prompt
+            from editorial_writer import Pending
+            try:
+                # A shared, versioned style is always used for new Cloudflare legends scenes.
+                styled_prompt = scene_prompt(row["prompt"])
+                data, credit = generate_scene(styled_prompt)
+                credit["visual_style"] = "zen-legends-visual-profile-v1"
+                # Klein refinement is opt-in until the user approves real 16:9 trial and quota.
+                if os.environ.get("ZEN_IMAGE_FINAL_KLEIN", "false").lower() == "true":
+                    from editorial_cloudflare_refine import refine_image
+                    from editorial_scene_contract import make_contract, validate_contract, controlled_edit_prompt, structural_verdict, fingerprint
+                    # Optional structured, reviewer-supplied contract; legacy plans get a conservative contract.
+                    supplied = row.get("scene_contract")
+                    contract = validate_contract(supplied) if supplied is not None else make_contract(
+                        row["prompt"], must_keep=["the source scene's subjects, objects, architecture and exact camera viewpoint"])
+                    candidate, final = refine_image(data, controlled_edit_prompt(contract))
+                    result = structural_verdict(data, candidate)
+                    if result["status"] == "reject":
+                        raise Pending("media_production_pending", "Klein generated an unusable frame: " + result["reason"])
+                    from editorial_image_guardrails import detect_severe_crop
+                    crop_check = detect_severe_crop(data, candidate)
+                    if crop_check["status"] == "reject":
+                        raise Pending("media_production_pending", "Klein changed the camera framing too severely")
+                    # Visual semantics cannot be confirmed by geometry/format checks.
+                    # Preserve both candidates and stop before silently promoting a possible semantic regression.
+                    from hashlib import sha256 as _sha256
+                    if not re.fullmatch(r"image-[1-8]", row["id"]):
+                        raise ValueError("Invalid illustration ID")
+                    prefix = "content/assets/legends/" + row["id"] + "-"
+                    source_name = prefix + "source-" + _sha256(data).hexdigest()[:16] + ".jpg"
+                    pending_name = prefix + "klein-review-" + _sha256(candidate).hexdigest()[:16] + ".jpg"
+                    for name, image_bytes in ((source_name, data), (pending_name, candidate)):
+                        path = root / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(image_bytes)
+                    raise Pending("media_production_pending",
+                                  "Original and Klein candidate saved for visual review; "
+                                  "semantic accuracy unverified: " + pending_name)
+            except CloudflarePending as exc:
+                raise Pending("media_production_pending", str(exc)) from None
+            credit["license"] = row["rights_basis"]
+        elif image_provider == "sd-webui":
+            # SD WebUI returns base64; send only to an explicitly configured loopback service.
+            payload = {"prompt": row["prompt"], **generation_settings(),
+                       "negative_prompt": "watermark, caption, text, collage", "batch_size": 1}
+            req = Request(local_endpoint(endpoint).geturl().rstrip("/") + "/sdapi/v1/txt2img",
+                          data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=900) as response:
+                raw = response.read(32_000_001)
+            if len(raw) > 32_000_000:
+                raise ValueError("Generator response too large")
+            result = json.loads(raw)
+            data = base64.b64decode(result["images"][0], validate=True)
+            credit = {"source": "Local Stable Diffusion WebUI", "artist": "ИИ-иллюстрация",
+                      "generation": json.loads(result["info"]), "prompt": row["prompt"],
+                      "license": row["rights_basis"]}
+        else:
+            raise ValueError("Unsupported image provider; Modal is disabled pending billing controls")
         if not credit["license"].strip():
             raise ValueError("Supply rights basis for the deployed model and its output")
     result = save_image(root, channel, row["id"], data, credit, row["caption"])

@@ -1,0 +1,36 @@
+{
+  "schema": "zen-legends-visual-profile-v1",
+  "channel": "legends",
+  "name": "Кинематографичный фотореализм",
+  "base_model": "@cf/black-forest-labs/flux-1-schnell",
+  "final_model": "@cf/black-forest-labs/flux-2-klein-4b",
+  "cover": {
+    "width": 1280,
+    "height": 720,
+    "aspect_ratio": "16:9",
+    "safe_center_fraction": 0.7
+  },
+  "inline": {
+    "width": 1280,
+    "height": 720,
+    "aspect_ratio": "16:9"
+  },
+  "visual_identity": [
+    "Believable live-action cinema still, photographed with a realistic 35mm lens",
+    "Understated, physically plausible lighting with detailed but readable shadows",
+    "Muted natural colours, deep cool shadows, carefully controlled warm practical lights",
+    "Genuine worn surfaces and organic texture, naturally imperfect architecture",
+    "Subtle real atmosphere rather than painted fog or exaggerated fantasy effects",
+    "Consistent face, hairstyle, outerwear and carried objects for recurring characters"
+  ],
+  "restrictions": [
+    "No painterly or glossy AI illustration look, no plastic skin",
+    "No disconnected walls, impossible door geometry or objects blocking a necessary passage",
+    "No extra characters, no random furniture or unrelated props",
+    "No lettering, logos, watermarks, captions or collage",
+    "No excessive bloom, HDR, strong teal-orange grading or aggressive sharpening"
+  ],
+  "composition": "Single wide cinematic shot, one coherent scene, clear central story action, clean and readable foreground, keep key subjects in the central 70 percent for mobile crops.",
+  "editing": "Preserve the actual events, subjects, architecture, and clothing from the reference; correct spatial defects; use the same cinematic photographic visual identity. Deliver an actual 16:9 horizontal frame.",
+  "notes": "Pilot profile. Do not apply to science photographs, historical file content, or cinema."
+}

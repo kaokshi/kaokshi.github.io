@@ -1,0 +1,45 @@
+name: Qwen 24 new documentary photo claims
+on:
+  push:
+    branches:
+      - feature/editorial-cloudflare-free-image
+    paths:
+      - .github/workflows/cloudflare-vision-independent-photos.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  independent-photos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: "true"
+      ZEN_IMAGE_ALLOW_PAID: "false"
+      ZEN_IMAGE_VISION_PILOT: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install free test dependencies
+        run: python -m pip install --disable-pip-version-check pillow requests
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p test_editorial_photo_claim_qa.py -v
+      - name: Run 24 visual claims on six independently sourced photos
+        run: PYTHONPATH=src python src/editorial_new_photo_benchmark.py --out photo-qa
+      - name: Archive audit only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-new-documentary-photos-24
+          path: photo-qa/*.json
+          retention-days: 3
+          if-no-files-found: warn
+
+# Retry after exact host validation update.
+
+# Authorized official Wikimedia thumbnail CDN.

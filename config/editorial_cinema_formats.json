@@ -1,0 +1,78 @@
+{
+  "schema": "zen-cinema-two-formats-policy-v1",
+  "channel": "cinema",
+  "channel_name": "Кадр за Кадром",
+  "status": "owner_approved_formats_channel_paused",
+  "active_for_production": false,
+  "formats": {
+    "classic_recap": {
+      "type": "detailed_spoiler_recap",
+      "audience": "classic_and_older_films",
+      "spoilers": true,
+      "requirements": [
+        "verified_full_story_not_only_short_synopsis",
+        "chronological_or_justified_narrative",
+        "major_twists_and_ending_factchecked",
+        "original_lively_russian_summary",
+        "meaningful_bold_section_headings",
+        "short_original_opinion",
+        "subscription_CTA"
+      ]
+    },
+    "new_release_review": {
+      "type": "spoiler_free_review",
+      "audience": "new_films_and_premieres",
+      "spoilers": false,
+      "requirements": [
+        "verified_release_date_by_country",
+        "accurate_premise_no_big_twists_or_ending",
+        "cinematography_performance_pacing_as_supported",
+        "transparent_about_no_screening",
+        "no_fabricated_first_hand_review_or_quotes",
+        "meaningful_bold_section_headings",
+        "original_subscription_CTA"
+      ]
+    }
+  },
+  "metadata_sources": {
+    "wikidata": {
+      "role": "independent_identity_and_facts",
+      "enabled_for_research": true
+    },
+    "tmdb": {
+      "role": "discovery_cast_dates_images_metadata",
+      "enabled_for_research": true,
+      "production_api_access": false,
+      "commercial_rights_pending": true
+    },
+    "omdb": {
+      "role": "optional_secondary_metadata",
+      "enabled_for_research": true,
+      "production_api_access": false,
+      "license_review_pending": true
+    },
+    "youtube": {
+      "role": "official_trailer_discovery",
+      "enabled_for_research": true,
+      "production_api_access": false,
+      "clip_rights_not_granted": true
+    }
+  },
+  "media_policy": {
+    "priority": "verified_authorized_official_stills_press_kits_then_rights_cleared_images",
+    "seven_eight_images_target": true,
+    "cover_best_available_first": true,
+    "exclude_unverified_image_rights": true,
+    "do_not_generate_fake_film_stills": true,
+    "require_identification_of_exact_film": true,
+    "require_attribution_and_hash": true,
+    "ffmpeg_whisper_only_on_authorized_media": true
+  },
+  "production_safety": {
+    "publication_enabled": false,
+    "cinema_paused": true,
+    "no_new_paid_services": true,
+    "do_not_modify_rss": true
+  },
+  "next_step": "Build movie identity and evidence dossier in offline tests; do not turn on live production without explicit owner activation."
+}
