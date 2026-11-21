@@ -14,7 +14,7 @@ from editorial_ai_check import CONTENT
 from editorial_factcheck import fact_check, valid_sources
 from editorial_quality import similarity_report
 from editorial_research import europe_pmc, topic_sources
-from editorial_revision import run_case, save_case, save_text
+from editorial_revision import agent_attempts_used, run_case, save_case, save_text
 from editorial_revision_checks import check_draft
 from editorial_semantic import diagnose, revise, resize_article
 from editorial_length import count_characters, length_finding
@@ -208,7 +208,7 @@ def execute(case, directory, provider, research, documents, reviews, response, q
     if (response is None and case.get("decision") == "assistant_handoff_pending"
             and (case.get("handoff") or {}).get("transport_status") == "not_connected"
             and review and review.get("issues") and review.get("edits")
-            and sum(v["stage"] == "agent" for v in case["versions"]) < MAX_AGENT):
+            and agent_attempts_used(case) < MAX_AGENT):
         # A newly supplied substantive review can use the remaining local attempt.
         review_key = sha256(json.dumps(review, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         if case.get("resumed_review_sha256") != review_key:

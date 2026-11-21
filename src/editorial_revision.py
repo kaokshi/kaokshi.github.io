@@ -155,8 +155,20 @@ def handoff(case, recipient, reasons):
         ]
 
 
+def agent_attempts_used(case):
+    # Older cases counted applied versions, and may also record a rejected last attempt.
+    versions = case["versions"]
+    used = sum(v["stage"] == "agent" for v in versions)
+    if "agent_attempts_used" not in case and versions[-1].get("report", {}).get("semantic_edit_status") in {
+        "invalid_revision", "provider_error", "repeats_previous_version"
+    }:
+        used += 1
+    return max(used, case.get("agent_attempts_used", 0))
+
+
 def run_case(case, check, save, response=None, *, semantic_editor=None):
     versions = case["versions"]
+    case["agent_attempts_used"] = agent_attempts_used(case)
     if response is not None:
         if case.get("decision") != "assistant_handoff_pending":
             raise ValueError("There is no pending ChatGPT handoff")
@@ -215,12 +227,17 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
         agent_versions = [v for v in versions if v["stage"] == "agent"]
         attempted = {v["rule"] for v in agent_versions}
         edit = None
-        can_edit = version["stage"] != "assistant" and len(agent_versions) < MAX_AGENT
+        can_edit = version["stage"] != "assistant" and case["agent_attempts_used"] < MAX_AGENT
         semantic = report.get("semantic", {})
         facts = report.get("facts", {})
         size_issue = next((issue for issue in ("short_article", "long_article") if issue in reasons), None)
         if can_edit and semantic_editor is not None and (semantic.get("issues") or size_issue):
+            case["agent_attempts_used"] += 1
+            save(case)
             candidate = semantic_editor(article, report)
+            if report.get("semantic_edit_status") == "fact_check_pending":
+                # Source prerequisites blocked the edit before generation.
+                case["agent_attempts_used"] -= 1
             if candidate:
                 draft, changes = candidate
                 if article_digest(draft) not in {v["text_sha256"] for v in versions}:
@@ -230,13 +247,14 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
                     continue
                 report["semantic_edit_status"] = "repeats_previous_version"
         edit = automatic_edit(article, attempted)
-        if can_edit and edit:
+        if can_edit and edit and case["agent_attempts_used"] < MAX_AGENT:
+            case["agent_attempts_used"] += 1
             candidate, rule, change = edit
             append_version(case, candidate, "agent", [change], rule)
             save(case)
             continue
         pending_edit = report.get("semantic_edit_status")
-        if can_edit and pending_edit in {"provider_error", "fact_check_pending"}:
+        if can_edit and case["agent_attempts_used"] < MAX_AGENT and pending_edit in {"provider_error", "fact_check_pending"}:
             case["decision"] = "semantic_review_pending" if pending_edit == "provider_error" else pending_edit
             save(case)
             return
@@ -253,7 +271,9 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
             "grammar_review", "style_review", "revision_introduced_new_findings", "semantic_issues", "open_claims",
         }.intersection(reasons))
         if version["stage"] != "assistant" and unresolved_text:
-            handoff(case, "chatgpt", ["local_edits_exhausted", *reasons])
+            routing_reason = ("local_edits_exhausted" if case["agent_attempts_used"] >= MAX_AGENT
+                              else pending_edit or "no_applicable_local_edit")
+            handoff(case, "chatgpt", [routing_reason, *reasons])
         elif semantic_editor is not None and (
             facts.get("status") == "fact_check_pending" or semantic.get("status") != "completed"
         ) and version["stage"] != "assistant":
