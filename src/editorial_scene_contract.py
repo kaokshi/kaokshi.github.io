@@ -95,3 +95,28 @@ def structural_verdict(original_data, refined_data, *, expected_size=(1280,720))
         return {"status":"needs_visual_review", "reason":"structural_checks_passed",
                 "semantic_verified":False,
                 "warning":"Visual content, character identity and scene semantics NOT verified"}
+
+
+def select_reviewed_variant(original, edited, evidence):
+    """Use an edit ONLY when a human/independent approved review matches exact bytes.
+
+    A rejection safely returns the intact original. No synthetic QA evidence.
+    """
+    if not isinstance(evidence, dict):
+        raise ValueError("Review evidence must be provided")
+    if evidence.get("edited_sha256") != sha256(edited).hexdigest():
+        raise ValueError("Review evidence is stale or for a different candidate")
+    if evidence.get("original_sha256") != sha256(original).hexdigest():
+        raise ValueError("Review source mismatch")
+    if evidence.get("reviewer_kind") not in ("human", "independent_validated_vision"):
+        raise ValueError("A real qualified reviewer is required")
+    if evidence.get("decision") == "reject":
+        return original, {"selection": "original", "reviewed": True}
+    if evidence.get("decision") != "approve":
+        raise ValueError("Review is not final")
+    gates = ("same_story", "same_character", "same_location",
+             "same_visual_style", "targeted_fix_successful", "no_new_defects")
+    if any(evidence.get(field) is not True for field in gates):
+        return original, {"selection": "original", "reviewed": True,
+                          "reason": "failed_visual_gate"}
+    return edited, {"selection": "refined", "reviewed": True}
