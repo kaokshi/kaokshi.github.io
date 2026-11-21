@@ -7,7 +7,7 @@ source retrieval, not proof that every fictional event happened on screen.
 """
 import json
 import re
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
 
 from editorial_writer import Pending
@@ -156,7 +156,7 @@ def movie_sources(task, payload, *, get_json=fetch_json):
     if cast:
         fact_lines.append("Актёры (не имена персонажей): " + ", ".join(cast))
     identity_url = "https://www.wikidata.org/wiki/" + qid
-    plot_url = "https://ru.wikipedia.org/wiki/" + __import__("urllib.parse", fromlist=["quote"]).quote(wiki_title.replace(" ", "_"))
+    plot_url = "https://ru.wikipedia.org/wiki/" + quote(wiki_title.replace(" ", "_"))
     return {
         "status": "source_documents_retrieved_not_plot_verified",
         "film": {"qid": qid, "title": movie_name, "years": years,
