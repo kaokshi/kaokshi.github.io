@@ -1,0 +1,78 @@
+name: Score exact Sapling fragments with existing four-detector genre models
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/editorial_same_fragment_comparison.py'
+      - '.github/workflows/editorial-same-fragment-comparison.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  evaluate-fragment:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - genre: legends
+            run_id: 44735041717
+            artifact: legends-longform-400-research
+          - genre: science
+            run_id: 44735041762
+            artifact: science-longform-400-research
+          - genre: cinema
+            run_id: 44735041824
+            artifact: cinema-plot-recaps-120-research
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-editorial.txt
+      - name: Download exact experiment model weights
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          run-id: ${{ matrix.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: editorial-models
+      - name: Install existing detector suite
+        run: |
+          python -m pip install -r requirements-editorial.txt
+          aiw-ru models install modernbert lightgbm
+      - name: Install pinned ruBERT v4 in its own venv
+        run: |
+          git clone --quiet https://github.com/k1y0miiii/ru-ai-text-detector.git .rubert-upstream
+          git -C .rubert-upstream checkout --quiet 244e955427548f5856bb389cc8611f959911290c
+          python -m venv .rubert-venv
+          .rubert-venv/bin/python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .rubert-venv/bin/python -m pip install "transformers==4.44.2" "scikit-learn==1.5.2" "numpy==1.26.4" "joblib==1.4.2" "huggingface_hub==0.26.5"
+      - name: Fetch ruBERT pinned model version
+        run: |
+          .rubert-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+              "k1y0mi/ru-ai-text-detector",
+              repo_type="model",
+              revision="175e75ec79e9471f3f5b4ab0da9b859188446807",
+              allow_patterns=["v4_model/*", "v4_calibrator.joblib", "threshold_v4.json"],
+              local_dir=".rubert-upstream/models",
+          )
+          PY
+      - name: Score precisely the 1900 plaintext chars submitted to Sapling
+        env:
+          OMP_NUM_THREADS: '2'
+          OPENBLAS_NUM_THREADS: '2'
+        run: python src/editorial_same_fragment_comparison.py --genre "${{ matrix.genre }}" --models editorial-models
+      - name: Archive comparable same-fragment analysis only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "same-fragment-${{ matrix.genre }}-sapling-comparison"
+          path: editorial-same-fragment/
+          if-no-files-found: warn
+          retention-days: 14
