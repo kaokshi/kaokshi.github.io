@@ -39,3 +39,5 @@ jobs:
           path: photo-qa/*.json
           retention-days: 3
           if-no-files-found: warn
+
+# Retry after exact host validation update.
