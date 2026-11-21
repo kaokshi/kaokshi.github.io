@@ -24,7 +24,8 @@ from editorial_encrypted_review import encrypt
 
 MODEL_IDS={"gemini":"gemini-2.5-flash",
            "groq":"openai/gpt-oss-120b",
-           "qwen":"qwen3.5-9b"}
+           "qwen":"qwen3.5-9b",
+           "hybrid":"gemini-2.5-flash + openai/gpt-oss-120b"}
 TASKS={
  "legends": {
    "title":"Когда из квартиры исчезли все часы",
@@ -65,7 +66,7 @@ def http_json(url, payload, headers, timeout=150):
         raise ValueError("response_too_large")
     return json.loads(raw)
 
-def generate(backend,prompt,*,http=http_json,env=None):
+def generate(backend,prompt,*,http=http_json,env=None,system_instruction=SYSTEM):
     env=os.environ if env is None else env
     if backend=="gemini":
         key=env.get("GEMINI_API_KEY")
@@ -74,7 +75,7 @@ def generate(backend,prompt,*,http=http_json,env=None):
         response=http(
             "https://generativelanguage.googleapis.com/v1beta/models/"
             +MODEL_IDS[backend]+":generateContent",
-            {"systemInstruction":{"parts":[{"text":SYSTEM}]},
+            {"systemInstruction":{"parts":[{"text":system_instruction}]},
              "contents":[{"role":"user","parts":[{"text":prompt}]}],
              "generationConfig":{"temperature":0.55,"maxOutputTokens":4600}},
             {"x-goog-api-key":key})
@@ -86,14 +87,14 @@ def generate(backend,prompt,*,http=http_json,env=None):
             raise KeyError("missing_api_key")
         response=http("https://api.groq.com/openai/v1/chat/completions",
             {"model":MODEL_IDS[backend],"temperature":0.5,"max_completion_tokens":4500,
-             "messages":[{"role":"system","content":SYSTEM},
+             "messages":[{"role":"system","content":system_instruction},
                          {"role":"user","content":prompt}]},
             {"Authorization":"Bearer "+key})
         return response["choices"][0]["message"].get("content") or "",response.get("usage",{})
     if backend=="qwen":
         response=http("http://127.0.0.1:8093/v1/chat/completions",
             {"model":MODEL_IDS[backend],"temperature":0.55,"max_tokens":4500,
-             "messages":[{"role":"system","content":SYSTEM},
+             "messages":[{"role":"system","content":system_instruction},
                          {"role":"user","content":prompt}]},{},timeout=900)
         return response["choices"][0]["message"].get("content") or "",response.get("usage",{})
     raise ValueError("unknown_backend")
@@ -121,11 +122,12 @@ def run(backend,root,*,generator=generate,env=None):
               "requested":3,"generated":0,"status":"running",
               "publication_authorized":False,
               "channels":[]}
-    key_name={"gemini":"GEMINI_API_KEY","groq":"GROQ_API_KEY",
-              "qwen":"ZEN_LLM_URL"}[backend]
-    if backend!="qwen" and not env.get(key_name):
+    needed_keys={"gemini":("GEMINI_API_KEY",),"groq":("GROQ_API_KEY",),
+                 "qwen":(),"hybrid":("GEMINI_API_KEY","GROQ_API_KEY")}[backend]
+    absent=[key for key in needed_keys if not env.get(key)]
+    if absent:
         manifest.update(status="blocked_missing_secret",
-                        blocked_secret_name=key_name)
+                        blocked_secret_names=absent)
         return manifest
     for channel,task in TASKS.items():
         prompt=("Канал: "+CHANNEL_NAMES[channel]+"\nТема: "+task["title"]+
@@ -134,7 +136,39 @@ def run(backend,root,*,generator=generate,env=None):
         start=monotonic()
         entry={"channel":channel,"status":"not_generated"}
         try:
-            prose,usage=generator(backend,prompt,env=env)
+            if backend == "hybrid":
+                # Shared brief, two real distinct provider calls. No draft text
+                # from either model is ever printed or uploaded unencrypted.
+                first,first_usage=generator("gemini",prompt,env=env)
+                if not isinstance(first,str) or not first.strip():
+                    raise ValueError("gemini_empty_draft")
+                editor_system=(
+                    "Ты независимый редактор русскоязычной статьи для Дзена. "
+                    "Исправь повторы, канцелярит и логические ошибки, сохраняя "
+                    "смысл и фактические ограничения. Не добавляй новые факты, "
+                    "цифры, сцены, источники или цитаты. "
+                    "Оставь 3000–5000 символов без пробелов, 4–7 разделов, "
+                    "каждый с заголовком в **двух звёздочках**, и естественный CTA. "
+                    "Верни только полностью отредактированную статью."
+                )
+                editor_prompt=("Канал: "+CHANNEL_NAMES[channel]+"\n"
+                               "Тема: "+task["title"]+"\n"
+                               "Фактические ограничения: "+task["brief"]+"\n"
+                               "Черновик Gemini для проверки и правки:\n"+first)
+                # Default provider accepts editor_system. Test doubles use
+                # only the three-argument interface and cannot claim real output.
+                if generator is generate:
+                    prose,second_usage=generator("groq",editor_prompt,env=env,
+                                                system_instruction=editor_system)
+                else:
+                    prose,second_usage=generator("groq",editor_prompt,env=env)
+                usage={"gemini":first_usage,"groq":second_usage}
+                entry["workflow"]="gemini_draft_then_groq_editor"
+                entry["gemini_draft_sha256"]=sha256(first.encode()).hexdigest()
+                (root/(channel+"-gemini-original.md")).write_text(first,encoding="utf-8")
+                (root/(channel+"-gemini-original.md")).chmod(0o600)
+            else:
+                prose,usage=generator(backend,prompt,env=env)
             if not isinstance(prose,str) or not prose.strip():
                 raise ValueError("empty_output")
             (root/(channel+".md")).write_text(prose,encoding="utf-8")
@@ -144,6 +178,7 @@ def run(backend,root,*,generator=generate,env=None):
             manifest["generated"]+=1
         except (KeyError,ValueError,TypeError,TimeoutError,OSError,URLError,HTTPError) as exc:
             entry.update(status="generation_failed",error_type=type(exc).__name__,
+                         http_status=(exc.code if isinstance(exc,HTTPError) else None),
                          elapsed_seconds=round(monotonic()-start,2))
         manifest["channels"].append(entry)
     manifest["status"]="drafts_generated_not_publish_ready" if manifest["generated"]==3 else "partial_or_failed"
@@ -159,6 +194,9 @@ def private_packet(root,manifest,public_key):
             path=root/(channel+".md")
             if path.is_file():
                 zipped.write(path,arcname=channel+".md")
+            original=root/(channel+"-gemini-original.md")
+            if original.is_file():
+                zipped.write(original,arcname=channel+"-gemini-original.md")
     result=root.parent/("zen-"+manifest["backend"]+"-owner-review.enc")
     result.write_bytes(encrypt(buffer.getvalue(),public_key))
     result.chmod(0o600)
