@@ -256,7 +256,29 @@ def run(args, parser, root):
             try:
                 with (root / f".topic-{args.channel}.lock").open("a") as lock:
                     flock(lock, LOCK_EX)
-                    args.topic = choose_topic(root, args.channel, day, provider, used)
+                    try:
+                        args.topic = choose_topic(root, args.channel, day, provider, used)
+                    except ValueError:
+                        if args.channel != "science" or not args.europe_pmc:
+                            raise
+                        # Use current source titles as briefs when model proposals are exhausted.
+                        seeds = ("structural coloration", "animal migration", "glacier dynamics",
+                                 "forest phenology", "coral fluorescence", "plant biomechanics")
+                        seed = seeds[datetime.fromisoformat(day).toordinal() % len(seeds)]
+                        records = research("discover", {"topic": seed, "search_query":
+                            f'TITLE_ABS:"{seed}" AND OPEN_ACCESS:Y'})["documents"]
+                        if not records:
+                            raise Pending("topic_selection_pending", "No source-backed topic candidates")
+                        titles = [doc["title"] for doc in records]
+                        args.topic = choose_topic(root, args.channel, day, lambda task, data: {"topics": titles}, used)
+                        documents = [doc for doc in records if doc["title"] == args.topic]
+                        save_case(root / f"topic-source-{day}-{args.channel}.json",
+                                  {"topic": args.topic, "documents": documents})
+                    source_path = root / f"topic-source-{day}-{args.channel}.json"
+                    if documents is None and source_path.is_file():
+                        saved_source = load(source_path)
+                        if saved_source["topic"] == args.topic:
+                            documents = saved_source["documents"]
             except (Pending, ValueError) as exc:
                 save_case(root / f"topic-{day}-{args.channel}.json",
                           {"status": "topic_selection_pending", "reason": str(exc)})
