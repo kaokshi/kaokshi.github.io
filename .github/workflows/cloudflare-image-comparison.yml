@@ -1,0 +1,64 @@
+name: Compare Cloudflare illustration (one image)
+on:
+  push:
+    branches:
+      - feature/editorial-cloudflare-free-image
+    paths:
+      - .github/workflows/cloudflare-image-comparison.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cloudflare-one-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: "true"
+      ZEN_IMAGE_ALLOW_PAID: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check Pillow
+      - name: Generate matching original test scene
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/zen-comparison
+          PYTHONPATH=src python - <<'PY'
+          import hashlib
+          import io
+          from pathlib import Path
+          from PIL import Image
+          from editorial_cloudflare import generate_scene
+
+          prompt = ("Single cinematic photorealistic horizontal illustration for a Russian urban-legend story: "
+                    "an abandoned late-19th-century apartment corridor at night, "
+                    "a lone young woman in a dark green coat holding a small flashlight stands in the foreground seen from behind, "
+                    "at the far end of the corridor an impossible open doorway reveals a softly glowing snow-covered forest, "
+                    "peeling wallpaper, damp wooden floorboards, subtle blue moonlight and warm amber light leaking from the doorway, "
+                    "realistic atmospheric fog, suspenseful but not gory, coherent architectural perspective, detailed environment, "
+                    "wide composition, no visible writing, no letters, no logos, no watermarks, one single scene.")
+          data, credit = generate_scene(prompt)
+          with Image.open(io.BytesIO(data)) as im:
+              im.load()
+              im = im.convert("RGB")
+              im.save("/tmp/zen-comparison/cloudflare-flux-schnell.jpg", quality=95)
+              print("COMPARISON_CLOUDFLARE_STATUS=success")
+              print("COMPARISON_IMAGE_DIMENSIONS=%sx%s" % im.size)
+          print("COMPARISON_IMAGE_SHA256=" + hashlib.sha256(data).hexdigest())
+          PY
+      - name: Save image artifact for owner comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-comparison-one-image
+          path: /tmp/zen-comparison/cloudflare-flux-schnell.jpg
+          retention-days: 2
+          if-no-files-found: error
