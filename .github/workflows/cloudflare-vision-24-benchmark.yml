@@ -1,0 +1,54 @@
+name: Qwen visual inspector 24-case benchmark
+on:
+  push:
+    branches:
+      - feature/editorial-cloudflare-free-image
+    paths:
+      - .github/workflows/cloudflare-vision-24-benchmark.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: "true"
+      ZEN_IMAGE_ALLOW_PAID: "false"
+      ZEN_IMAGE_VISION_PILOT: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloudflare-comparison-one-image
+          run-id: 44900179845
+          github-token: ${{ github.token }}
+          path: original-one
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloudflare-scenes-2-and-3
+          run-id: 44900806627
+          github-token: ${{ github.token }}
+          path: other-originals
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependencies
+        run: python -m pip install --disable-pip-version-check pillow requests
+      - name: Run 24 individually labeled visual cases
+        run: |
+          PYTHONPATH=src python src/editorial_vision_benchmark.py \
+            --first original-one --others other-originals --output benchmark-report
+      - name: Save only audit JSON privately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-24-case-benchmark
+          path: benchmark-report/*.json
+          retention-days: 3
+          if-no-files-found: warn
