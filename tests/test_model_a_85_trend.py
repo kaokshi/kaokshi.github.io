@@ -50,7 +50,7 @@ class TrendTests(unittest.TestCase):
         self.assertTrue(threshold_review(results(85.001))["exceeds_owner_review_threshold"])
         self.assertTrue(threshold_review(results(85.001))["advisory_only"])
 
-    def test_increase_prepares_handoff_not_more_agent_edits(self):
+    def test_increase_remains_advisory_without_extra_edits(self):
         case=self.case()
         scores=iter([86,90])
         run_case(case,lambda a:report(a,next(scores)),lambda c:None,semantic_editor=self.edit)
@@ -58,7 +58,7 @@ class TrendTests(unittest.TestCase):
         self.assertEqual(case["versions"][-1]["model_a_trend"],"increased")
         self.assertEqual(case["decision"],"assistant_handoff_pending")
         self.assertEqual(case["handoff"]["transport_status"],"not_connected")
-        self.assertIn("model_a_increased_after_agent_revision",case["handoff"]["reasons"])
+        self.assertNotIn("model_a_increased_after_agent_revision",case["handoff"]["reasons"])
 
     def test_plateau_stops_edits(self):
         case=self.case()
