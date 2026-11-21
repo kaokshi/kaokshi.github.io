@@ -7,6 +7,7 @@ import base64
 import binascii
 from io import BytesIO
 import os
+from editorial_cloud_budget import BudgetUnavailable
 import re
 
 from PIL import Image
@@ -79,7 +80,7 @@ def refine_image(original, prompt, *, env=None, post=None, style_reference=None)
             if final.size != (width, height):
                 raise CloudflarePending("Klein returned the wrong image dimensions")
             final.load()
-    except CloudflarePending:
+    except (BudgetUnavailable, CloudflarePending):
         raise
     except (ValueError, KeyError, TypeError, OSError, binascii.Error):
         raise CloudflarePending("Malformed Klein image response") from None

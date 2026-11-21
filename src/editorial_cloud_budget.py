@@ -7,17 +7,21 @@ import sqlite3
 from editorial_writer import private_path
 
 
+class BudgetUnavailable(ValueError):
+    """No request was sent. The caller can resume after correcting the budget."""
+
+
 def reserve(env):
     today = datetime.now(timezone.utc).date().isoformat()
     if env.get("ZEN_CF_BUDGET_DATE") != today:
-        raise ValueError("Free request budget missing or expired (UTC)")
+        raise BudgetUnavailable("Free request budget missing or expired (UTC)")
     if env.get("GITHUB_ACTIONS") == "true":
-        if env.get("ZEN_CF_APPROVED_RUN") != env.get("GITHUB_RUN_ID") or env.get("GITHUB_RUN_ATTEMPT") != "1":
-            raise ValueError("This Actions run has no single-use request allowance")
+        if not env.get("GITHUB_RUN_ID") or env.get("ZEN_CF_APPROVED_RUN") != env.get("GITHUB_RUN_ID") or env.get("GITHUB_RUN_ATTEMPT") != "1":
+            raise BudgetUnavailable("This Actions run has no single-use request allowance")
     limit = env.get("ZEN_CF_MAX_REQUESTS", "")
     ledger = env.get("ZEN_CF_LEDGER", "")
     if not limit.isascii() or not limit.isdigit() or not 1 <= int(limit) <= 32 or not Path(ledger).is_absolute():
-        raise ValueError("Set a private absolute ledger and a budget of 1 to 32 requests")
+        raise BudgetUnavailable("Set a private absolute ledger and a budget of 1 to 32 requests")
     path = private_path(Path(ledger))
     fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     os.close(fd)
@@ -27,7 +31,7 @@ def reserve(env):
         key = (env["CLOUDFLARE_ACCOUNT_ID"].lower(), today)
         row = db.execute("SELECT n FROM usage WHERE account=? AND day=?", key).fetchone()
         if row and row[0] >= int(limit):
-            raise ValueError("Cloudflare request budget exhausted")
+            raise BudgetUnavailable("Cloudflare request budget exhausted")
         db.execute("INSERT INTO usage VALUES(?,?,1) ON CONFLICT(account,day) DO UPDATE SET n=n+1", key)
 
 

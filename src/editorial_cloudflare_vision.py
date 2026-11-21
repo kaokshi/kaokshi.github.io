@@ -8,6 +8,7 @@ from hashlib import sha256
 from io import BytesIO
 import json
 import os
+from editorial_cloud_budget import BudgetUnavailable
 import re
 
 from PIL import Image
@@ -116,7 +117,7 @@ def review_pair(original, edited, scene_contract, *, env=None, post=None):
         else:
             raise VisionPending("Unsupported vision response")
         return {**parse_review(raw,original,edited), "scene_contract_sha256": fingerprint(scene_contract)}
-    except VisionPending:
+    except (BudgetUnavailable, VisionPending):
         raise
     except Exception:
         raise VisionPending("Vision model request or response failed") from None

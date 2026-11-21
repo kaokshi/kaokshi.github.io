@@ -7,6 +7,7 @@ still cannot certify that the image is scientifically correct in all respects.
 from hashlib import sha256
 import json
 import os
+from editorial_cloud_budget import BudgetUnavailable
 import re
 from editorial_cloudflare_vision import _image_data, VisionPending, MODEL
 
@@ -106,7 +107,7 @@ def review_science_diagram(image_data,contract_key,*,env=None,post=None):
         else:
             raise VisionPending("Scientific QA response format unsupported")
         return score_transcription(raw,image_data,contract_key)
-    except VisionPending:
+    except (BudgetUnavailable, VisionPending):
         raise
     except Exception:
         raise VisionPending("Scientific QA model unavailable") from None

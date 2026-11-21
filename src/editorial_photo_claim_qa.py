@@ -5,6 +5,7 @@ NOT inferable from pixels and must be independently verified.
 """
 import json
 import os
+from editorial_cloud_budget import BudgetUnavailable
 import re
 from hashlib import sha256
 from editorial_cloudflare_vision import _image_data, VisionPending, MODEL
@@ -71,7 +72,7 @@ def review_photo_claim(image_data, expected, *, env=None, post=None):
                 "uncertain":obj["uncertain"],"observable_evidence":obj["observable_evidence"],
                 "sha256":sha256(image_data).hexdigest(),
                 "semantic_verified":False,"model":MODEL}
-    except VisionPending:
+    except (BudgetUnavailable, VisionPending):
         raise
     except Exception:
         raise VisionPending("Vision photo claim audit unavailable") from None

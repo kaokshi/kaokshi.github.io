@@ -50,7 +50,7 @@ def generate_scene(prompt, *, env=None, opener=None):
 
         try:
             reserve(env)
-        except (ValueError, OSError) as exc:
+        except OSError as exc:
             raise CloudflarePending(str(exc)) from None
         opener = build_opener(NoRedirect).open
     try:

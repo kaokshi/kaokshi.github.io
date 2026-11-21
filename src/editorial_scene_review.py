@@ -6,6 +6,7 @@ import json
 import os
 import re
 
+from editorial_cloud_budget import BudgetUnavailable
 from editorial_cloudflare import MODEL, generate_scene
 from editorial_cloudflare_refine import MODEL as KLEIN, refine_image
 from editorial_cloudflare_vision import review_pair
@@ -39,7 +40,12 @@ def checkpoint_call(directory, state, stage, call):
         return data, record["metadata"]
     state[stage] = {"status": "requested"}
     save_case(directory / "state.json", state)
-    data, metadata = call()
+    try:
+        data, metadata = call()
+    except BudgetUnavailable:
+        del state[stage]
+        save_case(directory / "state.json", state)
+        raise
     with (directory / stage).open("xb") as stream:
         stream.write(data)
         stream.flush()
@@ -57,7 +63,8 @@ def style_anchor(root, digest):
     directory = root / ".scene-anchors" / digest
     path = directory / "reference"
     record = directory / "review.json"
-    if not record.is_file() or not path.is_file() or path.stat().st_size > 15_000_000:
+    if (not directory.resolve().is_relative_to(root) or record.is_symlink() or path.is_symlink()
+            or not record.is_file() or not path.is_file() or path.stat().st_size > 15_000_000):
         pending("Отсутствует проверенный эталон персонажа или стиля")
     permission = json.loads(record.read_text())
     data = path.read_bytes()
@@ -82,7 +89,7 @@ def prepare_scene(row, root):
     anchor_digest = row.get("style_reference_sha256") if edit_prompt else None
     anchor = style_anchor(root, anchor_digest)
     rights = root / "model-rights.json"
-    if not rights.is_file():
+    if rights.is_symlink() or not rights.is_file():
         pending("Отсутствует частный реестр проверенных прав model-rights.json")
     entries = json.loads(rights.read_text())
     models = [MODEL, KLEIN] if edit_prompt else [MODEL]
@@ -95,6 +102,8 @@ def prepare_scene(row, root):
     source_key = sha256(json.dumps([MODEL, row["id"], prompt, row.get("replaces")],
                                    ensure_ascii=False).encode()).hexdigest()
     source_dir = root / ".scene-originals" / source_key
+    if not source_dir.resolve().is_relative_to(root):
+        pending("Оригинал должен храниться в приватном рабочем каталоге")
     with scene_lock(source_dir):
         path = source_dir / "state.json"
         state = json.loads(path.read_text()) if path.exists() else {"id": row["id"], "scene": row["prompt"]}
@@ -109,6 +118,8 @@ def prepare_scene(row, root):
     key = sha256(json.dumps([source_key, sha256(original).hexdigest(), fingerprint(contract), KLEIN,
                              edit_prompt, anchor_digest], ensure_ascii=False).encode()).hexdigest()
     directory = root / ".scene-reviews" / key
+    if not directory.resolve().is_relative_to(root):
+        pending("Кандидат должен храниться в приватном рабочем каталоге")
     with scene_lock(directory):
         path = directory / "state.json"
         state = json.loads(path.read_text()) if path.exists() else {"original_sha256": sha256(original).hexdigest(),
@@ -129,6 +140,10 @@ def prepare_scene(row, root):
             from editorial_cloudflare_vision import VisionPending
             try:
                 state["vision"] = review_pair(original, candidate, contract)
+            except BudgetUnavailable:
+                del state["vision"]
+                save_case(path, state)
+                raise
             except VisionPending as exc:
                 state["vision"] = {"status": "unavailable", "reason": str(exc)}
             save_case(path, state)

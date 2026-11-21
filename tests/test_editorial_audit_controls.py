@@ -45,6 +45,30 @@ class Controls(unittest.TestCase):
             with self.assertRaises(ValueError):
                 reserve(dict(env, GITHUB_ACTIONS="true", GITHUB_RUN_ID="999", GITHUB_RUN_ATTEMPT="1"))
 
+    def test_commons_requires_allowed_https_host_on_redirect(self):
+        from editorial_media import commons_url
+        self.assertEqual(commons_url("https://upload.wikimedia.org/a"), "https://upload.wikimedia.org/a")
+        for url in ("http://commons.wikimedia.org/a", "https://upload.wikimedia.org.example.org/a",
+                    "https://me@upload.wikimedia.org/a", "https://upload.wikimedia.org:8443/a"):
+            with self.assertRaises(ValueError):
+                commons_url(url)
+
+    def test_only_preflight_budget_failure_releases_request(self):
+        from editorial_cloud_budget import BudgetUnavailable
+        from editorial_scene_review import checkpoint_call
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as tmp:
+            folder, state = Path(tmp), {}
+            with self.assertRaises(BudgetUnavailable):
+                checkpoint_call(folder,state,"original",Mock(side_effect=BudgetUnavailable("not sent")))
+            connection = Mock(side_effect=TimeoutError("response unknown"))
+            with self.assertRaises(TimeoutError):
+                checkpoint_call(folder,state,"original",connection)
+            with self.assertRaises(Pending):
+                checkpoint_call(folder,state,"original",connection)
+            connection.assert_called_once()
+            self.assertEqual(json.loads((folder/"state.json").read_text())["original"]["status"], "requested")
+
     def test_strict_vision_response(self):
         response = {"checks": dict.fromkeys(REQUIRED, True), "defects": ["coat replaced"]}
         self.assertEqual(parse_review(json.dumps(response), b"a", b"b")["status"], "reject_candidate")

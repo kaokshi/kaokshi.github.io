@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from PIL import Image, ImageOps
 from editorial_local_llm import local_endpoint
@@ -17,9 +17,22 @@ from editorial_revision import save_case
 from editorial_writer import private_path
 
 
+def commons_url(url):
+    parsed = urlsplit(url)
+    if (parsed.scheme != "https" or parsed.hostname not in {"commons.wikimedia.org", "upload.wikimedia.org"}
+            or parsed.username is not None or parsed.password is not None or parsed.port not in {None, 443}):
+        raise ValueError("Unsupported Commons URL")
+    return url
+
+
+class CommonsRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return super().redirect_request(req, fp, code, msg, headers, commons_url(newurl))
+
+
 def fetch(url, limit):
-    req = Request(url, headers={"User-Agent": "ZenEditorial/1.0 (github.com/kaokshi/kaokshi.github.io)"})
-    with urlopen(req, timeout=60) as reply:
+    req = Request(commons_url(url), headers={"User-Agent": "ZenEditorial/1.0 (github.com/kaokshi/kaokshi.github.io)"})
+    with build_opener(CommonsRedirect()).open(req, timeout=60) as reply:
         data = reply.read(limit + 1)
     if len(data) > limit:
         raise ValueError("Media response exceeds size limit")
@@ -39,6 +52,7 @@ def commons_photo(pageid):
         raise ValueError("Commons photo lacks an accepted reusable license")
     if not meta.get("Artist") or urlsplit(info["url"]).hostname != "upload.wikimedia.org":
         raise ValueError("Missing photographer or unsupported file host")
+    commons_url(info["descriptionurl"])
     data = fetch(info["url"], 45_000_000)
     return data, {"source": info["descriptionurl"], "original_url": info["url"], "artist": meta["Artist"],
                   "license": meta["LicenseShortName"], "license_url": license_url,
@@ -49,6 +63,8 @@ def save_image(root, channel, identifier, data, credit, caption):
     if channel not in {"science", "legends"} or not re.fullmatch(r"[a-z0-9-]{1,80}", identifier):
         raise ValueError("Unsupported channel or illustration identifier")
     with Image.open(BytesIO(data)) as source:
+        if source.width * source.height > 60_000_000:
+            raise ValueError("Illustration exceeds decode pixel limit")
         img = ImageOps.exif_transpose(source).convert("RGB")
     img.thumbnail((1800, 1800))
     stream = BytesIO()

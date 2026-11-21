@@ -95,13 +95,16 @@ def render_candidate(folder, row, digest):
 def reviewed_still(root, row):
     digest = specification_hash(row)
     folder = private_path(root) / ".science-reviews" / digest
+    if not folder.resolve().is_relative_to(private_path(root)):
+        raise ValueError("Private science directory escaped workspace")
     reason = "Требуется проверка научной иллюстрации " + str(folder)
     if row["media_type"] == "animation":
         raise Pending("science_visual_review_pending", "Для анимации требуется подтверждение поддержки формата")
     render_candidate(folder, row, digest)
     review_path = folder / "review.json"
     image_path = folder / "illustration.png"
-    if not review_path.is_file() or not image_path.is_file() or image_path.stat().st_size > 15_000_000:
+    if (review_path.is_symlink() or image_path.is_symlink() or not review_path.is_file()
+            or not image_path.is_file() or image_path.stat().st_size > 15_000_000):
         raise Pending("science_visual_review_pending", reason)
     review = json.loads(review_path.read_text())
     if (review.get("specification_sha256") != digest or review.get("approved") is not True
