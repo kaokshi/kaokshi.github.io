@@ -55,6 +55,36 @@ CHANNEL_NAMES={"legends":"Легенды тёмных улиц",
                "science":"За гранью очевидного",
                "cinema":"Кадр за Кадром"}
 MAX_HTTP_BYTES=2_000_000
+GEMINI_PREFERENCES=("gemini-3.8-flash","gemini-3.6-flash",
+                    "gemini-3.5-flash","gemini-3.1-flash-lite",
+                    "gemini-2.5-flash")
+
+def discover_gemini_model(env, opener=urlopen):
+    """Choose an actually advertised generateContent model for this API key."""
+    key=env.get("GEMINI_API_KEY")
+    if not key:
+        raise KeyError("missing_api_key")
+    request=Request("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+                    headers={"x-goog-api-key":key,"Accept":"application/json"})
+    with opener(request,timeout=35) as response:
+        payload=json.load(response)
+    models={x.get("name","").removeprefix("models/") for x in payload.get("models",[])
+            if "generateContent" in x.get("supportedGenerationMethods",[])}
+    for candidate in GEMINI_PREFERENCES:
+        if candidate in models:
+            return candidate
+    raise ValueError("no_preferred_generateContent_model_visible")
+
+def discover_groq_access(env, opener=urlopen):
+    key=env.get("GROQ_API_KEY")
+    if not key:
+        raise KeyError("missing_api_key")
+    request=Request("https://api.groq.com/openai/v1/models",
+                    headers={"Authorization":"Bearer "+key,"Accept":"application/json"})
+    with opener(request,timeout=35) as response:
+        data=json.load(response)
+    return MODEL_IDS["groq"] in {x.get("id") for x in data.get("data",[])}
+
 
 def http_json(url, payload, headers, timeout=150):
     request=Request(url,method="POST",headers={
@@ -74,7 +104,7 @@ def generate(backend,prompt,*,http=http_json,env=None,system_instruction=SYSTEM)
             raise KeyError("missing_api_key")
         response=http(
             "https://generativelanguage.googleapis.com/v1beta/models/"
-            +MODEL_IDS[backend]+":generateContent",
+            +env.get("GEMINI_SELECTED_MODEL",MODEL_IDS[backend])+":generateContent",
             {"systemInstruction":{"parts":[{"text":system_instruction}]},
              "contents":[{"role":"user","parts":[{"text":prompt}]}],
              "generationConfig":{"temperature":0.55,"maxOutputTokens":4600}},
@@ -129,6 +159,31 @@ def run(backend,root,*,generator=generate,env=None):
         manifest.update(status="blocked_missing_secret",
                         blocked_secret_names=absent)
         return manifest
+    # Preflight yields explicit authentication/model compatibility evidence,
+    # never API key contents. Only public model IDs and HTTP codes are stored.
+    if backend in ("gemini","hybrid"):
+        try:
+            actual_model=discover_gemini_model(env)
+            env=dict(env, GEMINI_SELECTED_MODEL=actual_model)
+            manifest["gemini_model_selected"]=actual_model
+            if backend=="gemini":
+                manifest["model"]=actual_model
+        except (KeyError,ValueError,TypeError,OSError,URLError,HTTPError) as exc:
+            manifest.update(status="gemini_preflight_failed",
+                            error_type=type(exc).__name__,
+                            http_status=(exc.code if isinstance(exc,HTTPError) else None))
+            return manifest
+    if backend in ("groq","hybrid"):
+        try:
+            manifest["groq_target_listed"]=discover_groq_access(env)
+            if not manifest["groq_target_listed"]:
+                manifest["status"]="groq_model_not_visible_to_key"
+                return manifest
+        except (KeyError,ValueError,TypeError,OSError,URLError,HTTPError) as exc:
+            manifest.update(status="groq_preflight_failed",
+                            error_type=type(exc).__name__,
+                            http_status=(exc.code if isinstance(exc,HTTPError) else None))
+            return manifest
     for channel,task in TASKS.items():
         prompt=("Канал: "+CHANNEL_NAMES[channel]+"\nТема: "+task["title"]+
                 "\nМатериал для написания: "+task["brief"]+
