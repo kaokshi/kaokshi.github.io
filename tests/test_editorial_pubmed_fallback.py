@@ -75,6 +75,20 @@ class ResearchFallbackTests(unittest.TestCase):
         result=pubmed_sources("discover",{"topic":"study"},open_url=open_url)
         self.assertEqual(result["documents"][0]["kind"],"secondary")
 
+    def test_esearch_response_cannot_expand_fetch_beyond_five_unique_ids(self):
+        excessive = b"<eSearchResult><IdList>" + b"".join(
+            b"<Id>" + str(i).encode() + b"</Id>" for i in [1, 1, 2, 3, 4, 5, 6, 7]
+        ) + b"</IdList></eSearchResult>"
+        requested = []
+        def open_url(url, timeout):
+            if "esearch.fcgi" in url:
+                return Download(excessive)
+            requested.append(parse_qs(urlsplit(url).query)["id"][0])
+            return Download(b"<PubmedArticleSet/>")
+        result = pubmed_sources("discover", {"topic": "test bounded IDs"}, open_url=open_url)
+        self.assertEqual(requested, ["1,2,3,4,5"])
+        self.assertEqual(result["documents"], [])
+
     def test_bad_id_does_not_make_request(self):
         def open_url(url,timeout):return Download(b"<eSearchResult><IdList><Id>123abc</Id></IdList></eSearchResult>")
         self.assertEqual(pubmed_sources("discover",{"topic":"study"},open_url=open_url)["documents"],[])
