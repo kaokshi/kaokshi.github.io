@@ -1,0 +1,58 @@
+name: Cloudflare three-scene visual comparison
+on:
+  push:
+    branches:
+      - feature/editorial-cloudflare-free-image
+    paths:
+      - .github/workflows/cloudflare-three-scene-comparison.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cloudflare-two-followup-scenes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ZEN_CLOUDFLARE_FREE_PLAN_CONFIRMED: "true"
+      ZEN_IMAGE_ALLOW_PAID: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check Pillow
+      - name: Generate two matching continuation scenes
+        shell: bash
+        env:
+          SCENE_PROMPTS_JSON: '["Single cinematic photorealistic horizontal 16:9 illustration for the same Russian urban-legend story, continuation of scene one. A young woman, about 27 years old, straight shoulder-length dark brown hair, wearing an unchanged dark forest-green wool coat, dark trousers, black ankle boots, holding the same small flashlight in her right hand, seen from behind and slightly to the side, stands among snow-covered fir trees immediately beyond an impossible doorway; through the open doorway behind her an abandoned late-19th-century apartment corridor with peeling wallpaper and damp wooden floorboards is clearly visible. Fresh snow and blue nighttime moonlight, her footprints stop abruptly at an old wooden bench, a second pair of mysterious footprints begins in front of her and disappears into dense forest fog, warm amber light from the doorway contrasts with cold blue snow, physically coherent perspective, elegant cinematic natural colors, atmospheric suspense not gore, meticulously detailed environment. Only one young woman, no additional person or creature visible, no words, no text, no logos, no watermarks, no collage.","Single cinematic photorealistic horizontal 16:9 illustration for the same Russian urban-legend story, final scene. The SAME young woman, about 27 years old, straight shoulder-length dark brown hair, wearing the SAME dark forest-green wool coat, dark trousers and black ankle boots and holding the SAME small flashlight in her right hand, is now back inside the abandoned late-19th-century apartment corridor, seen from behind and slightly to the side. She looks back over her shoulder at an old closed apartment door at the far end of the corridor, under which a narrow line of cold blue winter light glows; a trail of melting snowy footprints crosses the damp wooden floorboards from the door toward the camera. Peeling vintage wallpaper, weak warm amber lamp, deep blue moonlight in windows, subtle fog, eerily still suspense, realistic cinematic photography, coherent architecture, detailed textures, quiet eerie ending, no other person visible, no text, no letters, no logos, no watermarks, no collage."]'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/zen-scenes
+          PYTHONPATH=src python - <<'PY'
+          import json
+          import os
+          import io
+          import hashlib
+          from PIL import Image
+          from editorial_cloudflare import generate_scene
+          prompts = json.loads(os.environ["SCENE_PROMPTS_JSON"])
+          for index, prompt in enumerate(prompts, start=2):
+              data, credit = generate_scene(prompt)
+              with Image.open(io.BytesIO(data)) as image:
+                  image.load()
+                  print("SCENE_%s_DIMENSIONS=%sx%s" % (index, image.width, image.height))
+                  image.convert("RGB").save("/tmp/zen-scenes/cloudflare-scene-%s.jpg" % index, quality=95)
+              print("SCENE_%s_SUCCESS=true" % index)
+              print("SCENE_%s_SHA256=%s" % (index, hashlib.sha256(data).hexdigest()))
+          PY
+      - name: Preserve only private comparison artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-scenes-2-and-3
+          path: /tmp/zen-scenes/*.jpg
+          retention-days: 2
+          if-no-files-found: error
