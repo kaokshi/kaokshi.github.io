@@ -21,6 +21,7 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 from editorial_encrypted_review import encrypt
+from editorial_reader_quality import text_stats, quality_flags, review_checklist
 
 MODEL_IDS={"gemini":"gemini-2.5-flash",
            "groq":"openai/gpt-oss-120b",
@@ -55,6 +56,7 @@ CHANNEL_NAMES={"legends":"Легенды тёмных улиц",
                "science":"За гранью очевидного",
                "cinema":"Кадр за Кадром"}
 MAX_HTTP_BYTES=2_000_000
+HYBRID_REPAIR_LIMIT=2  # Bounded pilot; never exceeds 5 agent revisions
 GEMINI_PREFERENCES=("gemini-3.8-flash","gemini-3.6-flash",
                     "gemini-3.5-flash","gemini-3.1-flash-lite",
                     "gemini-2.5-flash")
@@ -219,6 +221,56 @@ def run(backend,root,*,generator=generate,env=None):
                                                 system_instruction=editor_system)
                 else:
                     prose,second_usage=generator("groq",editor_prompt,env=env)
+                # The first editorial pass is NOT approved just because it
+                # returned nonempty prose. Recheck actual draft constraints.
+                # Further repairs count towards the agent revision budget.
+                revisions=[]
+                for revision in range(HYBRID_REPAIR_LIMIT+1):
+                    if not isinstance(prose,str) or not prose.strip():
+                        break
+                    stats=text_stats(prose,channel)
+                    flaws=quality_flags(stats)
+                    revisions.append({
+                        "revision_index":revision+1,
+                        "sha256":sha256(prose.encode()).hexdigest(),
+                        "flags":flaws,
+                        "reader_interest_editorial_review":"pending",
+                        "real_audience_retention":None,
+                    })
+                    if not flaws or revision==HYBRID_REPAIR_LIMIT:
+                        break
+                    # Pass explicit diagnostic codes and the current text.
+                    # Enforce preservation of facts, genre and individual voice.
+                    repair_prompt=(
+                        "Канал: "+CHANNEL_NAMES[channel]+
+                        "\\nИсходная задача: "+task["brief"]+
+                        "\\nОтчёт проверок: "+", ".join(flaws)+
+                        "\\nПожалуйста, исправь ТОЛЬКО реальные недостатки. "
+                        "Объём 3000–6000 знаков без пробелов, 4–8 разделов. "
+                        "Каждый новый блок начинается с **жирного заголовка**. "
+                        "Сохраняй оригинальные детали, избегай повторов и пустых вступлений. "
+                        "Удерживай читательский интерес через развитие сюжета/объяснения, "
+                        "а не искусственную интригу. Заверши естественным призывом "
+                        "подписаться на канал. Не добавляй неподтверждённых фактов. "
+                        "\\nТЕКУЩИЙ ТЕКСТ:\\n"+prose)
+                    if generator is generate:
+                        replacement,repair_usage=generator(
+                            "groq",repair_prompt,env=env,
+                            system_instruction=editor_system)
+                    else:
+                        replacement,repair_usage=generator(
+                            "groq",repair_prompt,env=env)
+                    if isinstance(replacement,str) and replacement.strip():
+                        prose=replacement
+                        second_usage=repair_usage
+                entry["agent_revisions_used"]=max(0,len(revisions)-1)
+                entry["agent_revision_limit"]=5
+                entry["review_versions"]=revisions
+                entry["objective_quality_flags"]=quality_flags(text_stats(prose,channel))
+                entry["automated_format_pass"]=not entry["objective_quality_flags"]
+                entry["reader_interest_editorial_review"]="pending"
+                entry["real_audience_retention"]=None
+                entry["reader_interest_review_checklist"]=review_checklist(channel)
                 usage={"gemini":first_usage,"groq":second_usage}
                 entry["workflow"]="gemini_draft_then_groq_editor"
                 entry["gemini_draft_sha256"]=sha256(first.encode()).hexdigest()
@@ -231,6 +283,10 @@ def run(backend,root,*,generator=generate,env=None):
             (root/(channel+".md")).write_text(prose,encoding="utf-8")
             (root/(channel+".md")).chmod(0o600)
             entry.update(status="draft_generated",**metrics(prose,monotonic()-start))
+            entry["reader_quality_proxies"]=text_stats(prose,channel)
+            entry["reader_quality_flags"]=quality_flags(entry["reader_quality_proxies"])
+            entry["reader_interest_checklist"]=review_checklist(channel)
+            entry["reader_retention_measured"]=False
             entry["token_usage"]=usage
             manifest["generated"]+=1
         except (KeyError,ValueError,TypeError,TimeoutError,OSError,URLError,HTTPError) as exc:
