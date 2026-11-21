@@ -23,8 +23,9 @@ def array(items):
 STRING = {"type": "string"}
 INTEGER = {"type": "integer"}
 SECTIONS = array(obj(start=INTEGER, heading=STRING))
-PROSE_LINE = {"type": "string", "pattern": r"^[^\r\n]+$"}
-ARTICLE = obj(title=PROSE_LINE, paragraphs={**array(PROSE_LINE), "minItems": 3, "maxItems": 10}, cta=PROSE_LINE)
+ARTICLE = obj(title={**STRING, "minLength": 1, "maxLength": 140},
+              paragraphs={**array({**STRING, "minLength": 1, "maxLength": 950}), "minItems": 3, "maxItems": 8},
+              cta={**STRING, "minLength": 1, "maxLength": 260})
 ISSUE = obj(id=STRING, category=STRING, paragraph=INTEGER, quote=STRING, reason=STRING)
 EDIT = obj(issue_id=STRING, paragraph=INTEGER, after=STRING, reason=STRING)
 CLAIM = obj(id=STRING, paragraph=INTEGER, quote=STRING)
@@ -70,7 +71,7 @@ def read_json_response(endpoint, path, payload, timeout):
                      {"Content-Type": "application/json"})
         response = conn.getresponse()
         if response.status in {408, 429, 500, 502, 503, 504}:
-            raise TimeoutError(f"Local LLM HTTP {response.status}")
+            raise ConnectionError(f"Local LLM HTTP {response.status}")
         if response.status != 200:
             raise ProviderFailure(f"Local LLM HTTP {response.status}")
         raw = response.read(MAX_RESPONSE_BYTES + 1)
@@ -113,7 +114,7 @@ def matches_schema(value, schema):
     if kind == "integer":
         return type(value) is int
     return (isinstance(value, str) and ("enum" not in schema or value in schema["enum"])
-            and ("pattern" not in schema or re.fullmatch(schema["pattern"], value) is not None))
+            and schema.get("minLength", 0) <= len(value) <= schema.get("maxLength", len(value)))
 
 
 def indexed_sentences(rows, field):
@@ -183,7 +184,14 @@ def complete(request, *, env=None, send=read_json_response):
     tokens = {"field_review": 40, "photo_query": 60, "research_query": 80, "topics": 450, "scene_plan": 1650, "photo_plan": 900, "section_plan": 350, "write": 3400, "revise": 3300, "diagnose": 950, "extract_claims": 1200,
               "compare_claims": 1800, "learning_proposals": 800}[task]
     temperature = 0.65 if task == "write" else 0.2
-    if kind == "ollama":
+    native = kind == "llama.cpp" and task == "write"
+    if native:
+        # Apply the deployed model's template, then constrain token sampling itself.
+        rendered = send(endpoint, "/apply-template", {"messages": messages}, timeout=request_timeout(env))
+        path = "/completion"
+        payload = {"prompt": rendered["prompt"], "json_schema": schema, "n_predict": tokens,
+                   "temperature": temperature, "stream": False}
+    elif kind == "ollama":
         path = "/api/chat"
         payload = {"model": model, "messages": messages, "format": schema, "stream": False,
                    "options": {"temperature": temperature, "num_predict": tokens, "num_ctx": 8192}}
@@ -197,7 +205,10 @@ def complete(request, *, env=None, send=read_json_response):
     for attempt in range(attempts):
         try:
             response = send(endpoint, path, payload, timeout=max(1, min(timeout, deadline - monotonic())))
-            if kind == "ollama":
+            if native:
+                content = response["content"]
+                finish = "length" if response.get("stopped_limit") or response.get("stop_type") == "limit" else "stop"
+            elif kind == "ollama":
                 content, finish = response["message"]["content"], response.get("done_reason")
             else:
                 choice = response["choices"][0]
@@ -225,7 +236,7 @@ def complete(request, *, env=None, send=read_json_response):
             return answer
         except (OSError, http.client.HTTPException, ValueError, TypeError, KeyError, IndexError) as exc:
             if attempt + 1 == attempts or monotonic() >= deadline:
-                raise ProviderFailure(str(exc) if isinstance(exc, ValueError) else type(exc).__name__) from exc
+                raise ProviderFailure(str(exc) or type(exc).__name__) from exc
 
 
 def main():

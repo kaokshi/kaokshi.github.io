@@ -295,14 +295,16 @@ class LocalLlmTests(unittest.TestCase):
         def send(endpoint, path, payload, timeout):
             calls.append(path)
             self.assertEqual(endpoint.hostname, "127.0.0.1")
-            self.assertEqual(payload["response_format"]["type"], "json_schema")
-            return {"choices": [{"message": {"content": json.dumps(
-                {} if len(calls) == 1 else {"title": "Тест", "paragraphs": ["Один", "Два", "Три"], "cta": "Подписаться"}
-            )}, "finish_reason": "stop"}]}
+            if path == "/apply-template":
+                return {"prompt": "Rendered by the server"}
+            self.assertEqual(payload["prompt"], "Rendered by the server")
+            self.assertIn("paragraphs", payload["json_schema"]["properties"])
+            return {"content": json.dumps({} if len(calls) == 2 else
+                    {"title": "Тест", "paragraphs": ["Один", "Два", "Три"], "cta": "Подписаться"})}
 
         result = complete(request, env={"ZEN_LLM_MODEL": "test"}, send=send)
         self.assertEqual(result["title"], "Тест")
-        self.assertEqual(calls, ["/v1/chat/completions"] * 2)
+        self.assertEqual(calls, ["/apply-template", "/completion", "/completion"])
         with self.assertRaisesRegex(ProviderFailure, "loopback"):
             complete(request, env={"ZEN_LLM_MODEL": "test", "ZEN_LLM_URL": "http://example.org:8093"}, send=send)
 
