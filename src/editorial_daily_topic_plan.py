@@ -72,7 +72,8 @@ def create_plan(day, workspace, provider, *, per_channel=3, diagnostics=None):
         accepted = []
         counts = {"attempts": 0, "accepted": 0, "invalid_response": 0,
                   "bad_shape": 0, "invalid_topic": 0, "missing_query": 0,
-                  "duplicate_topic": 0, "duplicate_archive": 0}
+                  "duplicate_topic": 0, "duplicate_archive": 0,
+                  "unused_query_normalized": 0}
         if diagnostics is not None:
             diagnostics["channels"][channel] = counts
         for attempt in range(4):
@@ -147,8 +148,11 @@ def create_plan(day, workspace, provider, *, per_channel=3, diagnostics=None):
                     counts["missing_query"] += 1
                     continue
                 if channel != "science" and query.strip():
-                    counts["bad_shape"] += 1
-                    continue
+                    # A stray search hint on a fictional story is harmless
+                    # auxiliary metadata, not a reason to reject its title.
+                    # Drop it; do not accidentally research/publish invented facts.
+                    counts["unused_query_normalized"] += 1
+                    query = ""
                 if channel == "cinema":
                     import re
                     if not re.search(r"«[^»]{2,100}»\s*\((?:19|20)\d{2}\)", topic):
