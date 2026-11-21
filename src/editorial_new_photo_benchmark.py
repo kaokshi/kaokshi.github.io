@@ -10,7 +10,7 @@ import argparse
 import json
 from pathlib import Path
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 import requests
 from PIL import Image, ImageOps
 
@@ -56,8 +56,11 @@ def load_photo(spec):
         raise ValueError("Commons file not found: "+spec["key"])
     info=page["imageinfo"][0]
     url=info.get("thumburl") or info["url"]
-    if not url.startswith("https://upload.wikimedia.org/"):
-        raise ValueError("Unapproved image host")
+    host=urlsplit(url).hostname
+    if (urlsplit(url).scheme!="https" or host not in
+            ("upload.wikimedia.org","commons.wikimedia.org")):
+        raise ValueError("Unapproved image host: "+str(host))
+    print("IMAGE_HOST "+spec["key"]+" "+host,flush=True)
     img_resp=requests.get(url,headers=headers,timeout=60)
     img_resp.raise_for_status()
     if len(img_resp.content)>15_000_000:
