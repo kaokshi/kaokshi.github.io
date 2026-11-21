@@ -205,6 +205,12 @@ def produce_one(channel, row, root, endpoint):
             from editorial_writer import Pending
             try:
                 data, credit = prepare_scene(row, root)
+                from editorial_visual_style import expected_size
+                with Image.open(BytesIO(data)) as frame:
+                    if frame.size != expected_size():
+                        raise Pending("media_production_pending", "Сохранённый вариант "
+                                      + sha256(data).hexdigest()
+                                      + " требует проверки композиции и согласованной адаптации к 1280×720")
             except CloudflarePending as exc:
                 raise Pending("media_production_pending", str(exc)) from None
         elif image_provider == "sd-webui":

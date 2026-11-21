@@ -76,6 +76,15 @@ class Controls(unittest.TestCase):
             with self.assertRaises(VisionPending):
                 parse_review(raw, b"a", b"b")
 
+    def test_square_original_stays_out_of_draft(self):
+        original = encoded(Image.new("RGB", (512,512)))
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"ZEN_IMAGE_PROVIDER":"cloudflare"}), patch(
+                "editorial_scene_review.prepare_scene", return_value=(original, {})):
+            root = Path(tmp)
+            with self.assertRaisesRegex(Pending, sha256(original).hexdigest()):
+                produce_one("legends", {"id":"image-1"}, root, None)
+            self.assertFalse((root/"content").exists())
+
     def test_square_to_wide_crop(self):
         image = Image.effect_mandelbrot((512,512), (-2,-1,1,1), 45).convert("RGB")
         self.assertEqual(detect_severe_crop(encoded(image), encoded(ImageOps.fit(image,(1280,720))))["status"], "reject")
