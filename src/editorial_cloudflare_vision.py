@@ -86,7 +86,9 @@ def review_pair(original, edited, scene_contract, *, env=None, post=None):
                              {"type":"text","text":instruction},
                              {"type":"image_url","image_url":{"url":_image_data(original)}},
                              {"type":"image_url","image_url":{"url":_image_data(edited)}}]}],
-             "max_completion_tokens":800,"temperature":0.1,"stream":False}
+             "max_completion_tokens":1800,"reasoning_effort":"low",
+             "chat_template_kwargs":{"enable_thinking":False},
+             "temperature":0.1,"stream":False}
     endpoint="https://api.cloudflare.com/client/v4/accounts/"+account+"/ai/run/"+MODEL
     try:
         response=post(endpoint,headers={"Authorization":"Bearer "+token},json=payload,timeout=120)
