@@ -245,6 +245,22 @@ def main():
                             "plot_events_verified_against_film": False,
                             "character_roles_verified": False, "publication_authorized": False,
                         })
+                        # Reuse the existing Commons rights-aware API candidate finder.
+                        # Never assume a search result depicts a specific scene,
+                        # and never attach an image without separate inspection.
+                        try:
+                            from editorial_commons_images import search as commons_search
+                            film = movie_evidence["film"]
+                            candidates = commons_search(
+                                film["title"] + " film " +
+                                (str(film["years"][0]) if film["years"] else ""), limit=12)
+                            save_case(directory / "movie-image-candidates.json", candidates)
+                        except (OSError, ValueError, TypeError, KeyError) as exc:
+                            save_case(directory / "movie-image-candidates.json", {
+                                "status": "discovery_unavailable",
+                                "reason": type(exc).__name__,
+                                "candidates": [], "publication_authorized": False,
+                            })
                     except Pending as exc:
                         save_case(directory / "movie-source-status.json", {
                             "status": exc.status, "reason": str(exc), "publication_authorized": False,
