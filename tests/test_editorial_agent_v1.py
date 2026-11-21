@@ -56,8 +56,8 @@ class AgentTests(unittest.TestCase):
                               "body_html":"<p>Черновик после пяти правок</p>"},
                              {**r,"text_sha256": hashes[5]}, partial,
                              ["Нужна проверка факта"])
-        # Stale report stays blocked; do not bypass SHA checks.
-        self.assertEqual(result["decision"], "incomplete_or_stale_checks")
+        # A history pointing to a different text cannot be reused.
+        self.assertEqual(result["decision"], "history_text_digest_mismatch")
         fifth, rep = data("Текст после пяти агентских исправлений")
         history[-1] = {**history[-1], "after_text_sha256": agent.article_digest(fifth)}
         self.assertEqual(agent.route(fifth, rep, history, ["Ошибка"])["decision"],
