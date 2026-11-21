@@ -174,10 +174,18 @@ class RevisionTests(unittest.TestCase):
              "after": "Сторож остался у окна, чтобы разглядеть ключ в руке незнакомца.",
              "reason": "Объяснил решение сторожа."}]}
         revision.run_case(self.case, check, save, response)
-        self.assertEqual(self.case["decision"], "owner_review_pending")
+        self.assertEqual(self.case["decision"], "assistant_handoff_pending")
         self.assertEqual(len(checked), 4)
+        second = {"base_text_sha256": self.case["handoff"]["text_sha256"], "edits": [
+            {"paragraph": 1, "before": "Сторож остался у окна, чтобы разглядеть ключ в руке незнакомца.",
+             "after": "Сторож подошёл к окну, потому что увидел в руке незнакомца ключ.",
+             "reason": "Уточнил мотивацию персонажа."}]}
+        revision.run_case(self.case, check, save, second)
+        self.assertEqual(self.case["decision"], "owner_review_pending")
+        self.assertIn("rework_requested_after_exhausted_revisions", self.case["handoff"]["reasons"])
+        self.assertEqual(len(checked), 5)
         self.assertEqual([v["stage"] for v in self.case["versions"]],
-                         ["original", "agent", "agent", "assistant"])
+                         ["original", "agent", "agent", "assistant", "assistant"])
         for before, after in zip(self.case["versions"], self.case["versions"][1:]):
             self.assertEqual(before["text_sha256"], after["before_text_sha256"])
             self.assertEqual(after["report"]["text_sha256"], after["text_sha256"])
