@@ -9,7 +9,6 @@ import hashlib
 import json
 import math
 import random
-import sys
 from collections import defaultdict
 from pathlib import Path
 from urllib.request import urlopen
@@ -36,7 +35,6 @@ MAX_CHARS = 5500
 
 
 def download_json(path):
-    import urllib.parse
     if path not in {p for pair in SOURCE_FILES.values() for p in pair}:
         raise ValueError("Refusing unapproved corpus path")
     url = f"https://raw.githubusercontent.com/{SOURCE_REPO}/{SOURCE_REVISION}/{path}"
@@ -83,12 +81,12 @@ def four_features(data):
     checks = data["checks"]
     r = checks["rubert_v4"]["data"]
     m = checks["modernbert"]["data"]
-    l = checks["lightgbm"]["data"]
+    lightgbm_data = checks["lightgbm"]["data"]
     a = checks["ai_accent_detector"]["data"]
     features = {
         "rubert_v4": r.get("score_percent"),
         "modernbert": 100 * m["probability"],
-        "lightgbm": 100 * l["probability"],
+        "lightgbm": 100 * lightgbm_data["probability"],
         "ai_accent_detector": 100 * a["ai_accent_score"],
     }
     if any(not isinstance(v, (float, int)) or not math.isfinite(v) or v < 0 or v > 100 for v in features.values()):

@@ -6,7 +6,6 @@ of AI authorship or scientific correctness. Hard blockers always override it.
 No files are modified by the decision engine.
 """
 import argparse
-from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -158,11 +157,6 @@ def decide(article, evidence):
             blockers.append("comparison_score_missing")
         else:
             comparison[name] = val
-    if len(comparison) == 2:
-        difference = abs(comparison["modernbert"] - comparison["lightgbm"])
-        disagreement_points = 10 if difference >= 50 else 5 if difference >= 25 else 0
-    else:
-        disagreement_points = 0
     components = {
         "model_a_review_signal": 0,  # handled as separate owner-selected review flag
         "model_disagreement_advisory": 0,  # not independent evidence of AI

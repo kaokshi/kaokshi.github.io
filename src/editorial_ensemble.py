@@ -6,7 +6,6 @@ Training needs provenance-verified labelled HUMAN and AI examples, with
 four *actual* detector results for the same immutable text. No placeholder
 or guessed scores. AI Accent is a style feature, not a probability.
 """
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -195,7 +194,8 @@ def main():
         parser.error("--train and --out are mandatory (no synthetic real-world training)")
     dataset=json.loads(Path(args.train).read_text(encoding="utf-8"))
     data=checked_rows(dataset)
-    output=Path(args.out);output.mkdir(parents=True,exist_ok=True)
+    output=Path(args.out)
+    output.mkdir(parents=True,exist_ok=True)
     report={}
     for channel in sorted(SUPPORTED_GENRES):
         train=[r for r in data if r["channel"]==channel and r.get("split")=="train"]

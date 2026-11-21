@@ -2,7 +2,6 @@
 import json
 from pathlib import Path
 import sys
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -64,7 +63,7 @@ class MovieFactCheckTests(unittest.TestCase):
 
     def test_semantic_ranks_rephrased_evidence_without_claiming_truth(self):
         try:
-            import numpy
+            __import__("numpy")
         except ImportError:
             self.skipTest("numpy is installed only in the isolated movie workflow")
         import movie_semantic as semantic

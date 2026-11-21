@@ -9,14 +9,12 @@ import argparse
 import hashlib
 import json
 import random
-import re
-from datetime import datetime, timezone
 from pathlib import Path
 
 from editorial_ai_check import evaluate
 from editorial_ensemble import wilson
 from editorial_research_train import (
-    SOURCE_FILES, SOURCE_REPO, SOURCE_REVISION, PILOT_ARTICLES,
+    SOURCE_FILES, SOURCE_REPO, PILOT_ARTICLES,
     download_json, extract_pairs, four_features, predict,
     train_research, score_research,
 )

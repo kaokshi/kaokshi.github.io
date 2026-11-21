@@ -5,7 +5,6 @@ import unittest
 from datetime import datetime,timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from unittest.mock import patch
 from xml.etree import ElementTree as ET
 import sys
 ROOT=Path(__file__).resolve().parents[1]

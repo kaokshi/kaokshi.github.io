@@ -72,7 +72,7 @@ def text_style(text):
 
 def _razdel_available():
     try:
-        import razdel
+        __import__("razdel")
         return True
     except ImportError:
         return False

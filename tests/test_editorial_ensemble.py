@@ -1,6 +1,5 @@
 """Synthetic-only unit tests of experimental ensemble: NEVER production validation."""
 import hashlib
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -95,9 +94,9 @@ class EnsembleTests(unittest.TestCase):
         self.assertEqual(r["decision"],"targeted_revision")
         self.assertEqual(r["attempt_next"],1)
     def test_ai_score_alone_never_forces_rewrite(self):
-        for score in (0, 60, 100, None):
+        for candidate_index in (0, 60, 100, None):
             r=route_revision(channel="science",attempt=0,substantive_issues=[],
-                             score_percent=score,validated=False)
+                             score_percent=candidate_index,validated=False)
             self.assertEqual(r["decision"],"quality_cleared_for_other_release_gates")
             self.assertFalse(r["release"])
     def test_after_two_attempts_owner_gets_unresolved_issues(self):

@@ -1,7 +1,5 @@
 """Guard release application and RSS handling; no real publishing."""
-import json
 from pathlib import Path
-from datetime import datetime, timezone
 import sys
 import tempfile
 import unittest
@@ -11,7 +9,6 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 import editorial_auto_route as router
 import editorial_auto_release as release
-import build
 
 class AutoReleaseTests(unittest.TestCase):
     def setUp(self):
