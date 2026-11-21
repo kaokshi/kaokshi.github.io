@@ -42,7 +42,11 @@ jobs:
           filename="Qwen_Qwen3.5-9B-Q4_K_M.gguf"
           info=HfApi().model_info(repo,files_metadata=True)
           sibling=next((x for x in info.siblings if x.rfilename==filename),None)
-          if not sibling or not sibling.lfs:\n              raise SystemExit("Verified Qwen3.5 file metadata unavailable")\n          digest=(sibling.lfs.get("sha256") if isinstance(sibling.lfs,dict)\n                  else getattr(sibling.lfs,"sha256",None))\n          if not digest:
+          if not sibling or not sibling.lfs:
+              raise SystemExit("Verified Qwen3.5 file metadata unavailable")
+          digest=(sibling.lfs.get("sha256") if isinstance(sibling.lfs,dict)
+                  else getattr(sibling.lfs,"sha256",None))
+          if not digest:
               raise SystemExit("Verified Qwen3.5 file metadata unavailable")
           path=hf_hub_download(repo_id=repo,filename=filename,revision=info.sha,
                                local_dir=os.environ["RUNNER_TEMP"]+"/qwen")
