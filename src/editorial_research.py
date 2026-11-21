@@ -93,3 +93,20 @@ def europe_pmc(task, payload, *, open_url=urlopen):
                               "text": content, "scope": scope,
                               "kind": "primary" if primary else "secondary"}
     return {"documents": list(documents.values())}
+
+def topic_sources(seed, research):
+    """Broaden one exhausted constrained search, retaining retrieved texts for the writer."""
+    failures = []
+    for query in (f'TITLE_ABS:"{seed}" AND OPEN_ACCESS:Y', seed):
+        try:
+            rows = research("discover", {"topic": seed, "search_query": query})["documents"]
+        except Pending as exc:
+            failures.append(str(exc))
+            continue
+        terms = seed.casefold().split()
+        related = [row for row in rows if row.get("kind") == "primary" and
+                   all(word in (row["title"] + " " + row["text"]).casefold() for word in terms)]
+        if related:
+            return related
+        failures.append("No matching primary source text")
+    raise Pending("topic_selection_pending", "; ".join(failures))

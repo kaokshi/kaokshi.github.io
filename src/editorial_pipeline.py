@@ -13,7 +13,7 @@ from editorial_agent_v1 import ACTIVE, MAX_AGENT, article_digest
 from editorial_ai_check import CONTENT
 from editorial_factcheck import fact_check, valid_sources
 from editorial_quality import similarity_report
-from editorial_research import europe_pmc
+from editorial_research import europe_pmc, topic_sources
 from editorial_revision import run_case, save_case, save_text
 from editorial_revision_checks import check_draft
 from editorial_semantic import diagnose, revise, resize_article
@@ -307,8 +307,7 @@ def run(args, parser, root):
                         seeds = ("structural coloration", "animal migration", "glacier dynamics",
                                  "forest phenology", "coral fluorescence", "plant biomechanics")
                         seed = seeds[datetime.fromisoformat(day).toordinal() % len(seeds)]
-                        records = research("discover", {"topic": seed, "search_query":
-                            f'TITLE_ABS:"{seed}" AND OPEN_ACCESS:Y'})["documents"]
+                        records = topic_sources(seed, research)
                         if not records:
                             raise Pending("topic_selection_pending", "No source-backed topic candidates")
                         titles = [doc["title"] for doc in records]
