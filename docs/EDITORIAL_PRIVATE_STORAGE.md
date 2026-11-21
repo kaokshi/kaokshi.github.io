@@ -26,3 +26,23 @@ python src/editorial_storage.py restore /srv/zen/recovery --snapshot latest
 При статусе assistant_handoff_pending пакет находится в приватном case.json. В handoff перечислены причины, SHA-256 и редактируемые абзацы. Владелец может передать пакет в разрешённую сессию ChatGPT вручную и сохранить ответ локально. Команда повторного запуска того же дела с `--assistant-response /private/response.json` сверяет поле base_text_sha256 и точный before для каждой адресной правки, затем повторяет проверки. В edits нужны paragraph, before, after, reason. Для отказа передаются decision=no_revision, пустой edits и reason. Отправка пакета, получение ответа и происхождение вручную импортируемого ответа требуют подтверждения оператора.
 
 Подписка ChatGPT и доступ к API имеют отдельный биллинг. Автоматический сетевой транспорт в этом окружении не подключён. До авторизации выбранного транспорта и расходов сохраняется assistant_handoff_pending. [Справка OpenAI об отдельных системах оплаты](https://help.openai.com/en/articles/9039756-billing-settings-in-chatgpt-vs-platform)
+
+## Локальные модели для воспроизводимых проверок
+
+Для текста используется Qwen3-4B-Instruct-2507 в llama.cpp. Имена ZEN_LLM_MODEL и alias на сервере должны совпадать. Последняя проверенная сборка llama.cpp — b12580. Для автора необходимы /apply-template и /completion с json_schema. Сервер применяет собственный шаблон чата, затем грамматика ограничивает каждый генерируемый токен. Заголовки разделов создаёт отдельный запрос. JSON с повторяющимися ключами, служебными строками или неподходящей структурой отклоняется. Первичные попытки и принятый ответ остаются в каталоге дела.
+
+Для парного опыта используйте один topic, документы, модель и seed. Отдельный каталог результатов должен быть новым. Команда пишет ответы и сравнение в приватный каталог, а завершённое сравнение также попадает в SQLite. Она не меняет промпт в продакшене.
+
+```bash
+python src/editorial_writer_trial.py --memory /srv/zen/work --output /srv/zen/trials/run-01 \
+  --channel science --topic "$ZEN_CONTROL_TOPIC" --documents /srv/zen/controls/source-documents.json --seed 47
+```
+
+Совместимый с WebUI CPU-сервер stable-diffusion.cpp использует тот же маршрут /sdapi/v1/txt2img. Испытанная сборка имеет идентификатор 532d2c1. Артефакт Ubuntu 26.04 требует glibc 2.43 и libgomp. Для проверочного запуска выделены два CPU на среду, платный GPU отсутствует. Для этого конкретного теста использована SD 1.5 Q4_0, файл stable-diffusion-v1-5-pruned-emaonly-Q4_0.gguf. Фактический SHA-256 весов — b8944e9fe0b69b36ae1b5bb0185b3a7b8ef14347fe0fa9af6c64c4829022261f. Тестовый совместимый сервер сообщает фиктивный идентификатор 8888… в списке моделей, поэтому происхождение весов проверяют по локальным байтам. Параметр --mmap уменьшает потребность в дополнительной копии весов. Службу следует привязать к loopback.
+
+```bash
+sd-server --model-dir /srv/zen/models -m /srv/zen/models/checkpoints/sd15.gguf \
+  --mmap --vae-tiling --threads 1 --listen-ip 127.0.0.1 --listen-port 7860 --max-pending-jobs 1
+```
+
+Значение ZEN_GENERATOR_RIGHTS должно описывать реальные условия для используемых весов и результата, ZEN_IMAGE_GENERATOR — указывать на адрес локальной службы. Для испытанного файла применяется CreativeML Open RAIL-M. Раздел 6 описывает права на выходные материалы и ответственность пользователя. Для запуска производства требуется отдельно проверить соответствие сцены, комплекта и назначения иллюстрации. [Файл модели](https://huggingface.co/second-state/stable-diffusion-v1-5-GGUF/tree/031b5f5df991f511b3f5fa8fed6d99048ababb69) · [Лицензия](https://huggingface.co/spaces/CompVis/stable-diffusion-license/blob/14d42d09bffd871b1666a084fc954a50cff72ac0/license.txt)

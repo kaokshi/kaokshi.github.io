@@ -165,7 +165,7 @@ def execute(case, directory, provider, research, documents, reviews, response, q
         version = next(v for v in case["versions"] if v["text_sha256"] == digest)
         reviewed = reviews.get(version["text_sha256"])
         identity = getattr(provider, "identity", None)
-        inputs = [identity, reviewed, documents,
+        inputs = ["source-controls-v1", identity, reviewed, documents,
                   getattr(research, "__name__", None), version["text_sha256"]]
         key = sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         reuse = identity is not None and version.get("stage_input_sha256") == key
