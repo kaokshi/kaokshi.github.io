@@ -175,6 +175,16 @@ def run_case(case, check, save, response=None, *, semantic_editor=None):
     while True:
         version = versions[-1]
         article = version["article"]
+        if len(versions) > 1 and not versions[-2].get("report"):
+            previous = versions[-2]
+            prior = check(previous["article"])
+            if (prior.get("text_sha256") != previous["text_sha256"]
+                    or prior.get("automated_checks_completed") is not True):
+                case["decision"] = "checks_pending"
+                save(case)
+                return
+            previous["report"] = prior
+            save(case)
         report = check(article)
         version["report"] = report
         case["decision"] = "checks_pending"

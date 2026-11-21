@@ -1,5 +1,4 @@
 """Persistent, private genre experience and shared topic registry for daily drafting."""
-from collections import Counter
 from contextlib import closing
 from hashlib import sha256
 import json
@@ -123,8 +122,10 @@ REMINDERS = {
     "short_article": ("write", "Разверни пример или сцену до финала, прежде чем проверить длину."),
     "fact_check_pending": ("extract_claims", "Разделяй проверяемые утверждения и привязывай вывод к масштабу первоисточника."),
     "similar_article": ("topics", "Измени завязку или исследовательский вопрос, сверившись с известными работами."),
+    "media_production_pending": ("scene_plan","Проверь доступность генератора и сохрани конкретную сцену для каждой позиции."),
+    "draft_rejected": ("write","Проверяй название, массив абзацев и отдельное поле подписки."),
     "duplicate_image": ("photo_plan", "Выбирай разные кадры и источники, исключая уже принятые изображения."),
-    "cover_selection_pending": ("scene_plan", "Включи сцену, где предмет основной загадки различим в уменьшенном виде."),
+    "cover_selection_pending": ("cover_selection", "Сверь миниатюру и независимое обоснование по видимому объекту. Включи сцену, где предмет основной загадки различим в уменьшенном виде."),
     "section_headings_invalid": ("section_plan", "Сгруппируй соседние смысловые абзацы и озаглавь каждую группу."),
 }
 
@@ -136,3 +137,66 @@ def recalled_provider(root, channel, provider):
         return provider(task, {**payload, "genre_experience":cues} if cues else payload)
     invoke.identity = getattr(provider, "identity", None)
     return invoke
+
+
+def evaluate_field_reminder(root, channel, provider):
+    """Blind, paired micro-task on unseen inputs; tests recognition, not article quality."""
+    controls = (
+        (["Сторож закрыл дверь.", "start:3", "На часах было три."], [2]),
+        (["cta", "В заявке написали слово start.", "heading: Окно"], [1,3]),
+        (["Вера произнесла: «Начали!»", "Канал называется «Старт»."], []),
+    )
+    if not any(r["observed"]=="writer_field_in_prose" for r in experience(root,channel)):
+        return {"status":"no_matched_experience"}
+    results = []
+    reminder = REMINDERS["writer_field_in_prose"][1]
+    with closing(connect(root)) as db:
+        seen = [v[0] for v in db.execute("SELECT data FROM versions")]
+    for lines, expected in controls:
+        if any(all(line in text for line in lines) for text in seen):
+            raise ValueError("Control appeared in editorial memory")
+        pair = {}
+        for variant in ("baseline","candidate"):
+            instruction = "Укажи номера служебных строк от 1. Сохрани художественный текст."
+            if variant == "candidate":
+                instruction += " " + reminder
+            reply = provider("field_review", {"lines":lines,"instruction":instruction})
+            actual = reply["positions"]
+            if any(type(n) is not int or not 1<=n<=len(lines) for n in actual):
+                raise ValueError("Control response contains an invalid position")
+            pair[variant] = {"positions":actual,"errors":len(set(expected)^set(actual))}
+        results.append({"input":lines,"expected":expected,**pair})
+    improved = (any(r["candidate"]["errors"]<r["baseline"]["errors"] for r in results)
+                and all(r["candidate"]["errors"]<=r["baseline"]["errors"] for r in results))
+    result = {"status":"completed","channel":channel,"model":getattr(provider,"identity",None),
+              "controls":results,"improvement_demonstrated":improved,"activated":False,
+              "rollback":"No deployment. Remove this retrieval cue by reverting its versioned rule."}
+    from editorial_revision import save_case
+    save_case(root/f"field-reminder-{channel}.json",result)
+    return result
+
+
+def historical_drafts(root):
+    with closing(connect(root)) as db:
+        return [json.loads(row[0])["article"] for row in db.execute("SELECT data FROM versions")]
+
+
+def remember_failure(root, slug, channel, status, reason, raw=None):
+    data = json.dumps({"status":status,"reason":reason,"response":raw},sort_keys=True,ensure_ascii=False)
+    key = sha256(data.encode()).hexdigest()
+    with closing(connect(root)) as db, db:
+        db.execute("CREATE TABLE IF NOT EXISTS failures(slug TEXT,digest TEXT,channel TEXT,data TEXT,"
+                   "PRIMARY KEY(slug,digest))")
+        db.execute("INSERT OR IGNORE INTO failures VALUES(?,?,?,?)",(slug,key,channel,data))
+        db.execute("INSERT OR IGNORE INTO observations VALUES(?,?,?,?)",(slug,key,channel,status))
+
+
+def proposal_report(root, channel):
+    roles = {"topics":"выбор тем","write":"автор","section_plan":"редактор","extract_claims":"фактчекинг",
+             "scene_plan":"иллюстратор","photo_plan":"фоторедактор","cover_selection":"обложка"}
+    proposals = []
+    for row in experience(root,channel):
+        if row["observed"] in REMINDERS:
+            task, instruction = REMINDERS[row["observed"]]
+            proposals.append({**row,"role":roles[task],"proposal":instruction,"state":"requires_holdout"})
+    return proposals

@@ -75,6 +75,8 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
         with (root / ".catalog-lock").open("a") as catalog:
             flock(catalog, LOCK_EX)
             peers = [load(path)["versions"][-1]["article"] for path in root.glob("*/case.json")]
+            from editorial_memory import historical_drafts
+            peers.extend(historical_drafts(root))
             if (topic_key(article["title"]) in {topic_key(peer["title"]) for peer in peers}
                     or similarity_report(originals, candidate=article, drafts=peers)):
                 raise ValueError("Generated draft resembles an article already in the editorial corpus")
@@ -113,7 +115,8 @@ def execute(case, directory, provider, research, documents, reviews, response, q
         save_case(path, data)
 
     def check(article):
-        version = case["versions"][-1]
+        digest = article_digest(article)
+        version = next(v for v in case["versions"] if v["text_sha256"] == digest)
         reviewed = reviews.get(version["text_sha256"])
         identity = getattr(provider, "identity", None)
         inputs = [identity, reviewed, documents,
@@ -234,7 +237,7 @@ def main():
         response = load(args.assistant_response)
         root = private_path(args.output)
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        from editorial_memory import choose_topic, recalled_provider, image_conflicts, remember
+        from editorial_memory import choose_topic, recalled_provider, image_conflicts, remember, remember_failure
         provider = recalled_provider(root, args.channel, provider)
         from datetime import datetime
         from zoneinfo import ZoneInfo
@@ -288,6 +291,8 @@ def main():
                 print(json.dumps({"status": exc.status, "directory": str(directory)}))
                 raise SystemExit(2) from exc
             except (ValueError, TypeError, KeyError) as exc:
+                raw_path = directory / "writer-response.json"
+                remember_failure(root, slug, args.channel, "draft_rejected", str(exc), load(raw_path) if raw_path.exists() else None)
                 save_case(directory / "writer-status.json", {"status": "draft_rejected", "reason": str(exc)})
                 raise
             if args.topic:
@@ -342,6 +347,7 @@ def main():
                     assembled = cover_selection(load(directory / "draft.json"), load(manifest_path), args.asset_root,
                                                 review=load(args.cover_review), checkpoint=lambda result: save_case(selection_path, result))
                 except (OSError, KeyError, ValueError, TypeError, ProviderFailure) as exc:
+                    remember_failure(root, slug, args.channel, "cover_selection_pending", str(exc))
                     save_case(selection_path, {**load(selection_path), "status": "cover_selection_pending",
                                                "reason": str(exc)})
                     parser.exit(2, f"cover_selection_pending: {exc}\n")
