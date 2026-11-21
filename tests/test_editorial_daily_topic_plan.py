@@ -42,6 +42,28 @@ def proposals(channel, start=0, count=3):
 
 
 class TopicPlanTests(unittest.TestCase):
+    def test_one_per_channel_pilot_needs_only_three_topics(self):
+        calls=[]
+        def provider(task,payload):
+            calls.append((payload["channel"],payload["needed"]))
+            return proposals(payload["channel"],count=1)
+        with TemporaryDirectory() as tmp:
+            plan=create_plan("2026-11-22",Path(tmp),provider,per_channel=1)
+        self.assertEqual(len(plan["tasks"]),3)
+        self.assertEqual(plan["per_channel"],1)
+        self.assertEqual(calls,[("legends",1),("science",1),("cinema",1)])
+        self.assertEqual(len({row["channel"] for row in plan["tasks"]}),3)
+        self.assertFalse(plan["publication_authorized"])
+
+    def test_pilot_still_rejects_bad_science_query(self):
+        def provider(task,payload):
+            if payload["channel"]=="science":
+                return {"tasks":[{"topic":"Научный эксперимент над живым океаном","research_query":""}]}
+            return proposals(payload["channel"],count=1)
+        with TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError,"planner_channel_incomplete:science:0/1"):
+                create_plan("2026-11-22",Path(tmp),provider,per_channel=1)
+
     def test_three_independent_provider_calls_no_owner_topics(self):
         calls=[]
         def provider(task,payload):
