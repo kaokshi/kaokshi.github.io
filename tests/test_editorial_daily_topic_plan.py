@@ -10,17 +10,35 @@ from editorial_nine_draft_queue import validate_plan
 
 
 def proposals(channel, start=0, count=3):
-    if channel == "cinema":
-        rows=[{"topic": f"«Тестовая картина номер {i}» (2020) — обзор без спойлеров",
-               "research_query": ""} for i in range(start,start+count)]
-    elif channel == "science":
-        rows=[{"topic": f"Необычный научный эксперимент об океане {i}",
-               "research_query": f"ocean experimental primary study {i}"}
-              for i in range(start,start+count)]
-    else:
-        rows=[{"topic": f"Тайна городской станции с фонарём номер {i}",
-               "research_query": ""} for i in range(start,start+count)]
-    return {"tasks": rows}
+    topics = {
+        "legends": [
+            "Сторож услышал стук в пустом аквариуме музея",
+            "Шофёр обнаружил в старом гараже письмо с будущей датой",
+            "Кондитер нашёл потайную комнату за холодильником",
+            "На вокзале появился человек с чужим билетом",
+            "В подземном тоннеле отключился последний фонарь",
+        ],
+        "science": [
+            "Как колибри экономят энергию во время холодных ночей",
+            "Зачем глубоководным рыбам прозрачные ткани тела",
+            "Каким образом грибы очищают загрязнённую почву",
+            "Почему некоторые пауки способны планировать на ветру",
+            "Как растения обнаруживают повреждение соседних листьев",
+        ],
+        "cinema": [
+            "«Матрица» (1999) — пересказ со спойлерами",
+            "«Контакт» (1997) — обзор без спойлеров",
+            "«Марсианин» (2015) — обзор без спойлеров",
+            "«Гравитация» (2013) — пересказ со спойлерами",
+            "«Аватар» (2009) — обзор без спойлеров",
+        ],
+    }
+    return {"tasks": [
+        {"topic": topic, "research_query":
+          f"primary peer reviewed research {i} animal physiology"
+          if channel == "science" else ""}
+        for i, topic in enumerate(topics[channel][start:start+count], start)
+    ]}
 
 
 class TopicPlanTests(unittest.TestCase):
@@ -67,9 +85,9 @@ class TopicPlanTests(unittest.TestCase):
             calls+=1
             if calls==1:
                 return {"tasks":[
-                    {"topic":"Тайна городской станции с фонарём номер 0",
+                    {"topic":"Сторож услышал стук в пустом аквариуме музея",
                      "research_query":""},
-                    {"topic":"Тайна городской станции с фонарём номер 0",
+                    {"topic":"Сторож услышал стук в пустом аквариуме музея",
                      "research_query":""},
                     {"topic":"Коротко","research_query":""}
                 ]}
@@ -83,7 +101,7 @@ class TopicPlanTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             archive=Path(tmp)/"nine-topics-2026-11-21.json"
             archive.write_text(json.dumps({"tasks":[
-                {"topic":"Тайна городской станции с фонарём номер 0"}]}),
+                {"topic":"Сторож услышал стук в пустом аквариуме музея"}]}),
                 encoding="utf-8")
             def provider(task,payload):
                 if payload["channel"]=="legends":
