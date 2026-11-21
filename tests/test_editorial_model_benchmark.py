@@ -10,7 +10,7 @@ from compare_editorial_models import TASKS, MODEL_IDS, metrics, run, generate
 class BenchmarkTests(unittest.TestCase):
     def test_all_models_receive_same_three_channel_briefs(self):
         self.assertEqual(set(TASKS),{"legends","science","cinema"})
-        self.assertEqual(set(MODEL_IDS),{"gemini","groq","qwen"})
+        self.assertEqual(set(MODEL_IDS),{"gemini","groq","qwen","hybrid"})
         self.assertEqual(len(set(t["title"] for t in TASKS.values())),3)
 
     def test_cloud_without_secret_is_blocked_not_fake_result(self):
@@ -39,6 +39,37 @@ class BenchmarkTests(unittest.TestCase):
             self.assertTrue(all(not row["human_quality_review_completed"]
                                 for row in result["channels"]))
         self.assertEqual(len(calls),3)
+
+    def test_hybrid_requires_both_secrets_before_any_generation(self):
+        with TemporaryDirectory() as tmp:
+            for credentials in ({}, {"GEMINI_API_KEY":"test"},
+                                {"GROQ_API_KEY":"test"}):
+                def never_run(*args, **kwargs):
+                    raise AssertionError("no generation without both keys")
+                result=run("hybrid",Path(tmp)/str(len(credentials)),
+                           generator=never_run,env=credentials)
+                self.assertEqual(result["status"],"blocked_missing_secret")
+                self.assertEqual(result["generated"],0)
+
+    def test_hybrid_calls_gemini_first_then_groq_editor_for_each_channel(self):
+        mock_body=("Заголовок\\n"+
+                  "\\n".join("**Раздел текста**\\n"+("Это проверочный абзац. "*80)
+                            for _ in range(5))+
+                  "\\nПодписывайтесь на канал.")
+        order=[]
+        def generator(backend,prompt,env):
+            order.append(backend)
+            if backend=="groq":
+                self.assertIn("Черновик Gemini",prompt)
+            return mock_body,{"total_tokens":45}
+        with TemporaryDirectory() as tmp:
+            result=run("hybrid",Path(tmp),generator=generator,
+                       env={"GEMINI_API_KEY":"test","GROQ_API_KEY":"test"})
+            self.assertEqual(result["generated"],3)
+            self.assertEqual(order,["gemini","groq"]*3)
+            self.assertTrue(all(x["workflow"]=="gemini_draft_then_groq_editor"
+                                for x in result["channels"]))
+            self.assertFalse(result["publication_authorized"])
 
     def test_header_and_length_metrics_are_mechanical_only(self):
         result=metrics("**Раздел**\nЗдравствуйте!\nПодписывайтесь.",0.3)
