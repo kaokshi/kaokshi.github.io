@@ -1,0 +1,33 @@
+name: Zen Groq safe API diagnosis
+on:
+  pull_request:
+    paths:
+      - 'research/diagnose_groq_api.py'
+      - 'tests/test_groq_safe_diagnostic.py'
+      - '.github/workflows/editorial-groq-api-diagnostic.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  groq-diagnosis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate secret-safe diagnostics offline
+        run: python -m unittest discover -s tests -p test_groq_safe_diagnostic.py -v
+      - name: Query Groq list-models with protected authorization
+        run: python research/diagnose_groq_api.py
+      - name: Upload only allowlisted summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: groq-403-safe-diagnostic
+          path: ${{ runner.temp }}/groq-safe-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 7
