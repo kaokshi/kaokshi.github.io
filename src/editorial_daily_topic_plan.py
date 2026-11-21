@@ -81,11 +81,11 @@ def create_plan(day,workspace,provider):
             validate_plan(plan)
             prior={topic_key(t) for t in archive}
             if any(topic_key(x["topic"]) in prior for x in tasks):
-                raise ValueError("previous_topic_exact_repeat")
+                raise ValueError("topic repeats previous draft")
             for item in tasks:
                 issue=topic_duplicate_reason(item["channel"],item["topic"],archive)
                 if issue:
-                    raise ValueError("previous_topic_semantic_repeat: "+issue)
+                    raise ValueError("topic repeats previous draft: "+issue)
             return plan
         except (ValueError,KeyError,TypeError) as exc:
             last_error = type(exc).__name__ + ":" + str(exc)[:100]
