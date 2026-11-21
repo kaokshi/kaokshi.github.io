@@ -52,7 +52,30 @@ def new_case(root, directory, existing, channel, topic, provider, *, documents=(
             if (inputs[0] is not None and saved.get("input_sha256") == key
                     and status.get("status") != "draft_rejected"):
                 return saved["response"]
-            reply = provider(task, payload)
+            if task == "write":
+                from editorial_writer import validate_prose_reply
+                attempts_path = directory / "writer-attempts.json"
+                attempts = load(attempts_path) if attempts_path.exists() else []
+                while len(attempts) < 2:
+                    attempt = {"number": len(attempts) + 1, "input_sha256": key, "status": "started"}
+                    attempts.append(attempt)
+                    save_case(attempts_path, attempts)
+                    try:
+                        reply = provider(task, dict(payload, single_attempt=True))
+                        save_case(directory / f"writer-raw-{len(attempts)}.json", reply)
+                        validate_prose_reply(reply)
+                    except (ValueError, Pending) as exc:
+                        attempt.update(status="rejected", reason=str(exc))
+                        save_case(attempts_path, attempts)
+                        continue
+                    attempt["status"] = "accepted"
+                    save_case(response_path, {"input_sha256": key, "response": reply})
+                    save_case(attempts_path, attempts)
+                    break
+                else:
+                    raise Pending("writer_contract_pending", "Writer attempts exhausted; see writer-attempts.json")
+            else:
+                reply = provider(task, payload)
             if task == "write":
                 from editorial_memory import writer_experience_report
                 report = writer_experience_report(root, channel, getattr(provider, "last_reminders", []), reply)

@@ -57,3 +57,28 @@ class PersistentExperience(unittest.TestCase):
             self.assertEqual(report["prior_observations"][0]["text_sha256"], article_digest(article))
             self.assertEqual(report["field_lines"], 1)
             self.assertFalse(report["prompt_deployed"])
+
+    def test_prose_gate_rejects_realistic_field_streams_and_allows_dialogue(self):
+        from editorial_writer import validate_prose_reply
+        base = {"title": "Станция", "paragraphs": ["Вера вошла.", "На столе лежал ключ.", "Она ждала."], "cta": "Подпишитесь."}
+        validate_prose_reply(base)
+        for field in ("start 1", "heading: Поезд", "cta", "История.\nheading: Поезд"):
+            with self.assertRaises(ValueError):
+                validate_prose_reply(dict(base, paragraphs=[*base["paragraphs"], field]))
+        validate_prose_reply(dict(base, paragraphs=[*base["paragraphs"], "На кнопке написано start."]))
+
+    def test_writer_budget_is_durable_after_invalid_json_structure(self):
+        from editorial_pipeline import new_case
+        from editorial_writer import Pending
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            case_dir = root / "legends-test"
+            case_dir.mkdir()
+            calls = []
+            def invalid(task, request):
+                calls.append(task)
+                return {"title": "title", "paragraphs": ["start 1", "Пора.", "Тихо."], "cta": "cta"}
+            for _ in range(2):
+                with self.assertRaises(Pending):
+                    new_case(root, case_dir, None, "legends", "Задание", invalid)
+            self.assertEqual(calls, ["write", "write"])

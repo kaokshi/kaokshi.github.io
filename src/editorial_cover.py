@@ -64,19 +64,22 @@ def vision(article, image):
     if os.environ.get("ZEN_VISION_BACKEND") == "llama.cpp":
         properties = {k: {"type": "integer", "enum": list(range(6))} for k in CRITERIA}
         schema = obj(**properties, defect={"type": "string", "enum": [
-            "none", "watermark", "text", "misleading", "blur", "spoiler", "artifact"]}, reason=STRING)
+            "none", "watermark", "text", "misleading", "blur", "spoiler", "artifact"]}, reason={**STRING, "maxLength": 210})
         prompt = ("Rate the photograph or scene illustration for the lead image of an online article. The second view is a center crop of the same picture. No printed title or lettering is expected. Judge crop by subject visibility. Legitimate scale bars on microscopy are allowed. Give a score from 0 (poor) to 5 (excellent) "
                   "for each criterion. Identify any disqualifying defect; choose none if absent. "
-                  "Name a concrete object you can see, describe how it relates to the subject, and why the crop works or fails. Article: " + article["title"] + ". " +
+                  "In one short sentence identify the visible subject, its relevance, and the crop. A mismatch between pixels and caption disqualifies the image. Article: " + article["title"] + ". " +
                   " ".join(s[0][0].text for s in parse_sections(article["body_html"])) +
                   " Caption to verify against the pixels: " + article.get("candidate_caption", ""))
         content = [{"type": "text", "text": prompt}, *[
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + item}} for item in images]]
         response = read_json_response(endpoint, "/v1/chat/completions",
-            {"model": model, "temperature": 0, "max_tokens": 240,
+            {"model": model, "temperature": 0, "max_tokens": 360,
              "messages": [{"role": "user", "content": content}],
              "response_format": {"type": "json_schema", "schema": schema}}, request_timeout())
-        rating = json.loads(response["choices"][0]["message"]["content"])
+        choice = response["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise ValueError("Incomplete visual assessment at token limit")
+        rating = json.loads(choice["message"]["content"])
         if rating["defect"] == "none":
             rating["defect"] = ""
         return rating

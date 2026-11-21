@@ -288,7 +288,7 @@ class LocalLlmTests(unittest.TestCase):
             self.assertEqual(endpoint.hostname, "127.0.0.1")
             self.assertEqual(payload["response_format"]["type"], "json_schema")
             return {"choices": [{"message": {"content": json.dumps(
-                {} if len(calls) == 1 else {"title": "Тест", "sections": [], "paragraphs": ["Абзац"], "cta": "Подписаться"}
+                {} if len(calls) == 1 else {"title": "Тест", "paragraphs": ["Один", "Два", "Три"], "cta": "Подписаться"}
             )}, "finish_reason": "stop"}]}
 
         result = complete(request, env={"ZEN_LLM_MODEL": "test"}, send=send)
