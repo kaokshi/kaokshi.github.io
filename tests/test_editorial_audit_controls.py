@@ -76,6 +76,16 @@ class Controls(unittest.TestCase):
             with self.assertRaises(VisionPending):
                 parse_review(raw, b"a", b"b")
 
+    def test_shared_scene_cards_follow_only_visible_characters(self):
+        from editorial_media import attach_scene_cards, continuity_prompt
+        cards = [{"key":"hero","description":"woman in green coat"}]
+        scenes = [{"prompt":"opens door","continuity_refs":["hero"]},{"prompt":"empty room","continuity_refs":[]}]
+        filled = attach_scene_cards(scenes,cards)
+        self.assertIn("green coat", continuity_prompt(filled[0]))
+        self.assertNotIn("green coat", continuity_prompt(filled[1]))
+        with self.assertRaises(ValueError):
+            attach_scene_cards([{"continuity_refs":["unseen"]}],cards)
+
     def test_square_original_stays_out_of_draft(self):
         original = encoded(Image.new("RGB", (512,512)))
         with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"ZEN_IMAGE_PROVIDER":"cloudflare"}), patch(

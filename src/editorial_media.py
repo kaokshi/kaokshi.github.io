@@ -79,6 +79,33 @@ def save_image(root, channel, identifier, data, credit, caption):
             "sha256": digest, "rights_verified": True, "adaptation": "JPEG; масштабирование"}
 
 
+def continuity_prompt(row):
+    details = row.get("continuity", [])
+    if not isinstance(details, list) or len(details) > 3 or any(
+            not isinstance(x, str) or not x.strip() or len(x) > 150 for x in details):
+        raise ValueError("Invalid character or location card")
+    return row["prompt"] + ("\nPreserve these visible details: " + "; ".join(details) if details else "")
+
+
+def attach_scene_cards(rows, cards):
+    by_key = {}
+    if not isinstance(cards, list) or len(cards) > 6:
+        raise ValueError("Invalid story continuity cards")
+    for card in cards:
+        key = card["key"]
+        detail = card["description"]
+        if not isinstance(key, str) or not key.strip() or key in by_key or not isinstance(detail, str) or not 1 <= len(detail.strip()) <= 150:
+            raise ValueError("Invalid or repeated continuity card")
+        by_key[key] = detail
+    result = []
+    for row in rows:
+        refs = row.get("continuity_refs", [])
+        if not isinstance(refs, list) or len(refs) > 3 or any(not isinstance(k, str) or k not in by_key for k in refs):
+            raise ValueError("Unknown or excessive scene references")
+        result.append(dict(row, continuity=[by_key[k] for k in refs]))
+    return result
+
+
 def plan_images(article, provider, *, query=None, rights_basis=None, exclude=()):
     from editorial_length import extract_text
     from editorial_layout import parse_sections
@@ -91,7 +118,8 @@ def plan_images(article, provider, *, query=None, rights_basis=None, exclude=())
         task = "scene_plan"
         inputs["instruction"] = ("Выбери семь разных конкретных сцен из рассказа. Для каждой дай "
                                  "caption на русском и самостоятельный prompt для генерации оригинальной "
-                                 "иллюстрации. Сохрани героев, место и время; избегай надписей и спойлеров.")
+                                 "иллюстрации. В cards дай краткие постоянные признаки повторяющихся героев и мест из текста. "
+                                 "В continuity_refs каждой сцены укажи ключи только видимых в ней героев и мест. Избегай надписей и спойлеров.")
     else:
         if not query or not query.strip():
             query = provider("photo_query", {**inputs, "instruction": "Give a concise English Wikimedia Commons search query for documentary photographs of this subject."})["query"]
@@ -121,7 +149,10 @@ def plan_images(article, provider, *, query=None, rights_basis=None, exclude=())
                       f"Доступны точные контракты схем: 2D «{INNER_PLANETS}» и 3D «{MOON_PHASES}». "
                       "Выбирай их только при прямом соответствии разделу.")
     inputs["instruction"] += " Укажи для каждого изображения номер подходящего смыслового раздела section, начиная с 1."
-    rows = provider(task, inputs)["images"]
+    response = provider(task, inputs)
+    rows = response["images"]
+    if task == "scene_plan":
+        rows = attach_scene_cards(rows, response.get("cards", []))
     if len(rows) not in (7, 8):
         raise ValueError("Model did not select seven or eight images")
     count = len(sections)
@@ -215,7 +246,7 @@ def produce_one(channel, row, root, endpoint):
                 raise Pending("media_production_pending", str(exc)) from None
         elif image_provider == "sd-webui":
             # SD WebUI returns base64; send only to an explicitly configured loopback service.
-            payload = {"prompt": row["prompt"], **generation_settings(),
+            payload = {"prompt": continuity_prompt(row), **generation_settings(),
                        "negative_prompt": "watermark, caption, text, collage", "batch_size": 1}
             req = Request(local_endpoint(endpoint).geturl().rstrip("/") + "/sdapi/v1/txt2img",
                           data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
@@ -226,7 +257,7 @@ def produce_one(channel, row, root, endpoint):
             result = json.loads(raw)
             data = base64.b64decode(result["images"][0], validate=True)
             credit = {"source": "Local Stable Diffusion WebUI", "artist": "ИИ-иллюстрация",
-                      "generation": json.loads(result["info"]), "prompt": row["prompt"],
+                      "generation": json.loads(result["info"]), "prompt": payload["prompt"],
                       "license": row["rights_basis"]}
         else:
             raise ValueError("Unsupported image provider; Modal is disabled pending billing controls")

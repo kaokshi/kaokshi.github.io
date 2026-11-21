@@ -76,7 +76,8 @@ def style_anchor(root, digest):
 
 def prepare_scene(row, root):
     root = private_path(root)
-    prompt = scene_prompt(row["prompt"])
+    from editorial_media import continuity_prompt
+    prompt = scene_prompt(continuity_prompt(row))
     contract = row.get("scene_contract")
     edit = os.environ.get("ZEN_IMAGE_FINAL_KLEIN", "false").lower() == "true" and contract is not None
     edit_prompt = None

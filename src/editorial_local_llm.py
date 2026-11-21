@@ -39,7 +39,10 @@ SCHEMAS = {
     "write": ARTICLE,
     "article_layout": obj(sections={**SECTIONS, "minItems": 2, "maxItems": 4},
                           cta={**STRING, "minLength": 1, "maxLength": 260}),
-    "scene_plan": obj(images=array(obj(caption=STRING, prompt=STRING, section=INTEGER))),
+    "scene_plan": obj(cards={**array(obj(key={**STRING, "maxLength": 32},
+                                         description={**STRING, "maxLength": 150})), "maxItems": 6},
+                      images=array(obj(caption=STRING, prompt=STRING, section=INTEGER,
+                                       continuity_refs={**array(STRING), "maxItems": 3}))),
     "photo_plan": obj(images=array({"anyOf": [
         obj(caption=STRING, pageid=INTEGER, section=INTEGER, media_type={"type": "string", "enum": ["documentary_photo"]}),
         obj(caption=STRING, section=INTEGER, media_type={"type": "string", "enum": ["explanatory_2d", "explanatory_3d", "animation"]},
