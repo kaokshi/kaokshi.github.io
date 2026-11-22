@@ -27,7 +27,7 @@ jobs:
           python -m pip install -q huggingface_hub
           python - <<'PY'
           from huggingface_hub import hf_hub_download
-          p=hf_hub_download(repo_id='bartowski/Qwen_Qwen3.5-4B-GGUF',filename='Qwen_Qwen3.5-4B-Q4_K_M.gguf',local_dir='/tmp/qwen-model')
+          p=hf_hub_download(repo_id='bartowski/Qwen_Qwen3.5-4B-GGUF',filename='Qwen3.5-4B-Q4_K_M.gguf',local_dir='/tmp/qwen-model')
           print('MODEL_PATH='+p)
           PY
       - name: Test all three editorial roles and collect measurements
@@ -35,7 +35,7 @@ jobs:
           mkdir -p benchmark
           python - <<'PY'
           import subprocess,time,pathlib,json,re
-          model='/tmp/qwen-model/Qwen_Qwen3.5-4B-Q4_K_M.gguf'
+          model='/tmp/qwen-model/Qwen3.5-4B-Q4_K_M.gguf'
           cli='/tmp/llama.cpp/build/bin/llama-cli'
           tasks=[
             ('legends','Напиши начало оригинальной мистической истории на естественном русском языке. Место: ночная трамвайная остановка, где каждую ночь появляется чужая фотография. 2 абзаца, без штампов, с живыми деталями, не менее 500 русских символов.'),
