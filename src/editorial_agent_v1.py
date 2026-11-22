@@ -14,9 +14,10 @@ from editorial_ai_check import extract_text
 
 MODEL_A = ("modernbert", "lightgbm", "transformer")
 THRESHOLD = 80.0
-ACTIVE = ("legends", "science")
-ESCALATION = json.loads((Path(__file__).resolve().parents[1] / "config" /
-                         "ai_revision_policy.json").read_text(encoding="utf-8"))["editorial_escalation"]
+POLICY = json.loads((Path(__file__).resolve().parents[1] / "config" /
+                     "ai_revision_policy.json").read_text(encoding="utf-8"))
+ACTIVE = tuple(POLICY["current_channels"])
+ESCALATION = POLICY["editorial_escalation"]
 MAX_AGENT = ESCALATION["agent_revision_limit"]
 MAX_ASSISTANT = ESCALATION["assistant_revision_limit"]
 

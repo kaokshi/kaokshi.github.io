@@ -92,7 +92,7 @@ class Article:
 
     def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None):
         if tokens is None:
-            tokens = 4800 if provider == "groq" else 7800
+            tokens = 3700 if provider == "groq" else 7800
 
         def execute(task):
             seen = self.memory.response(task)
@@ -101,6 +101,9 @@ class Article:
             try:
                 return self.memory.call(task, self.id, provider, lambda: text_call(provider, prompt, tokens))
             except ProviderError as exc:
+                if str(exc) == "http_429_groq_request_exceeds_token_window" and tokens > 2700:
+                    return self.memory.call(task, self.id, provider,
+                                            lambda: text_call(provider, prompt, max(2600, tokens * 2 // 3)))
                 if exc.retry_after is None or self.memory.time_left() < exc.retry_after + 125:
                     raise
                 return self.memory.call(task, self.id, provider, lambda: text_call(provider, prompt, tokens))
@@ -251,7 +254,7 @@ class Article:
             for provider in ("groq", "openrouter"):
                 try:
                     return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
-                                      metadata={"text_sha256": sha}, tokens=4300 if provider == "groq" else 8300)
+                                      metadata={"text_sha256": sha}, tokens=2900 if provider == "groq" else 8300)
                 except Blocked as exc:
                     last_error = exc
                     if provider == "openrouter" and str(exc) == "empty_visible_content":

@@ -3,7 +3,8 @@ from collections import Counter
 from pathlib import Path
 import re
 
-from .editorial_memory import read_json
+from .editorial_memory import digest, read_json
+from .editorial_review import canonical, parse_article, structural_checks
 
 CATEGORIES = {
     "missing_cta": "Before submitting, compare the last paragraph with the original and preserve a natural channel-specific subscription CTA.",
@@ -66,8 +67,36 @@ def evaluate_cases(rows, minimum):
 
 
 def learn(root: Path, minimum):
-    feedback = [read_json(path) for path in (root / "feedback").glob("*.json")]
-    return evaluate_cases(feedback, minimum)
+    feedback = []
+    invalid = 0
+    for path in sorted((root / "feedback").glob("*.json")):
+        try:
+            row = read_json(path)
+            if not valid(row):
+                invalid += 1
+                continue
+            if row["partition"] == "holdout":
+                evidence = {}
+                for version in ("baseline", "candidate"):
+                    item = (root / row[f"{version}_file"]).resolve()
+                    if item.is_relative_to(root.resolve()) and item.suffix == ".md" and item.is_file():
+                        article = parse_article(item.read_text(encoding="utf-8"))
+                        if digest(canonical(article)) == row[f"{version}_sha256"]:
+                            evidence[version] = structural_checks(article, [])["issues"]
+                if set(evidence) != {"baseline", "candidate"}:
+                    invalid += 1
+                    continue
+                if row["issue"] != "unsupported_claim":
+                    known = {version: {item.partition(":")[0] for item in issues}
+                             for version, issues in evidence.items()}
+                    row["baseline_resolved"] = row["issue"] not in known["baseline"]
+                    row["candidate_resolved"] = row["issue"] not in known["candidate"]
+                    row["regression"] = row.get("regression") is True or bool(
+                        known["candidate"] - known["baseline"])
+            feedback.append(row)
+        except (OSError, ValueError, KeyError, TypeError):
+            invalid += 1
+    return {**evaluate_cases(feedback, minimum), "invalid_or_unavailable_cases": invalid}
 
 
 def propose_pull_requests(result, token):

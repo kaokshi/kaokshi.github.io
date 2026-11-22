@@ -39,7 +39,36 @@ def check_url(url, domains):
         raise ProviderError("url_outside_allowed_sources", stop=True)
 
 
-def request(url, domains, *, data=None, headers=None, timeout=25, limit=12_000_000):
+def groq_throttle(error):
+    try:
+        raw = json.loads(error.read(4500))
+        detail = ((raw.get("error") or {}).get("message") or "").casefold()
+        header = error.headers.get("retry-after", "")
+    except (ValueError, AttributeError, OSError, TypeError):
+        return ProviderError("http_429_groq_unclassified", stop=True)
+    if ("per day" in detail or "daily" in detail
+            or error.headers.get("x-ratelimit-remaining-requests") == "0"):
+        return ProviderError("http_429_groq_daily_quota", stop=True)
+    limit = re.search(r"limit[ :]+([0-9,]+)", detail)
+    requested = re.search(r"requested[ :]+([0-9,]+)", detail)
+    number = lambda match: int(match[1].replace(",", "")) if match else None
+    minute = any(marker in detail for marker in ("per minute", "tpm", "rpm"))
+    if ("request too large" in detail or
+            (minute and limit and requested and number(requested) > number(limit))):
+        return ProviderError("http_429_groq_request_exceeds_token_window")
+    if minute:
+        message_delay = re.search(r"try again in (\d+(?:\.\d+)?)s", detail)
+        try:
+            delay = float(header or (message_delay[1] if message_delay else 62))
+        except ValueError:
+            delay = 62
+        if 0 < delay <= 75:
+            return ProviderError("http_429_groq_minute_rate_limit", retry_after=delay + 1)
+    return ProviderError("http_429_groq_unclassified", stop=True)
+
+
+def request(url, domains, *, data=None, headers=None, timeout=25, limit=12_000_000,
+            with_headers=False):
     check_url(url, domains)
 
     class RestrictedRedirect(HTTPRedirectHandler):
@@ -55,18 +84,10 @@ def request(url, domains, *, data=None, headers=None, timeout=25, limit=12_000_0
             body = response.read(limit + 1)
             if len(body) > limit:
                 raise ProviderError("oversize_response")
-            return body
+            return (body, response.headers) if with_headers else body
     except HTTPError as exc:
         if exc.code == 429 and domains == ("api.groq.com",):
-            try:
-                detail = (json.loads(exc.read(4500)).get("error") or {}).get("message", "").casefold()
-                delay = float(exc.headers.get("retry-after", "0"))
-                if (any(marker in detail for marker in ("per minute", "tpm", "rpm"))
-                        and exc.headers.get("x-ratelimit-remaining-requests") != "0"
-                        and 0 < delay <= 70):
-                    raise ProviderError("http_429_minute_rate_limit", retry_after=delay + 1) from None
-            except (ValueError, AttributeError, OSError):
-                pass
+            raise groq_throttle(exc) from None
         codes = {401: "authorization", 402: "payment_required", 403: "forbidden",
                  429: "quota_or_rate_limit"}
         raise ProviderError(f"http_{exc.code}_{codes.get(exc.code, 'request_failed')}",
@@ -120,24 +141,31 @@ class GroqPacer:
         self.lock = Lock()
         self.next_at = 0
         self.stopped = None
+        self.remaining_tokens = None
 
-    def run(self, send):
+    def run(self, send, estimate):
         with self.lock:
             if self.stopped:
                 raise ProviderError("provider_stopped_" + self.stopped, stop=True)
-            delay = self.next_at - monotonic()
-            while delay > 0:
-                sleep(min(delay, 45))
+            if self.remaining_tokens is None or estimate > self.remaining_tokens:
                 delay = self.next_at - monotonic()
-            self.next_at = monotonic() + 28
+                while delay > 0:
+                    sleep(min(delay, 45))
+                    delay = self.next_at - monotonic()
+            started = monotonic()
             try:
-                return send()
+                body, headers = send()
             except ProviderError as exc:
                 if exc.retry_after is not None:
-                    self.next_at = max(self.next_at, monotonic() + exc.retry_after)
+                    self.next_at = monotonic() + exc.retry_after
+                    self.remaining_tokens = None
                 if exc.stop:
                     self.stopped = str(exc)
                 raise
+            left = headers.get("x-ratelimit-remaining-tokens", "")
+            self.remaining_tokens = int(left) if left.isdecimal() else None
+            self.next_at = started + 62
+            return body
 
 
 GROQ_PACER = GroqPacer()
@@ -165,9 +193,11 @@ def text_call(provider, prompt, max_tokens=7500):
     ]}
     def send():
         return request(url, (domain,), data=json.dumps(payload).encode(),
-                       headers={**authorization(secret), "Content-Type": "application/json"}, timeout=95)
+                       headers={**authorization(secret), "Content-Type": "application/json"},
+                       timeout=95, with_headers=provider == "groq")
 
-    result = parse_json(GROQ_PACER.run(send) if provider == "groq" else send())
+    estimate = len(prompt.encode("utf-8")) // 3 + max_tokens + 150
+    result = parse_json(GROQ_PACER.run(send, estimate) if provider == "groq" else send())
     try:
         choice = result["choices"][0]
         content = choice["message"]["content"].strip()

@@ -115,6 +115,11 @@ def clip_model():
 VISUAL_LOCK = Lock()
 
 
+def warm_visual_matcher():
+    with VISUAL_LOCK:
+        clip_model()
+
+
 def similarity(image, captions):
     try:
         with VISUAL_LOCK:
@@ -199,7 +204,7 @@ class ImageIndex:
 
 
 def photo(scene, subject, path, index):
-    clip_model()
+    warm_visual_matcher()
     had_candidate = False
     errors = []
     for find in (commons_photos, nasa_photos):
@@ -223,7 +228,7 @@ def photo(scene, subject, path, index):
 
 
 def generated(scene, subject, path, index, task, article, channel):
-    clip_model()
+    warm_visual_matcher()
     style = ("Cinematic realistic urban mystery, restrained color grading and atmospheric lighting."
              if channel == "legends" else
              "Modern moderately stylized science editorial illustration with a coherent muted palette. "
