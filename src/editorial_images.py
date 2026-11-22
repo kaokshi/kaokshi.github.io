@@ -360,8 +360,32 @@ def generated(scene, subject, path, index, task, article, channel):
         except (OSError, ValueError):
             if attempt + 1 == max_attempts:
                 raise Blocked("generated_image_quality_or_match_failed") from None
+    if experimental and candidates:
+        # The draft receives the best AVAILABLE image with an explicit hold,
+        # never an approval. Preserve the candidate for the owner's review.
+        # Existing article QA must block any publication of this candidate.
+        winner = best_candidate(candidates)
+        review = winner["review"]
+        metadata = {"kind": "illustration", "source": "Cloudflare Workers AI",
+                    "model": KLEIN, "prompt": winner["prompt"], "parameters": winner["params"],
+                    "rights_status": "rights_review_pending",
+                    "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
+                    "label": "ИИ-иллюстрация" if channel != "legends" else None,
+                    "visual_feedback": {
+                        "candidate_status": "owner_review_required",
+                        "issues": review["issues"],
+                        "generation_attempt": winner["attempt"],
+                        "generated_attempts": len(candidates),
+                        "siglip_relative_margin": winner["assessment"]["siglip_relative_margin"],
+                        "florence_caption": winner["assessment"]["florence_caption"],
+                        "object_detector": winner["assessment"].get("object_detector"),
+                        "not_fact_or_rights_proof": True}}
+        try:
+            return index.save(winner["raw"], metadata, scene, subject, path)
+        except (OSError, ValueError):
+            raise Blocked("generated_image_no_valid_owner_review_candidate") from None
     if experimental:
-        raise Blocked("generated_image_required_details_not_verified")
+        raise Blocked("generated_image_no_candidates")
     raise AssertionError("unreachable image attempt")
 
 
