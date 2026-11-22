@@ -67,8 +67,12 @@ def decide(article, evidence):
     length_no_whitespace = len(re.sub(r"\s", "", text))
     if length_no_whitespace < 3000:
         blockers.append("short_text")
-    elif length_no_whitespace > 6000:
+    elif length_no_whitespace > 7000:
         blockers.append("long_text")
+    elif length_no_whitespace > 6000:
+        exception_reason = article.get("length_exception_reason")
+        if not isinstance(exception_reason, str) or not exception_reason.strip():
+            blockers.append("length_exception_reason_missing")
     imgs = article.get("image_files") or []
     if len(imgs) < 7 or len(set(imgs)) != len(imgs):
         blockers.append("images_count_or_duplicate")
