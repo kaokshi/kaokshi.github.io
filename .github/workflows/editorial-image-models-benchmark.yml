@@ -1,4 +1,5 @@
 name: Visual matching model research (CPU, no publishing)
+# Rerun after broadening discovery terms and adding candidate availability guards.
 on:
   push:
     branches: [experiment/editorial-image-rerank-20261123]
