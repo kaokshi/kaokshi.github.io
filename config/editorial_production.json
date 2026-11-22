@@ -52,7 +52,7 @@
     "successful_validation_run": null,
     "owner_access_verified": false,
     "legacy_automation_retired": false,
-    "private_repository": null,
+    "private_repository": "kaokshi/zen-editorial-review",
     "owner_public_key": null,
     "groq_free_only": true,
     "klein_free_only": true
