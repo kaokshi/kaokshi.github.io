@@ -46,6 +46,38 @@ class AtomicOwnerDeliveryTests(unittest.TestCase):
             publish_verified_directory(source, final)
             self.assertEqual((final / "Статья.html").read_text(encoding="utf-8"), "исходник")
 
+    def test_corrupt_late_archive_member_never_changes_existing_state(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            destination = root / "state"
+            destination.mkdir()
+            (destination / "state.json").write_text("original", encoding="utf-8")
+
+            class Entry:
+                def __init__(self, name):
+                    self.filename = name
+
+            class CorruptArchive:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+                def infolist(self):
+                    return [Entry("state.json"), Entry("last.bin")]
+
+                def read(self, entry):
+                    if entry.filename == "last.bin":
+                        raise OSError("corrupt late archive member")
+                    return b"new state that must not be written"
+
+            with patch("src.editorial_delivery.safe_zip", return_value=CorruptArchive()):
+                with self.assertRaisesRegex(OSError, "corrupt late archive member"):
+                    unpack(b"fixture", destination)
+            self.assertEqual((destination / "state.json").read_text(encoding="utf-8"), "original")
+            self.assertFalse((destination / "last.bin").exists())
+
     def test_conflicting_zip_paths_rejected_before_any_write(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)
