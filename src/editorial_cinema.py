@@ -15,7 +15,7 @@ DETAILED = {"retelling", "plot_analysis"}
 WIKI = ("wikimedia.org",)
 STUDIO_DOMAINS = ("paramount.com", "universalpictures.com", "warnerbros.com", "sonypictures.com",
                   "disney.com", "a24films.com", "focusfeatures.com", "lionsgate.com", "bfi.org.uk",
-                  "rogerebert.com", "bbc.com", "independent.co.uk", "theguardian.com")
+                  "rogerebert.com", "rottentomatoes.com", "bbc.com", "independent.co.uk", "theguardian.com")
 WIFI = "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/ru.wikipedia/all-access/"
 
 
@@ -62,10 +62,16 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
         raise Blocked("cinema_plan_missing_exact_identity_or_format")
     initial = resolver("discover", {"topic": f"«{film_title}» ({year})"})
     identity = initial["film"]
+    today = date.today()
+    dated = [value for value in identity.get("release_dates", []) if value[:4] == str(year)]
+    if year > today.year or (dated and min(dated) > today.isoformat()) or (year == today.year and not dated):
+        raise Blocked("film_release_not_confirmed")
     if year not in identity["years"] or not identity["directors"] or not identity["cast"]:
         raise Blocked("film_metadata_incomplete")
     if plan.get("qid") and plan["qid"] != identity["qid"]:
         raise Blocked("movie_catalog_id_conflict")
+    if plan.get("original_title") and normalize(plan["original_title"]) != normalize(identity["original_title"]):
+        raise Blocked("movie_original_title_conflict")
     approved = rights_registry.get(identity["qid"], {})
     submitted = plan.get("sources", [])
     public_urls = [url for url in submitted if isinstance(url, str)] if isinstance(submitted, list) else []

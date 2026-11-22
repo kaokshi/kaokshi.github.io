@@ -26,7 +26,7 @@ from .editorial_review import RULES, canonical, improves, parse_article, qa, sou
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config"
 CONTENT = ROOT / "content" / "articles"
-PROMPT_VERSION = "production-2026-11-22-v1"
+PROMPT_VERSION = "production-2026-11-23-v2"
 CHANNELS = ("legends", "science", "cinema")
 
 
@@ -261,6 +261,9 @@ class Article:
                            + "\nУбедись, что режим спойлеров соблюдён. Проверяй сцены, хронологию, "
                            "точность имён, режиссёра, роли, финал и год только по источникам. "
                            "Отдельно помечай оценочные высказывания.")
+            if reason := candidate["article"].get("length_exception_reason"):
+                prompt += ("\nОБОСНОВАНИЕ ОБЪЁМА: " + reason
+                           + "\nЕсли статья свыше 6000 знаков, проверь конкретность и необходимость обоснования.")
             if reference:
                 prompt += "\nПРЕДЫДУЩАЯ ВЕРСИЯ ДЛЯ СРАВНЕНИЯ:\n" + canonical(reference["article"])
             last_error = None
@@ -276,7 +279,8 @@ class Article:
                                           metadata={"text_sha256": sha}, tokens=9000)
             raise last_error
         report = self.task("qa", "local-qa-and-editorial-review",
-                           {"text_sha256": sha, "reference": reference and reference["text_sha256"]},
+                           {"text_sha256": sha, "reference": reference and reference["text_sha256"],
+                            "length_exception_reason": candidate["article"].get("length_exception_reason")},
                            lambda _: qa(raw, self.channel, self.prior[1], self.records,
                                         audit, self.memory.time_left), minimum_seconds=20 * 60,
                            reusable=lambda row: all(row[key]["status"] == "completed"
@@ -297,7 +301,15 @@ class Article:
                      "Не выдумывай сцены, реплики и последовательность событий. "
                      f"Карточка, формат и режим спойлеров: {json.dumps(self.film, ensure_ascii=False)}.")
         brief = f"{RULES}\n{style}\nТема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}"
-        raw = self.model("draft", "groq", brief, metadata={"topic": self.title})
+        author, editor = "groq", "openrouter"
+        try:
+            raw = self.model("draft", author, brief, metadata={"topic": self.title})
+        except Blocked as exc:
+            if str(exc) in {"production_deadline", "groq_quota_wait_exceeds_deadline"}:
+                raise
+            author, editor = "openrouter", "groq"
+            raw = self.model("draft-fallback", author, brief, metadata={"topic": self.title})
+        self.memory.article(self.id, draft_provider=author, independent_editor_provider=editor)
         self.current = self.remember_version(raw)
         original = self.current
         edit_prompt = (brief + "\nТы независимый литературный редактор. Полностью отредактируй "
@@ -307,14 +319,14 @@ class Article:
                        + raw)
         edited = None
         try:
-            edited = self.model("full-edit", "openrouter", edit_prompt,
+            edited = self.model("full-edit", editor, edit_prompt,
                                 metadata={"source_sha256": original["text_sha256"]})
             self.remember_version(edited)
         except Blocked as exc:
             can_retry = str(exc) in {"empty_visible_content", "connection_failed", "truncated_response"}
             if can_retry:
                 try:
-                    edited = self.model("full-edit-retry", "openrouter", edit_prompt,
+                    edited = self.model("full-edit-retry", editor, edit_prompt,
                                         metadata={"source_sha256": original["text_sha256"]})
                     self.remember_version(edited)
                 except Blocked as last:
@@ -329,7 +341,7 @@ class Article:
                 not old_report["issues"] and not new_report["issues"]
                 and all(new_report[key]["status"] == old_report[key]["status"]
                         for key in ("model_a", "grammar", "editorial", "facts")))
-            self.attempts.append(self.change("independent_edit", "openrouter", self.current, candidate, accepted))
+            self.attempts.append(self.change("independent_edit", editor, self.current, candidate, accepted))
             if accepted:
                 self.current = candidate
         elif edited:
@@ -382,7 +394,8 @@ class Article:
                 self.current = candidate
         if self.current["report"]["issues"]:
             self.assistant = ("assistant_handoff_pending" if sum(
-                x["role"] == "agent" for x in self.attempts) == limit
+                x["role"] == "agent" and x["status"] in {"accepted", "rejected"}
+                for x in self.attempts) == limit
                 else "agent_revisions_pending")
 
     def images(self):
@@ -391,7 +404,8 @@ class Article:
         if not 1 <= count <= self.config["maximum_images"]:
             raise Blocked("image_plan_article_sections_unavailable")
         guide = ("Только illustration. Сделай 7–8 кинематографичных, разных сцен." if self.channel == "legends"
-                 else "Скомбинируй оба типа без фиксированной пропорции: photo для реальных объектов "
+                 else "Скомбинируй оба типа. Предпочти реальные фотографии, когда они точно показывают явление. "
+                 "Photo для реальных объектов "
                  "и наблюдений, illustration для объяснения механизмов, аналогий и реконструкций. "
                  "Для photo дай краткий английский поисковый запрос; визуализация не изображает доказательство.")
         if self.channel == "cinema":

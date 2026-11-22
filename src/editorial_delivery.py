@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from .editorial_encrypted_review import MAX_INPUT, decrypt, encrypt
+from .editorial_length import check_length
 from .editorial_memory import PrivateGit, StorageError, digest, read_json, write
 from .editorial_providers import Blocked
 
@@ -177,8 +178,13 @@ def verify_review(data, *, allow_incomplete=False):
                     article + "/SHA256SUMS.txt"}:
                 raise Blocked("review_manifest_incomplete")
             report = json.loads(archive.read(article + "/Статус и проверки.json"))
-            if digest(archive.read(article + "/Текст для SHA-256.txt")) != report["text_sha256"]:
+            canonical = archive.read(article + "/Текст для SHA-256.txt")
+            if digest(canonical) != report["text_sha256"]:
                 raise Blocked("review_canonical_text_sha_mismatch")
+            _, length_issue = check_length(canonical.decode("utf-8"),
+                                           report.get("article_checks", {}).get("length_exception_reason"))
+            if length_issue and not allow_incomplete:
+                raise Blocked("review_article_length_invalid: " + length_issue)
             assets = {name for name in verified if "/images/" in name}
             by_name = {article + "/images/" + row["file"]: row["sha256"] for row in report["images"]}
             if (assets != by_name.keys() or len(by_name) != len(report["images"])

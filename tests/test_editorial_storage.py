@@ -27,7 +27,7 @@ from src.editorial_review import canonical, parse_article
 
 
 DAY = "2026-11-22"
-FIXTURE = parse_article("**Проверка восстановления**\nКонтрольный текст. Подпишитесь.")
+FIXTURE = parse_article("**Проверка восстановления**\n" + "Контрольный текст. " * 230 + "Подпишитесь.")
 ARTICLE_IDS = ("legends-01", "science-01")
 
 

@@ -17,7 +17,7 @@ on:
     inputs:
       command:
         type: choice
-        options: [health, daily, retry, review, status, audit, learn, quota, storage-test]
+        options: [health, daily, retry, review, status, audit, learn, quota, storage-test, cinema-test]
         default: health
       day:
         description: Moscow date (YYYY-MM-DD)
@@ -229,6 +229,28 @@ jobs:
           path: ${{ env.EDITORIAL_QUOTA_DIR }}/reservation.json
           if-no-files-found: error
           retention-days: 15
+      - name: Verify an existing cinema title and spoiler guard with public sources
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'cinema-test'
+        timeout-minutes: 3
+        run: |
+          python - <<'PYTHON'
+          import json
+          from src.editorial_brain import settings
+          from src.editorial_cinema import evidence
+          assert settings()["articles_per_channel"]["cinema"] == 0
+          check = evidence({"film_title": "Шоу Трумана", "original_title": "The Truman Show",
+                            "year": 1998, "qid": "Q214801", "format": "retelling", "spoilers": True,
+                            "sources": ["https://www.rogerebert.com/reviews/the-truman-show-1998",
+                                        "https://www.paramount.com/movies/the-truman-show",
+                                        "https://www.rottentomatoes.com/m/truman_show"]}, {})
+          assert check["film"]["imdb_id"] == "tt0120382"
+          assert check["film"]["title_ru"] == "Шоу Трумана"
+          assert check["format"] == "review" and check["spoilers"] is False
+          print(json.dumps({"status": "film_identity_verified", "qid": check["film"]["qid"],
+                            "released": check["film"]["release_dates"], "format": check["format"],
+                            "source_count": len(check["records"]), "cinema_scheduled": False,
+                            "film_still_rights": "not_verified", "publication_authorized": False}))
+          PYTHON
       - name: Exercise package recovery in separate processes without providers
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'storage-test'
         run: |
@@ -273,7 +295,7 @@ jobs:
         timeout-minutes: 145
         if: >-
           env.EDITORIAL_EFFECTIVE_COMMAND != 'skip' && env.EDITORIAL_EFFECTIVE_COMMAND != 'quota' &&
-          env.EDITORIAL_EFFECTIVE_COMMAND != 'storage-test' &&
+          env.EDITORIAL_EFFECTIVE_COMMAND != 'storage-test' && env.EDITORIAL_EFFECTIVE_COMMAND != 'cinema-test' &&
           (env.EDITORIAL_MODE != 'encrypted' || env.EDITORIAL_EFFECTIVE_COMMAND != 'review')
         run: |
           args=("$EDITORIAL_EFFECTIVE_COMMAND" --date "$EDITORIAL_MOSCOW_DAY")

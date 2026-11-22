@@ -5,6 +5,7 @@ Uses official public Wikidata and MediaWiki APIs only. No keys, scraping,
 film downloads, copyrighted still extraction, or publication. This is
 source retrieval, not proof that every fictional event happened on screen.
 """
+from datetime import date
 import json
 import re
 from urllib.parse import urlencode, quote
@@ -58,6 +59,22 @@ def claim_ids(entity, property_id):
         if isinstance(value, dict) and re.fullmatch(r"Q[1-9][0-9]*", str(value.get("id", ""))):
             result.append(value["id"])
     return result
+
+
+def release_dates(entity):
+    """Wikidata P577 at day precision. Future dates never prove a release."""
+    dates = []
+    for claim in entity.get("claims", {}).get("P577", []):
+        value = claim.get("mainsnak", {}).get("datavalue", {}).get("value", {})
+        if not isinstance(value, dict) or value.get("precision", 0) < 11 or claim.get("rank") == "deprecated":
+            continue
+        raw = value.get("time", "")
+        if re.fullmatch(r"\+\d{4}-\d{2}-\d{2}T.*", raw):
+            try:
+                dates.append(date.fromisoformat(raw[1:11]).isoformat())
+            except ValueError:
+                continue
+    return sorted(set(dates))
 
 
 def release_years(entity):
@@ -176,12 +193,13 @@ def movie_sources(task, payload, *, get_json=fetch_json):
     return {
         "status": "source_documents_retrieved_not_plot_verified",
         "film": {"qid": qid, "title": movie_name,
+                 "title_ru": movie.get("labels", {}).get("ru", {}).get("value"),
                  "original_title": (movie.get("claims", {}).get("P1476") or [{}])[0]
                      .get("mainsnak", {}).get("datavalue", {}).get("value", {}).get("text")
                      or movie.get("labels", {}).get("en", {}).get("value") or movie_name,
                  "imdb_id": (movie.get("claims", {}).get("P345") or [{}])[0]
                      .get("mainsnak", {}).get("datavalue", {}).get("value"),
-                 "years": years,
+                 "years": years, "release_dates": release_dates(movie),
                  "directors": directors, "cast": cast, "cast_roles": cast_roles,
                  "wikipedia_title": wiki_title},
         "documents": [

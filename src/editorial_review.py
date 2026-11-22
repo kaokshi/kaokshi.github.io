@@ -5,6 +5,7 @@ import re
 from threading import Lock
 
 from .editorial_ai_check import measure_text, threshold_review
+from .editorial_length import HARD_MAX, MIN_CHARS, check_length
 from .editorial_language_tool import serialize_match
 from .editorial_memory import digest
 from .editorial_no_repeat import normalize, words
@@ -23,14 +24,25 @@ def numbers(text):
     return {token.replace(",", ".") for token in NUMBER.findall(text)}
 RULES = (
     "Русская статья, 3000–6000 непробельных знаков, ориентир 4300–4900. "
+    "Только при конкретной необходимости раскрыть материал можно написать 6001–7000 знаков. "
+    "В этом случае после статьи добавь одну служебную строку "
+    "<!-- length_exception_reason: конкретная причина -->. Строка в текст статьи не входит. "
     "Обычно 6–7 смысловых разделов (допустимо 4–8). Первая строка каждого раздела, "
     "включая первый, отдельный заголовок **жирным**. Заголовок всей статьи перед ними "
     "не добавляй. Абзацы отделяй пустой строкой. Закончи естественным призывом "
-    "подписаться. Не возвращай пояснений, служебных блоков, HTML, ссылок и списков источников."
+    "подписаться. Кроме строки обоснования объёма возвращай только текст статьи."
 )
 
 
+LENGTH_NOTE = re.compile(r"\s*<!--\s*length_exception_reason:[ \t]*([^<>\n]*?)\s*-->\s*\Z")
+
+
 def parse_article(raw):
+    note = LENGTH_NOTE.search(raw)
+    reason = None
+    if note:
+        raw = raw[:note.start()]
+        reason = note.group(1).strip() or None
     sections = []
     intro = []
     for block in re.split(r"\n\s*\n", raw.strip()):
@@ -46,7 +58,7 @@ def parse_article(raw):
                 paragraph.append(line.strip())
         if paragraph:
             (sections[-1]["paragraphs"] if sections else intro).append(" ".join(paragraph))
-    return {"sections": sections, "intro": intro}
+    return {"sections": sections, "intro": intro, "length_exception_reason": reason}
 
 
 def canonical(article):
@@ -143,10 +155,11 @@ def structural_checks(article, history):
     text = canonical(article)
     sections = article["sections"]
     paragraphs = [p for section in sections for p in section["paragraphs"]]
-    chars = len(re.sub(r"\s", "", text))
+    reason = article.get("length_exception_reason")
+    chars, issue = check_length(text, reason)
     problems = []
-    if not 3000 <= chars <= 6000:
-        problems.append(f"article_length: {chars}")
+    if issue:
+        problems.append(f"article_length: {chars} ({issue})")
     if article["intro"] or not 4 <= len(sections) <= 8 or any(not s["paragraphs"] for s in sections):
         problems.append("section_structure")
     if not paragraphs or not CTA.search(paragraphs[-1]):
@@ -161,6 +174,7 @@ def structural_checks(article, history):
     if similar:
         problems.append("archive_overlap: " + " / ".join(similar[:4]))
     return {"chars_without_spaces": chars, "section_count": len(sections),
+            "length_exception_reason": reason,
             "issues": problems, "style": text_style(text)}
 
 
@@ -224,6 +238,6 @@ def improves(previous, candidate):
     if sum(after.values()) < sum(before.values()):
         return True
     if before["article_length"]:
-        distance = lambda n: max(3000 - n, n - 6000, 0)
+        distance = lambda n: max(MIN_CHARS - n, n - HARD_MAX, 0)
         return distance(candidate["chars_without_spaces"]) < distance(previous["chars_without_spaces"])
     return False

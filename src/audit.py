@@ -2,21 +2,25 @@
 """Read-only editorial audit: never changes publication state or submits RSS."""
 from pathlib import Path
 import json
-import re
+from editorial_length import check_html_length
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTICLES = ROOT / "content" / "articles"
 def main():
     files = sorted(ARTICLES.glob("*.json"))
     summary = {"total":len(files),"drafts":0,"approved":0,"channels":{},"short_text":[],"missing_images":[],"pending_rights":[],"pending_editorial":[],"ai_review_pending":[],"independent_ai_checks_missing":[]}
+    summary["length_issues"] = []
     for p in files:
         d = json.loads(p.read_text(encoding="utf-8"))
         name = d.get("title",p.name)
         channel = d.get("channel","unknown")
         summary["channels"][channel] = summary["channels"].get(channel,0)+1
         summary["drafts" if d.get("status") == "draft" else "approved"] += 1
-        count = len(re.sub(r"\s+", "", re.sub(r"<[^>]*>", "", d.get("body_html",""))))
-        if count < 3000: summary["short_text"].append({"article":name,"characters":count})
+        count, issue = check_html_length(d.get("body_html", ""), d.get("length_exception_reason"))
+        if issue:
+            summary["length_issues"].append({"article": name, "characters": count, "issue": issue})
+            if issue == "short_text":
+                summary["short_text"].append({"article": name, "characters": count})
         images = d.get("image_files",[])
         if len(images)<7:summary["missing_images"].append({"article":name,"count":len(images)})
         if d.get("rights_reviewed") is not True: summary["pending_rights"].append(name)

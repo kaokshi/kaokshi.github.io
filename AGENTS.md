@@ -6,9 +6,11 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 
 - The owner has three channels; only `legends` and `science` are currently active for drafts. `cinema` stays paused.
 - Do not change `publication_enabled=false`, publish content, activate RSS delivery, or remove release holds without an explicit owner launch instruction. A successful check is not publication authorization.
-- Articles: natural original Russian prose, 3000–6000 characters without whitespace, meaningful source checks, original channel CTA, usually 7–8 verified rights-cleared illustrations.
+- Articles use natural original Russian prose, verified sources, an original channel CTA and usually 7–8 rights-cleared illustrations.
 - The current diagnostic Model A is `modernbert + lightgbm + transformer`; the reported index is the arithmetic mean of three 0–100 classifier scores. `ai_accent_detector` remains a separate style score. The **owner-selected review flag** is strictly >80 on this **uncalibrated index**, NOT 80% of AI authorship. Never claim detector scores prove origin or optimize prose to evade classifiers.
 - Up to five genuine editorial-agent revisions, followed by at most two ChatGPT revisions through a connected transport. Every attempt needs an actual text change, immutable SHA-256, a documented substantive issue, and complete fresh checks. If unresolved, escalate to the owner. Do not falsely claim ChatGPT handoff or user delivery: these transports are not yet fully integrated.
+
+- Mandatory for ALL THREE genres including paused `cinema` test drafts: article body must be at least 3,000 characters and normally at most 6,000, with an exceptional maximum of 7,000 only when needed and justified in a nonempty `length_exception_reason` field; check after each real revision and before any release. Under 3,000, above 7,000, or 6,001–7,000 without documented justification is a blocking content defect. Do not count HTML markup, captions, metadata or image URLs toward length.
 
 ## Self-learning feature (requested 20 November 2026)
 

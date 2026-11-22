@@ -71,6 +71,18 @@ class WebsiteTest(unittest.TestCase):
                 ]
                 (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
                 self.assertEqual(len(build.read_posts(now)), 1, "Approved item with confirmed reports may be eligible")
+                article["body_html"] = "<p>" + "а" * 6001 + "</p>"
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(build.read_posts(now), [], "6001 without exception justification must block release")
+                article["length_exception_reason"] = "Подробность необходима для точного объяснения."
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(len(build.read_posts(now)), 1, "6001 with reason is allowed")
+                article["body_html"] = "<p>" + "а" * 7001 + "</p>"
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(build.read_posts(now), [], "7001 must block even when justified")
+                article["body_html"] = "<p>" + "а" * 6000 + "</p>"
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(len(build.read_posts(now)), 1, "Exactly 6000 characters is allowed")
                 article["ai_checks"][0]["provider"] = "rubert_v4"
                 (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
                 self.assertEqual(build.read_posts(now), [], "Legacy ruBERT cannot replace the new model")
