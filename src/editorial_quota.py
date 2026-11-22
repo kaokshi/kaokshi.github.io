@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 
-from .editorial_delivery import artifact_rows
 from .editorial_memory import read_json, write
 from .editorial_providers import Blocked, ProviderError, text_call
 from .editorial_schedule import CONFIG
@@ -22,10 +21,19 @@ def quota_status(config, day, markers):
 
 
 def recorded_markers(day):
+    from .editorial_delivery import artifact_rows
+
     for state in ("blocked", "ready", "attempted"):
         if next(artifact_rows(f"editorial-groq-{state}-", refs={"main", "codex/editorial-production"},
                               day=day), None):
             yield state
+
+
+def current_status(day):
+    config = read_json(CONFIG)
+    if quota_status(config, day, ()) == "blocked":
+        return "blocked"
+    return quota_status(config, day, recorded_markers(day))
 
 
 def probe():
@@ -70,7 +78,7 @@ def main():
             publish_marker(args.markers, "ready")
             print(json.dumps({"groq_quota": "ready", "utc_day": day}))
             return 0
-        state = quota_status(read_json(CONFIG), day, recorded_markers(day))
+        state = current_status(day)
         print(json.dumps({"groq_quota": state, "utc_day": day}))
         if args.command == "require-ready" and state != "ready":
             return 2

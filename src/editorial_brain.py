@@ -713,6 +713,10 @@ def main():
             probe = validate_klein()
             print(json.dumps(probe, sort_keys=True))
             return 0 if probe["visual_check"]["status"] == "completed" else 2
+        if args.command in {"daily", "retry"} and os.environ.get("GITHUB_ACTIONS") != "true":
+            from .editorial_quota import current_status
+            if current_status(datetime.now(timezone.utc).date().isoformat()) != "ready":
+                raise Blocked("groq_quota_unverified_or_blocked")
         with TemporaryDirectory(prefix="zen-editorial-") as temporary:
             storage_repo = os.environ.get("EDITORIAL_PRIVATE_REPOSITORY")
             token = os.environ.get("EDITORIAL_PRIVATE_TOKEN")

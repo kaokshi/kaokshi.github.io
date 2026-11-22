@@ -156,6 +156,7 @@ def learn(root: Path, minimum):
 
 def propose_pull_requests(result, token):
     """Submit independent evidence summaries to a review branch, without artifacts or texts."""
+    import base64
     import json
     import os
     import subprocess
@@ -187,20 +188,24 @@ def propose_pull_requests(result, token):
         if prior:
             proposed.append(prior[0]["html_url"])
             continue
-        base = api("git/ref/heads/main")["object"]["sha"]
-        if api("git/ref/heads/" + branch, absent=True):
-            raise RuntimeError("learning_proposal_branch_exists_without_open_pr")
+        path = f"config/editorial_prompt_candidates/{tag}.json"
         document = {"candidate": row["instruction"], "channel": row["channel"], "issue": row["issue"],
                     "holdout_cases": row["held_out_cases"], "baseline_resolved": row["baseline_resolved"],
                     "candidate_resolved": row["candidate_resolved"], "regressions": row["regressions"],
                     "deployment": "requires_owner_review", "rollback": row["rollback"]}
-        tree = api("git/commits/" + base)["tree"]["sha"]
-        new_tree = api("git/trees", "POST", {"base_tree": tree, "tree": [{
-            "path": f"config/editorial_prompt_candidates/{tag}.json", "mode": "100644",
-            "type": "blob", "content": json.dumps(document, indent=2) + "\n"}]})["sha"]
-        commit = api("git/commits", "POST", {"message": f"Propose editorial instruction for {tag}",
-                     "tree": new_tree, "parents": [base]})["sha"]
-        api("git/refs", "POST", {"ref": "refs/heads/" + branch, "sha": commit})
+        if api("git/ref/heads/" + branch, absent=True):
+            existing = api(f"contents/{path}?ref={branch}", absent=True)
+            if not existing or json.loads(base64.b64decode(existing["content"])) != document:
+                raise RuntimeError("learning_proposal_branch_conflict")
+        else:
+            base = api("git/ref/heads/main")["object"]["sha"]
+            tree = api("git/commits/" + base)["tree"]["sha"]
+            new_tree = api("git/trees", "POST", {"base_tree": tree, "tree": [{
+                "path": path, "mode": "100644", "type": "blob",
+                "content": json.dumps(document, indent=2) + "\n"}]})["sha"]
+            commit = api("git/commits", "POST", {"message": f"Propose editorial instruction for {tag}",
+                         "tree": new_tree, "parents": [base]})["sha"]
+            api("git/refs", "POST", {"ref": "refs/heads/" + branch, "sha": commit})
         pr = api("pulls", "POST", {"title": f"Editorial learning proposal: {tag}", "head": branch,
                  "base": "main", "draft": True,
                  "body": "Independent holdout results and rollback are recorded in the proposal. "
