@@ -86,7 +86,7 @@ def inspect_visual(raw, scene, *, reviewer=None):
     except Blocked:
         raise
     except (ImportError, OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
-        raise Blocked("visual_feedback_unavailable_" + type(exc).__name__) from None
+        raise Blocked("visual_feedback_unavailable_" + type(exc).__name__ + ":" + str(exc)[:240]) from None
 
 
 def review_decision(scene, assessment, *, relative_margin_min=0.0):
