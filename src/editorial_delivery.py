@@ -86,6 +86,13 @@ def safe_zip(data):
             archive.close()
             raise Blocked("unsafe_encrypted_archive")
         names.add(entry.filename)
+    # A path may not also be a file serving as the parent of another member.
+    # Reject this before extracting any bytes, rather than leaving half a restore.
+    if any(any("/".join(PurePosixPath(name).parts[:depth]) in names
+               for depth in range(1, len(PurePosixPath(name).parts)))
+           for name in names):
+        archive.close()
+        raise Blocked("unsafe_encrypted_archive")
     if archive.testzip() is not None:
         archive.close()
         raise Blocked("encrypted_archive_integrity_failure")
