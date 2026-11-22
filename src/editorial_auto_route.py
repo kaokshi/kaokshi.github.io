@@ -64,8 +64,11 @@ def decide(article, evidence):
     if article.get("release_hold") is True or article.get("status") in {"rejected", "published"}:
         blockers.append("explicit_release_hold_or_terminal_status")
     text = extract_text(article.get("body_html", ""))
-    if len(re.sub(r"\s", "", text)) < 3000:
+    length_no_whitespace = len(re.sub(r"\s", "", text))
+    if length_no_whitespace < 3000:
         blockers.append("short_text")
+    elif length_no_whitespace > 6000:
+        blockers.append("long_text")
     imgs = article.get("image_files") or []
     if len(imgs) < 7 or len(set(imgs)) != len(imgs):
         blockers.append("images_count_or_duplicate")
