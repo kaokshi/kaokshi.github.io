@@ -228,6 +228,8 @@ class Memory:
         with self.lock:
             task = self.data["tasks"].get(task_id)
             if task and task["status"] == "completed":
+                if ("result" not in task or task.get("result_sha256") != digest(json_bytes(task["result"]))):
+                    raise Blocked("completed_task_result_integrity_failed")
                 if (not self.retry or not reusable or reusable(task["result"]) or task["attempts"] >= 2
                         or self.time_left() < minimum_seconds):
                     return task["result"]
