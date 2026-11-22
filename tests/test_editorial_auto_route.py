@@ -78,6 +78,31 @@ class RoutingTests(unittest.TestCase):
         self.assertFalse(result["ai_rewrite_required_by_detector"])
         self.assertIn("ai_auto_release_threshold_not_validated", result["blockers"])
 
+    def test_length_bounds_all_genres(self):
+        for channel in ("legends", "science", "cinema"):
+            for length, expected in ((2999, "short_text"), (3000, None),
+                                     (6000, None), (6001, "length_exception_reason_missing"),
+                                     (7000, "length_exception_reason_missing"), (7001, "long_text")):
+                with self.subTest(channel=channel, length=length):
+                    self.article["channel"] = channel
+                    self.article["body_html"] = "<p>" + "а" * length + "</p>"
+                    evidence = self.make_evidence(self.article, 5)
+                    blockers = route.decide(self.article, evidence)["blockers"]
+                    if expected:
+                        self.assertIn(expected, blockers)
+                    else:
+                        self.assertNotIn("short_text", blockers)
+                        self.assertNotIn("long_text", blockers)
+
+    def test_justified_exception_to_7000_characters(self):
+        for channel in ("legends", "science", "cinema"):
+            self.article["channel"] = channel
+            self.article["body_html"] = "<p>" + "а" * 7000 + "</p>"
+            self.article["length_exception_reason"] = "Значимая сюжетная развязка требует дополнительных деталей."
+            blockers = route.decide(self.article, self.make_evidence(self.article, 5))["blockers"]
+            self.assertNotIn("length_exception_reason_missing", blockers)
+            self.assertNotIn("long_text", blockers)
+
     def test_missing_evidence_never_passes(self):
         result = route.decide(self.article, {})
         self.assertEqual(result["disposition"], "send_for_owner_review")

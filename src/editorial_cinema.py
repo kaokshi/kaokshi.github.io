@@ -62,6 +62,10 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
         raise Blocked("cinema_plan_missing_exact_identity_or_format")
     initial = resolver("discover", {"topic": f"«{film_title}» ({year})"})
     identity = initial["film"]
+    today = date.today()
+    dated = [value for value in identity.get("release_dates", []) if value[:4] == str(year)]
+    if year > today.year or (dated and min(dated) > today.isoformat()) or (year == today.year and not dated):
+        raise Blocked("film_release_not_confirmed")
     if year not in identity["years"] or not identity["directors"] or not identity["cast"]:
         raise Blocked("film_metadata_incomplete")
     if plan.get("qid") and plan["qid"] != identity["qid"]:
