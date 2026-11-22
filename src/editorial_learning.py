@@ -8,7 +8,7 @@ from .editorial_review import canonical, parse_article, structural_checks
 
 CATEGORIES = {
     "missing_cta": "Before submitting, compare the last paragraph with the original and preserve a natural channel-specific subscription CTA.",
-    "article_length": "Develop underexplained scenes or mechanisms with concrete new details. Verify 3000–6000 visible non-whitespace characters.",
+    "article_length": "Develop underexplained scenes or mechanisms with concrete new details. Verify 3000–6000 visible non-whitespace characters. Allow up to 7000 only with a concrete recorded reason.",
     "unsupported_claim": "Keep source-backed claims only. Compare each numeric and causal claim with its exact primary-source excerpt.",
     "section_structure": "Preserve each section's bold heading and body. Verify that the first nonempty line is the first heading.",
     "repeated_paragraphs": "Identify duplicated ideas and paragraphs before editing. Replace only the repeated contribution.",
@@ -18,7 +18,7 @@ SHA = re.compile(r"[a-f0-9]{64}")
 
 def valid(row):
     return (isinstance(row, dict) and row.get("owner_verified") is True
-            and row.get("channel") in {"legends", "science"}
+            and row.get("channel") in {"legends", "science", "cinema"}
             and row.get("issue") in CATEGORIES and isinstance(row.get("article_id"), str)
             and isinstance(row.get("provenance"), str) and bool(row["provenance"].strip())
             and all(isinstance(row.get(k), str) and SHA.fullmatch(row[k])
