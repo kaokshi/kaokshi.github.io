@@ -71,6 +71,12 @@ class WebsiteTest(unittest.TestCase):
                 ]
                 (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
                 self.assertEqual(len(build.read_posts(now)), 1, "Approved item with confirmed reports may be eligible")
+                article["body_html"] = "<p>" + "а" * 6001 + "</p>"
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(build.read_posts(now), [], "Over 6000 characters must block release")
+                article["body_html"] = "<p>" + "а" * 6000 + "</p>"
+                (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
+                self.assertEqual(len(build.read_posts(now)), 1, "Exactly 6000 characters is allowed")
                 article["ai_checks"][0]["provider"] = "rubert_v4"
                 (folder/"test.json").write_text(json.dumps(article,ensure_ascii=False),encoding="utf-8")
                 self.assertEqual(build.read_posts(now), [], "Legacy ruBERT cannot replace the new model")
