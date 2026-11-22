@@ -266,6 +266,12 @@ class Memory:
 
     def call(self, task_id, article, provider, callback, *, metrics=None):
         with self.lock:
+            # A runner can stop after the external provider accepted a request but
+            # before a response is saved. Never send an untraceable duplicate on retry.
+            # A persisted "responded" call is reused by Article.model -> response().
+            if any(row["task"] == task_id and row["provider"] == provider
+                   and row["status"] == "reserved" for row in self.data["calls"]):
+                raise ProviderError("previous_provider_request_outcome_unknown", stop=True)
             stopped = self.data["provider_stops"].get(provider)
             if stopped:
                 raise ProviderError("provider_stopped_" + stopped, stop=True)
