@@ -80,9 +80,16 @@ def inspect_visual(raw, scene, *, reviewer=None):
         observed = parsed.get(prompt, "") if isinstance(parsed, dict) else ""
         if not isinstance(observed, str) or not observed.strip():
             raise Blocked("florence_caption_missing")
-        return {"siglip_model": SIGLIP_MODEL, "florence_model": FLORENCE_MODEL,
-                "siglip_relative_margin": round(margin, 5),
-                "florence_caption": observed.strip()[:1200]}
+        report = {"siglip_model": SIGLIP_MODEL, "florence_model": FLORENCE_MODEL,
+                  "siglip_relative_margin": round(margin, 5),
+                  "florence_caption": observed.strip()[:1200]}
+        import os
+        if os.getenv("EDITORIAL_OBJECT_DETECTION_EXPERIMENT") == "true":
+            from .editorial_object_detector import evidence_for_scene
+            # A detector may flag count mismatches and improve the next
+            # prompt. It is NOT independent human-verified approval.
+            report["object_detector"] = evidence_for_scene(raw, scene)
+        return report
     except Blocked:
         raise
     except (ImportError, OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
@@ -117,11 +124,18 @@ def repair_prompt(scene, assessment, *, style=""):
         caption = ""
     positive = "; ".join(spec["must_include"])
     negative = "; ".join(spec["must_avoid"])
+    from .editorial_visual_constraints import count_prompt
+    from .editorial_object_detector import discrepancy_instructions
+    counts = count_prompt(scene)
+    detected = assessment.get("object_detector", {})
+    detector_notes = discrepancy_instructions(scene, detected) if isinstance(detected, dict) else []
     return ("GENERATE A NEW IMAGE FROM SCRATCH, not a photo edit. "
             "Target scene (highest priority): " + spec["brief"] +
             ". Main subject: " + spec["subject"] +
             (". Essential visible elements: " + positive if positive else "") +
             (". Do not depict: " + negative if negative else "") +
+            (". Exact object quantities: " + counts if counts else "") +
+            (". Detector findings (may be inaccurate): " + " ".join(detector_notes) if detector_notes else "") +
             (". Preserve this art direction: " + style if style else "") +
             ". The earlier attempt was described by a fallible visual captioner as: " +
             (caption[:450] or "not described") +

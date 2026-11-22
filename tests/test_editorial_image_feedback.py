@@ -54,7 +54,10 @@ class FeedbackTests(unittest.TestCase):
             {"siglip_model":"sig","florence_model":"flo","siglip_relative_margin":-1.5,
              "florence_caption":"An empty train tunnel with no carriage."},
             {"siglip_model":"sig","florence_model":"flo","siglip_relative_margin":3.0,
-             "florence_caption":"An old train at a deserted station."},
+             "florence_caption":"An old train at a deserted station.",
+             "detail_evidence":{"verified_independently":True,
+                 "present":["old train","open doors","metro platform"],
+                 "absent":["empty tunnel without train","crowds"],"counts":{}}},
         ])
         prompts=[]
         def fake_klein(prompt):
@@ -69,6 +72,33 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(len(index.saved),1)
         self.assertEqual(row["visual_feedback"]["generation_attempt"],2)
         self.assertIn("GENERATE A NEW IMAGE FROM SCRATCH",prompts[1])
+
+    def test_best_unverified_count_candidate_is_saved_with_owner_hold(self):
+        from src.editorial_visual_constraints import best_candidate
+        index = Index()
+        observations = iter([
+            {"siglip_model":"sig","florence_model":"flo","siglip_relative_margin":4.0,
+             "florence_caption":"two wall clocks",
+             "object_detector":{"detections":{"wall clock":{"count":2}}}},
+            {"siglip_model":"sig","florence_model":"flo","siglip_relative_margin":2.0,
+             "florence_caption":"four wall clocks",
+             "object_detector":{"detections":{"wall clock":{"count":4}}}},
+            {"siglip_model":"sig","florence_model":"flo","siglip_relative_margin":5.0,
+             "florence_caption":"one wall clock",
+             "object_detector":{"detections":{"wall clock":{"count":1}}}},
+        ])
+        scene={**SCENE,
+               "must_include":[], "must_avoid":[],
+               "count_requirements":[{"object":"wall clock","mode":"exact","value":4}]}
+        with patch.dict(os.environ,{"EDITORIAL_IMAGE_FEEDBACK_EXPERIMENT":"true"}), \
+             patch.object(images,"warm_visual_matcher"), \
+             patch.object(images,"klein",side_effect=[(b"image1",{}),(b"image2",{}),(b"image3",{})]), \
+             patch.object(feedback,"inspect_visual",side_effect=lambda *_:next(observations)):
+            chosen=images.generated(scene,"metro","unused.jpg",index,"job","legend","legends")
+        self.assertEqual(index.memory.calls,3)
+        self.assertEqual(chosen["visual_feedback"]["candidate_status"],"owner_review_required")
+        self.assertEqual(chosen["visual_feedback"]["generation_attempt"],2)
+        self.assertEqual(index.saved[0][0],b"image2")
 
     def test_unavailable_reviewer_fails_closed(self):
         index=Index()
