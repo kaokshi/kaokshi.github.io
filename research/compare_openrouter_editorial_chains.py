@@ -132,7 +132,7 @@ def do_pilot(root,env=None,*,router=router_call,groq=None,cf=None,preflight=only
             if draft:sources.append(("nemotron-ultra-author",draft))
         # Opposite directions: Groq -> Cloudflare, Cloudflare -> Groq,
         # OpenRouter Ultra -> Groq, OpenRouter Ultra -> Cloudflare.
-        for name,draft in sources:
+        for name,draft in list(sources):
             editor_roles=(
                 (("groq","groq",groq),) if name=="cloudflare-author" else
                 (("cloudflare","cloudflare",cf),("groq","groq",groq))
@@ -153,6 +153,8 @@ def do_pilot(root,env=None,*,router=router_call,groq=None,cf=None,preflight=only
         # Two independent free critics on each base author version and on edits.
         # At most 24 OpenRouter calls shared; no exhaustive cartesian explosion.
         for name,draft in sources:
+            if name not in ("groq-author","cloudflare-author","nemotron-ultra-author"):
+                continue
             for critic in ("nemotron_ultra","nemotron_lightning"):
                 if critic not in accepted:continue
                 model=accepted[critic]
