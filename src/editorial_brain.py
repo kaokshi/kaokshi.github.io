@@ -225,7 +225,9 @@ class Article:
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"]},
                            lambda _: qa(raw, self.channel, self.prior[1], self.records,
-                                        audit, self.memory.time_left), minimum_seconds=150)
+                                        audit, self.memory.time_left), minimum_seconds=20 * 60,
+                           reusable=lambda row: all(row[key]["status"] == "completed"
+                               for key in ("model_a", "grammar", "editorial")))
         if report["text_sha256"] != sha:
             raise Blocked("qa_sha_mismatch")
         return self.remember_version(raw, report)
@@ -379,6 +381,8 @@ class Article:
                 self.pictures.append(result)
             except Blocked as exc:
                 self.blockers.append(f"image_{index:02d}: {exc}")
+                if str(exc) in ("production_deadline", "visual_matcher_unavailable"):
+                    break
         if len(self.pictures) != len(plan["images"]):
             self.blockers.append("incomplete_image_plan")
         if self.channel == "science" and {row["kind"] for row in self.pictures} != {"photo", "illustration"}:

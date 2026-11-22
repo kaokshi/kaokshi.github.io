@@ -147,13 +147,15 @@ class Memory:
     def time_left(self):
         return (self.cutoff - datetime.now(timezone.utc)).total_seconds()
 
-    def task(self, article, stage, executor, inputs, action, *, minimum_seconds=55, validator=None):
+    def task(self, article, stage, executor, inputs, action, *, minimum_seconds=55, validator=None, reusable=None):
         input_sha = digest(json_bytes(inputs))
         task_id = f"{article}.{stage}.{input_sha[:16]}"
         with self.lock:
             task = self.data["tasks"].get(task_id)
             if task and task["status"] == "completed":
-                return task["result"]
+                if (not self.retry or not reusable or reusable(task["result"]) or task["attempts"] >= 2
+                        or self.time_left() < minimum_seconds):
+                    return task["result"]
             if not task:
                 task = self.data["tasks"][task_id] = {
                     "id": task_id, "article": article, "channel": article.split("-")[0],

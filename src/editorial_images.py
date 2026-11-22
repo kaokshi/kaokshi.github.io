@@ -21,9 +21,9 @@ NONPHOTO = re.compile(
     r"drawing|generated with|concept art|collage|blender|diagramm", re.I)
 RESTRICTED = re.compile(r"all rights reserved|copyright(?:ed| notice)|third.party|©|editorial use only", re.I)
 LICENSES = {
+    **{f"CC-{code.upper()}-{version}": f"https://creativecommons.org/licenses/{code}/{version}/"
+       for code in ("by", "by-sa") for version in ("2.0", "2.5", "3.0", "4.0")},
     "CC0-1.0": "https://creativecommons.org/publicdomain/zero/1.0/",
-    "CC-BY-4.0": "https://creativecommons.org/licenses/by/4.0/",
-    "CC-BY-SA-4.0": "https://creativecommons.org/licenses/by-sa/4.0/",
 }
 
 
@@ -192,6 +192,7 @@ class ImageIndex:
 
 
 def photo(scene, subject, path, index):
+    clip_model()
     had_candidate = False
     errors = []
     for find in (commons_photos, nasa_photos):
@@ -215,6 +216,7 @@ def photo(scene, subject, path, index):
 
 
 def generated(scene, subject, path, index, task, article, channel):
+    clip_model()
     style = ("Cinematic realistic urban mystery, restrained color grading and atmospheric lighting."
              if channel == "legends" else
              "Modern moderately stylized science editorial illustration with a coherent muted palette. "

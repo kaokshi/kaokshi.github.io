@@ -19,8 +19,8 @@ API="https://commons.wikimedia.org/w/api.php"
 KNOWN_LICENSES = {
     "CC0": "CC0-1.0",
     "CC0 1.0": "CC0-1.0",
-    "CC BY 4.0": "CC-BY-4.0",
-    "CC BY-SA 4.0": "CC-BY-SA-4.0",
+    **{f"CC {code} {version}": f"CC-{code}-{version}"
+       for code in ("BY", "BY-SA") for version in ("2.0", "2.5", "3.0", "4.0")},
     "PUBLIC DOMAIN": "PUBLIC_DOMAIN",
     "PD": "PUBLIC_DOMAIN",
 }
@@ -65,13 +65,13 @@ def candidate(page):
     license_label=value(metadata,"LicenseShortName")
     license_id=KNOWN_LICENSES.get(license_label.upper())
     pageurl=info.get("descriptionurl","")
-    imageurl=info.get("url","")
+    imageurl=info.get("thumburl") or info.get("url", "")
     if (not isinstance(pageurl,str) or not pageurl.startswith("https://commons.wikimedia.org/wiki/")
             or not isinstance(imageurl,str) or urlsplit(imageurl).scheme!="https"
             or urlsplit(imageurl).hostname not in {"upload.wikimedia.org","commons.wikimedia.org"}):
         return None
     return {"title":title,"source_page":pageurl,
-            "asset_url":imageurl,
+            "asset_url":imageurl, "original_asset_url": info.get("url"),
             "license_claimed":license_id,
             "license_status": "recognized_claim_unverified" if license_id else "unknown_or_restricted",
             "license_label":license_label,
@@ -99,7 +99,7 @@ def search(query, limit=20, opener=urlopen):
         raise ValueError("limit must be 1–50")
     params={"action":"query","format":"json","generator":"search",
             "gsrsearch":query,"gsrnamespace":"6","gsrlimit":str(limit),
-            "prop":"imageinfo","iiprop":"url|size|extmetadata",
+            "prop":"imageinfo","iiprop":"url|size|extmetadata","iiurlwidth":"1440",
             "iiextmetadatafilter":"LicenseShortName|LicenseUrl|Artist|Credit|Attribution|AttributionRequired|ImageDescription|Restrictions|Categories"}
     url=API+"?"+urlencode(params)
     request=Request(url,headers={"User-Agent":"ZenEditorialResearch/0.1 (rights metadata research only)"})

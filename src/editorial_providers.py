@@ -145,7 +145,7 @@ def klein(prompt):
     if not re.fullmatch(r"[0-9a-fA-F]{32}", account):
         raise ProviderError("invalid_cloudflare_account_id", stop=True)
     boundary = uuid4().hex
-    params = {"prompt": prompt, "width": "1024", "height": "768", "steps": "4"}
+    params = {"prompt": prompt, "width": "1024", "height": "768"}
     fields = [
         f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
         for name, value in params.items()

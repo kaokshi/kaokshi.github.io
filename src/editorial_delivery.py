@@ -156,8 +156,10 @@ def verify_review(data, *, allow_incomplete=False):
             report = json.loads(archive.read(article + "/Статус и проверки.json"))
             if digest(archive.read(article + "/Текст для SHA-256.txt")) != report["text_sha256"]:
                 raise Blocked("review_canonical_text_sha_mismatch")
-            if set(row["file"] for row in report["images"]) != {
-                    PurePosixPath(name).name for name in verified if "/images/" in name}:
+            assets = {name for name in verified if "/images/" in name}
+            by_name = {article + "/images/" + row["file"]: row["sha256"] for row in report["images"]}
+            if (assets != by_name.keys() or len(by_name) != len(report["images"])
+                    or any(digest(archive.read(name)) != sha for name, sha in by_name.items())):
                 raise Blocked("review_image_manifest_mismatch")
         return {"date": index["day"], "articles": expected, "package_sha256": digest(data)}
 

@@ -27,6 +27,14 @@ on:
         description: Run a manual end-to-end validation with a separate artifact namespace or private repository.
         default: false
         type: boolean
+      validation_public_key:
+        description: Optional raw X25519 public key (64 hex characters) for the isolated test.
+        default: ''
+        type: string
+      validation_free_accounts_confirmed:
+        description: Owner has confirmed Groq and Cloudflare reject calls above their free quotas.
+        default: false
+        type: boolean
 permissions:
   contents: read
 jobs:
@@ -62,10 +70,10 @@ jobs:
       EDITORIAL_DAILY_REPOSITORY: ${{ vars.EDITORIAL_PRIVATE_REPOSITORY }}
       EDITORIAL_VALIDATION_REPOSITORY: ${{ vars.EDITORIAL_VALIDATION_REPOSITORY }}
       EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
-      EDITORIAL_REVIEW_PUBLIC_KEY: ${{ vars.EDITORIAL_REVIEW_PUBLIC_KEY }}
+      EDITORIAL_REVIEW_PUBLIC_KEY: ${{ inputs.isolated_validation && inputs.validation_public_key || vars.EDITORIAL_REVIEW_PUBLIC_KEY }}
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
-      EDITORIAL_CF_FREE_ONLY: ${{ vars.EDITORIAL_CF_FREE_ONLY }}
-      EDITORIAL_GROQ_FREE_ONLY: ${{ vars.EDITORIAL_GROQ_FREE_ONLY }}
+      EDITORIAL_CF_FREE_ONLY: ${{ inputs.isolated_validation && inputs.validation_free_accounts_confirmed && 'true' || vars.EDITORIAL_CF_FREE_ONLY }}
+      EDITORIAL_GROQ_FREE_ONLY: ${{ inputs.isolated_validation && inputs.validation_free_accounts_confirmed && 'true' || vars.EDITORIAL_GROQ_FREE_ONLY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -136,7 +144,8 @@ jobs:
       - name: Restore the authenticated state checkpoint
         if: env.EDITORIAL_MODE == 'encrypted' && env.EDITORIAL_EFFECTIVE_COMMAND != 'review' && env.EDITORIAL_EFFECTIVE_COMMAND != 'health'
         run: |
-          mkdir -m 700 -p "$EDITORIAL_STATE_DIR"
+          umask 077
+          mkdir -p "$EDITORIAL_STATE_DIR"
           if [ "$EDITORIAL_EFFECTIVE_COMMAND" = daily ] || [ "$EDITORIAL_EFFECTIVE_COMMAND" = retry ]; then
             python -c 'from src.editorial_delivery import owner_key; owner_key()'
           fi

@@ -108,9 +108,14 @@ def package(folder, title, version, report, images, image_folder, summary):
             name = picture["file"]
             credit = " · ".join(str(picture.get(k) or "уточняется")
                                 for k in ("source", "creator", "license"))
-            out.append(f'<li>{escape(name)} · {escape(credit)} · ' +
-                       f'<a href="{escape(picture["source_page"])}">страница снимка</a></li>')
-            document.add_paragraph(f'{name} · {credit} · {picture["source_page"]}', "Caption")
+            terms = picture.get("license_url") or ""
+            attribution = picture.get("attribution") or ""
+            link = (f' · <a href="{escape(terms)}">условия использования</a>'
+                    if terms.startswith("https://") else "")
+            out.append(f'<li>{escape(name)} · {escape(credit)} · {escape(attribution)} · '
+                       f'<a href="{escape(picture["source_page"])}">страница снимка</a>{link}</li>')
+            document.add_paragraph(f'{name} · {credit} · {attribution} · {picture["source_page"]} · {terms}',
+                                   "Caption")
         out.append("</ul></aside>")
     out.append("</html>")
     html = "\n".join(out)

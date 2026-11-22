@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 import io
 import json
+import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -10,11 +11,11 @@ from unittest.mock import patch
 from docx import Document
 from PIL import Image
 
-from src import editorial_brain as brain
+from src import editorial_brain as brain, editorial_cinema, editorial_delivery
 from src.editorial_learning import CATEGORIES, evaluate_cases
 from src.editorial_memory import Memory, digest, read_json, write
 from src.editorial_providers import Blocked, ProviderError
-from src.editorial_review import CTA, parse_article, structural_checks
+from src.editorial_review import CTA, fact_evidence, parse_article, structural_checks
 
 
 def draft(channel):
@@ -117,9 +118,79 @@ class ProductionTests(unittest.TestCase):
             self.assertIn("document_roundtrip", report)
             self.assertEqual(brain.execute("review", root, PrivateStub())["status"],
                              "owner_notification_created")
+            from cryptography.hazmat.primitives.asymmetric import x25519
+            from cryptography.hazmat.primitives.serialization import (
+                Encoding, PrivateFormat, NoEncryption, PublicFormat,
+            )
+            key = x25519.X25519PrivateKey.generate()
+            public = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+            key_path = root / "owner.pem"
+            write(key_path, key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
+            editor = root / "editorial"
+            protected = root / "sealed"
+            stage = root / result["day"]
+            editor.mkdir()
+            shutil.copytree(stage, editor / result["day"])
+            with patch.dict("os.environ", {"EDITORIAL_REVIEW_PUBLIC_KEY": public,
+                                           "EDITORIAL_STATE_KEY_HEX": "ab" * 32}):
+                actual = editorial_delivery.save_outputs(editor, result["day"], protected)
+                self.assertEqual(actual["delivery"], "delivery_integration_pending")
+                self.assertEqual({x.name for x in protected.iterdir()}, {"checkpoint.enc", "owner-review.enc"})
+                state_wire = (protected / "checkpoint.enc").read_bytes()
+                self.assertEqual(editorial_delivery.unseal_state(state_wire)[:2], b"PK")
+                with self.assertRaisesRegex(Blocked, "authentication_failed"):
+                    editorial_delivery.unseal_state(state_wire[:-1] + bytes([state_wire[-1] ^ 1]))
+            delivered = editorial_delivery.retrieve(root / "authorized", key_path, day=result["day"],
+                                                     artifact=protected / "owner-review.enc")
+            self.assertEqual(delivered["status"], "verified_files_available")
+            self.assertTrue((root / "authorized" / "science-01" / "Статья.docx").is_file())
+            self.assertTrue((root / "authorized" / "science-01" / "Статья.html").is_file())
+            self.assertEqual(len(list((root / "authorized" / "science-01" / "images").glob("*.jpg"))), 7)
+
             previous = len(calls)
             brain.execute("daily", root, PrivateStub(), validation_window=120)
             self.assertEqual(len(calls), previous)
+
+    def test_existing_truman_show_evidence_and_rights_fail_closed(self):
+        repo = Path(brain.ROOT)
+        existing = read_json(repo / "content/articles/cinema-01-truman-show-real-photos.json")
+        ref = read_json(repo / "config/movie_reference_index.json")[existing["slug"]]
+        self.assertEqual(ref["imdb_id"], "tt0120382")
+        official = "https://www.paramount.com/movies/the-truman-show"
+        plan = {"film_title": "Шоу Трумана", "year": 1998, "format": "retelling",
+                "spoilers": True, "sources": [official]}
+        def film_resolver(action, payload):
+            self.assertEqual(payload["topic"], "«Шоу Трумана» (1998)")
+            return {"film": {"title": "Шоу Трумана", "original_title": ref["film_title"],
+                "qid": "Q214801", "imdb_id": ref["imdb_id"], "years": [ref["original_year"]],
+                "cast": ["Jim Carrey"], "directors": [ref["director"]]},
+                "documents": [{"url": "https://www.wikidata.org/wiki/Q214801",
+                    "text": "The Truman Show. Peter Weir. 1998."}]}
+        details = editorial_cinema.evidence(plan, {}, resolver=film_resolver, fetch=lambda *args: [
+            {"status": "accessible", "url": official, "text": "The Truman Show. Jim Carrey stars."}])
+        self.assertEqual(details["format"], "review")
+        self.assertFalse(details["spoilers"])
+        self.assertFalse(details["detailed_plot_evidence"])
+        self.assertEqual(details["film"]["imdb_id"], ref["imdb_id"])
+        with self.assertRaisesRegex(Blocked, "film_independent_source_unavailable"):
+            editorial_cinema.evidence(plan, {}, resolver=film_resolver, fetch=lambda *args: [])
+        class Index:
+            class memory:
+                time_left = staticmethod(lambda: 1000)
+        with self.assertRaisesRegex(Blocked, "rights_review_pending"):
+            editorial_cinema.stills({"subject": "Truman in Seahaven"}, "Truman Show", None,
+                                    Index(), details["film"], {})
+        self.assertEqual(brain.settings()["articles_per_channel"]["cinema"], 0)
+
+    def test_unsupported_claim_cannot_be_covered_by_an_unrelated_fragment(self):
+        text = "Наблюдение началось в 1998 году. Объект находился рядом."
+        actual, issue = fact_evidence(text, {"claims": [
+            {"claim": "Объект находился рядом", "source": "S1", "quote": "Достоверная цитата о положении объекта",
+             "verdict": "supported"}]},
+            [{"url": "https://example.org", "status": "accessible",
+              "text": "Достоверная цитата о положении объекта."}])
+        self.assertEqual(len(actual), 1)
+        self.assertTrue(any(line.startswith("unsupported_numeric_claim") for line in issue))
 
     def test_revision_cap_and_rejected_versions(self):
         def report(raw, **details):
