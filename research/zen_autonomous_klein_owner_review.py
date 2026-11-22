@@ -6,7 +6,7 @@ calls rather than silently substituting ChatGPT images. If available: 7 distinct
 images, Groq author, OpenRouter full rewrite, 4 local AI diagnostics, DOCX/HTML,
 owner-encrypted archive, and honest non-publication QA report.
 """
-import base64,hashlib,io,json,os,re,sys,zipfile,html
+import base64,hashlib,io,json,os,re,sys,zipfile,html as htmlmod
 from pathlib import Path
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
@@ -98,14 +98,14 @@ def build_docs(text,pictures,folder):
     doc=Document()
     doc.add_heading(base.TITLE,0)
     html=["<!doctype html><html lang='ru'><meta charset='utf-8'><title>Пилот для согласования</title><body>"]
-    html.append("<h1>"+html.escape(base.TITLE)+"</h1>")
+    html.append("<h1>"+htmlmod.escape(base.TITLE)+"</h1>")
     idx=0
     for piece in re.split(r"(?m)^(\*\*[^*\n]+\*\*)\s*$",text):
         if not piece.strip():continue
         if piece.startswith("**") and piece.endswith("**"):
             title=piece[2:-2]
             doc.add_heading(title,level=2)
-            html.append("<h2>"+html.escape(title)+"</h2>")
+            html.append("<h2>"+htmlmod.escape(title)+"</h2>")
             if idx<len(pictures):
                 name=pictures[idx]["file"]
                 doc.add_picture(str(folder/name),width=Inches(5.9))
