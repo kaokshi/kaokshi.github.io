@@ -203,28 +203,90 @@ class ImageIndex:
         return row
 
 
-def photo(scene, subject, path, index):
-    warm_visual_matcher()
-    had_candidate = False
-    errors = []
-    for find in (commons_photos, nasa_photos):
-        if index.memory.time_left() < 70:
-            raise Blocked("production_deadline")
+def rank_photo_candidates(candidates, scene, topic, scorer=similarity):
+    """Rank every downloaded candidate; do not approve a first loosely related photo.
+
+    A short-list rank is not final validation: ImageIndex.save still applies all
+    CLIP thresholds, duplicate checks, image quality and rights metadata.
+    A clearly better candidate may arrive late in a provider's results.
+    """
+    from PIL import Image, ImageOps
+    scored = []
+    for candidate in candidates:
         try:
-            for n, row in enumerate(find(scene["query"])):
-                if n >= 5 or index.memory.time_left() < 40:
+            with Image.open(io.BytesIO(candidate["bytes"])) as file:
+                if file.format not in ("JPEG", "PNG", "WEBP") or file.width * file.height > 22_000_000:
+                    continue
+                if min(file.size) < 480:
+                    continue
+                image = ImageOps.exif_transpose(file).convert("RGB")
+            model, values, _ = scorer(image, [
+                scene["subject"], topic,
+                "an unrelated image with no connection with this topic"])
+            if len(values) != 3 or not all(isinstance(v, (int, float)) for v in values):
+                continue
+            # Same acceptance gate as ImageIndex.save; rank with a section-specific
+            # advantage rather than topical similarity alone.
+            if values[0] < .19 or values[0] <= values[2] + .015:
+                continue
+            scored.append({**candidate, "preselection_model": model,
+                           "preselection_scene_score": values[0],
+                           "preselection_topic_score": values[1],
+                           "preselection_margin": round(values[0] - values[2], 5)})
+        except (OSError, ValueError, TypeError, Blocked):
+            continue
+    return sorted(scored, key=lambda x: (x["preselection_scene_score"],
+        x["preselection_margin"], x["preselection_topic_score"]), reverse=True)
+
+
+def photo(scene, subject, path, index):
+    """Compare a bounded candidate pool, then pass ranked results to existing QA.
+
+    Strictly preserves licensing/rights review, duplicate prevention, the CLIP
+    reject threshold and the final ImageIndex.save() audit. If none qualifies,
+    fail closed rather than quietly choosing a thematically similar image.
+    """
+    warm_visual_matcher()
+    candidates, errors = [], []
+    seen_urls = set()
+    for find in (commons_photos, nasa_photos):
+        if index.memory.time_left() < 100:
+            break
+        try:
+            for row in find(scene["query"]):
+                if len(candidates) >= 20 or index.memory.time_left() < 75:
                     break
-                had_candidate = True
+                url = row.get("asset_url")
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
                 try:
-                    raw = request(row["asset_url"], row.pop("domains"), timeout=10)
-                    row["availability"] = "downloaded"
-                    return index.save(raw, row, scene, subject, path)
+                    # Never persist a downloaded photo before semantic ranking.
+                    raw = request(url, row["domains"], timeout=10, limit=6_000_000)
+                    metadata = {k: v for k, v in row.items() if k != "domains"}
+                    candidates.append({"bytes": raw, "metadata": metadata})
                 except (ValueError, OSError, ProviderError) as exc:
                     errors.append(str(exc) if isinstance(exc, ProviderError) else type(exc).__name__)
+            if len(candidates) >= 20:
+                break
         except (ProviderError, ValueError, OSError) as exc:
             errors.append(str(exc) if isinstance(exc, ProviderError) else type(exc).__name__)
-    detail = "photo_candidates_rejected" if had_candidate else "no_traceable_photo_found"
-    raise Blocked(detail + (": " + ", ".join(dict.fromkeys(errors)) if errors else ""))
+    if not candidates:
+        raise Blocked("no_traceable_photo_found" + (": " + ", ".join(dict.fromkeys(errors)) if errors else ""))
+    ranked = rank_photo_candidates(candidates, scene, subject)
+    for rank, candidate in enumerate(ranked, 1):
+        if index.memory.time_left() < 45:
+            raise Blocked("production_deadline")
+        metadata = {**candidate["metadata"], "availability": "downloaded",
+                    "candidate_pool_size": len(candidates),
+                    "candidate_rank": rank,
+                    "candidate_selection": "all_available_candidates_ranked_by_scene_clip"}
+        try:
+            return index.save(candidate["bytes"], metadata, scene, subject, path)
+        except (ValueError, OSError, ProviderError) as exc:
+            errors.append(str(exc) if isinstance(exc, ProviderError) else type(exc).__name__)
+    raise Blocked("photo_candidates_rejected_after_ranking" +
+                  (": " + ", ".join(dict.fromkeys(errors)) if errors else ""))
 
 
 def generated(scene, subject, path, index, task, article, channel):
