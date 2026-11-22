@@ -55,6 +55,19 @@ def evaluate(scene, assessment, margin_min=0.0):
         for item in counts:
             if type(observed.get(item["object"])) is not int or observed[item["object"]] != item["value"]:
                 issues.append("count_mismatch_or_unverified:" + item["object"])
+    # Detector results guide *ranking and prompt repair*, not approval.
+    # This lets four clearly detected clocks beat a later two-clock result.
+    machine = assessment.get("object_detector", {})
+    detections = machine.get("detections", {}) if isinstance(machine, dict) else {}
+    if not isinstance(detections, dict):
+        raise Blocked("visual_machine_detections_malformed")
+    for req in counts:
+        prediction = detections.get(req["object"], {})
+        detected_count = prediction.get("count") if isinstance(prediction, dict) else None
+        if type(detected_count) is int and detected_count != req["value"]:
+            issues.append("detector_suggests_count_mismatch:" + req["object"])
+        elif type(detected_count) is not int:
+            issues.append("detector_count_unavailable:" + req["object"])
     return {"passed":not issues,"status":"verified_candidate" if not issues else "owner_review_required",
             "issues":issues,"siglip_relative_margin":margin,
             "caption":caption[:1200],"not_a_fact_or_rights_check":True}
