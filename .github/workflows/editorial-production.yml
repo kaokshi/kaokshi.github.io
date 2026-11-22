@@ -246,7 +246,7 @@ jobs:
           EDITORIAL_LEARNING_PR_TOKEN: ${{ env.EDITORIAL_EFFECTIVE_COMMAND == 'learn' && secrets.EDITORIAL_LEARNING_PR_TOKEN || '' }}
         timeout-minutes: 145
         if: >-
-          env.EDITORIAL_EFFECTIVE_COMMAND != 'skip' &&
+          env.EDITORIAL_EFFECTIVE_COMMAND != 'skip' && env.EDITORIAL_EFFECTIVE_COMMAND != 'quota' &&
           env.EDITORIAL_EFFECTIVE_COMMAND != 'storage-test' &&
           (env.EDITORIAL_MODE != 'encrypted' || env.EDITORIAL_EFFECTIVE_COMMAND != 'review')
         run: |
