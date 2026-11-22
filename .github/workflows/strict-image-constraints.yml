@@ -20,4 +20,4 @@ jobs:
       - name: Install local fixtures
         run: python -m pip install 'Pillow==11.3.0' 'ImageHash==4.3.2'
       - name: Test strict objects, counts, retries, source selection
-        run: python -m unittest -v tests.test_editorial_visual_constraints tests.test_editorial_image_feedback tests.test_editorial_image_reranking
+        run: python -m unittest -v tests.test_editorial_visual_constraints tests.test_editorial_image_feedback tests.test_editorial_image_reranking tests.test_editorial_object_detector
