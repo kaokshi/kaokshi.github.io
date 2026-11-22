@@ -1,0 +1,22 @@
+name: Zen Groq-first critics offline contract
+on:
+  pull_request:
+    paths:
+      - 'research/compare_groq_gemini_critics.py'
+      - 'tests/test_groq_gemini_critics.py'
+      - '.github/workflows/editorial-groq-first-critics-offline.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'cryptography>=44,<48'
+      - name: Test orchestration and privacy without any external API
+        run: python -m unittest discover -s tests -p test_groq_gemini_critics.py -v

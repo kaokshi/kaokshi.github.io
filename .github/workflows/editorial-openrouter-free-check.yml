@@ -1,0 +1,27 @@
+name: Zen OpenRouter free DeepSeek read-only diagnosis
+on:
+  pull_request:
+    paths:
+      - 'research/diagnose_openrouter_free.py'
+      - '.github/workflows/editorial-openrouter-free-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: zen-openrouter-free-check
+  cancel-in-progress: true
+jobs:
+  diagnose-openrouter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax check, no API requests
+        run: python -m py_compile research/diagnose_openrouter_free.py
+      - name: Read-only model catalog and free DeepSeek discovery
+        run: python research/diagnose_openrouter_free.py

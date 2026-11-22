@@ -1,0 +1,45 @@
+name: Zen Cloudflare/Groq/Gemini linked pilot
+on:
+  workflow_dispatch:
+concurrency:
+  group: zen-cloudflare-linked-pilot
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  compare-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      ZEN_REVIEW_PUBLIC_KEY_HEX: c4a92b34baaf877160714955f32ea81021f066d63e6c1ae1587323c2e8a0d561
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install private archive encryption only
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Offline unit tests without any real provider calls
+        run: python -m unittest discover -s tests -p test_cloudflare_model_linked_pilot.py -v
+      - name: Limited Cloudflare model comparison and linked editing
+        run: python research/cloudflare_model_linked_pilot.py
+      - name: Upload metadata only (no texts or tokens)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-cloudflare-linked-pilot-metrics
+          path: ${{ runner.temp }}/zen-cf-pilot/metrics.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload owner-encrypted draft texts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-cloudflare-linked-pilot-owner-encrypted
+          path: ${{ runner.temp }}/zen-cf-pilot/private-owner-benchmark.enc
+          if-no-files-found: ignore
+          retention-days: 7

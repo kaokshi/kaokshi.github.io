@@ -1,0 +1,105 @@
+name: Zen independent Qwen3.5-9B comparison
+on:
+  pull_request:
+    paths:
+      - 'research/compare_editorial_models.py'
+      - 'tests/test_editorial_model_benchmark.py'
+      - '.github/workflows/editorial-model-qwen-benchmark.yml'
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  compare-qwen-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      ZEN_REVIEW_PUBLIC_KEY_HEX: c4a92b34baaf877160714955f32ea81021f066d63e6c1ae1587323c2e8a0d561
+      ZEN_LLM_URL: http://127.0.0.1:8093
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install benchmark dependencies
+        run: python -m pip install 'huggingface-hub==0.36.0' 'cryptography>=44,<48'
+      - name: Run offline benchmark regressions
+        run: python -m unittest discover -s tests -p test_editorial_model_benchmark.py -v
+      - name: Download pinned llama.cpp CPU server
+        run: |
+          curl -fL --retry 3 --connect-timeout 20 \
+            https://github.com/ggml-org/llama.cpp/releases/download/b9222/llama-b9222-bin-ubuntu-x64.tar.gz \
+            -o "$RUNNER_TEMP/llama.tar.gz"
+          mkdir -p "$RUNNER_TEMP/llama"
+          tar -xzf "$RUNNER_TEMP/llama.tar.gz" -C "$RUNNER_TEMP/llama"
+          find "$RUNNER_TEMP/llama" -type f -name llama-server -print
+      - name: Download Qwen3.5-9B quantization and verify model revision and LFS SHA256
+        run: |
+          python - <<'PY'
+          import hashlib,os
+          from huggingface_hub import HfApi,hf_hub_download
+          repo="bartowski/Qwen_Qwen3.5-9B-GGUF"
+          filename="Qwen_Qwen3.5-9B-Q4_K_M.gguf"
+          info=HfApi().model_info(repo,files_metadata=True)
+          sibling=next((x for x in info.siblings if x.rfilename==filename),None)
+          if not sibling or not sibling.lfs:
+              raise SystemExit("Verified Qwen3.5 file metadata unavailable")
+          digest=(sibling.lfs.get("sha256") if isinstance(sibling.lfs,dict)
+                  else getattr(sibling.lfs,"sha256",None))
+          if not digest:
+              raise SystemExit("Verified Qwen3.5 file metadata unavailable")
+          path=hf_hub_download(repo_id=repo,filename=filename,revision=info.sha,
+                               local_dir=os.environ["RUNNER_TEMP"]+"/qwen")
+          h=hashlib.sha256()
+          with open(path,"rb") as f:
+              for chunk in iter(lambda:f.read(4*1024*1024),b""):
+                  h.update(chunk)
+          if h.hexdigest()!=digest:
+              raise SystemExit("Qwen3.5 GGUF SHA256 mismatch")
+          open(os.environ["RUNNER_TEMP"]+"/model-path.txt","w").write(path)
+          print("Model revision and file SHA verified; no user article text logged")
+          PY
+      - name: Start CPU model and wait for readiness
+        run: |
+          SERVER="$(find "$RUNNER_TEMP/llama" -type f -name llama-server | head -1)"
+          test -n "$SERVER"
+          chmod +x "$SERVER"
+          "$SERVER" --model "$(cat "$RUNNER_TEMP/model-path.txt")" \
+            --alias qwen3.5-9b --host 127.0.0.1 --port 8093 \
+            --ctx-size 8192 --threads 4 --parallel 1 --no-ui \
+            > "$RUNNER_TEMP/qwen-server.log" 2>&1 &
+          python - <<'PY'
+          import json,time,urllib.request
+          for _ in range(240):
+              try:
+                  d=json.load(urllib.request.urlopen("http://127.0.0.1:8093/health",timeout=3))
+                  if d.get("status")=="ok":
+                      print("Qwen3.5 local CPU server healthy")
+                      break
+              except Exception:
+                  pass
+              time.sleep(3)
+          else:
+              raise SystemExit("Qwen3.5 CPU server failed health check")
+          PY
+      - name: Generate three independent private benchmark texts
+        run: python research/compare_editorial_models.py --backend qwen
+      - name: Upload numerical metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-qwen-comparison-metrics
+          path: ${{ runner.temp }}/zen-model-compare/qwen-metadata.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload encrypted drafts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-qwen-owner-encrypted
+          path: ${{ runner.temp }}/zen-model-compare/zen-qwen-owner-review.enc
+          if-no-files-found: ignore
+          retention-days: 14
