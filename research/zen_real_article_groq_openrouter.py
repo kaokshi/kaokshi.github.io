@@ -9,6 +9,7 @@ from urllib.error import HTTPError,URLError
 from zipfile import ZipFile,ZIP_DEFLATED
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"src"))
 from editorial_encrypted_review import encrypt
+from diagnose_groq_api import diagnostic_error
 
 TOPIC="Часы на закрытой водонапорной башне: кто переводил стрелки каждую ночь"
 GROQ="openai/gpt-oss-120b"
@@ -22,9 +23,9 @@ AUTHOR=("Напиши оригинальную мистическую истор
 "Без повторов сцен и одинаковых оборотов. В конце ненавязчиво позови подписаться. Верни только статью.")
 def api(url,key,model,prompt,max_tokens):
     body={"model":model,"messages":[{"role":"system","content":SYSTEM},
-      {"role":"user","content":prompt}],"temperature":0.55,"max_tokens":max_tokens}
+      {"role":"user","content":prompt}],"temperature":0.55,**({"max_completion_tokens":max_tokens} if "groq.com" in url else {"max_tokens":max_tokens})}
     req=Request(url,data=json.dumps(body,ensure_ascii=False).encode(),
-      headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},method="POST")
+      headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"ZenEditorialAPIDiagnostic/1.0"},method="POST")
     with urlopen(req,timeout=150) as resp:data=json.load(resp)
     choices=data.get("choices") or []
     if not choices:raise ValueError("empty_choices")
@@ -77,7 +78,8 @@ def main():
             r["stages"].append(d);return text
         except (HTTPError,URLError,ValueError,TimeoutError,OSError,KeyError,TypeError) as e:
             r["stages"].append({"stage":name,"provider":provider,"status":"failed",
-                "error_type":type(e).__name__,"http_status":e.code if isinstance(e,HTTPError) else None})
+                "error_type":type(e).__name__,"http_status":e.code if isinstance(e,HTTPError) else None,
+                **({"safe_diagnostic":diagnostic_error(e)} if isinstance(e,HTTPError) and provider=="groq" else {})})
             return None
     draft=stage("author","groq","https://api.groq.com/openai/v1/chat/completions",
       env["GROQ_API_KEY"],GROQ,AUTHOR,3200)
