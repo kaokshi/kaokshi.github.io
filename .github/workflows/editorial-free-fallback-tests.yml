@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install minimal CPU test dependencies
-        run: python -m pip install -r requirements-quality.txt python-docx
+        run: python -m pip install -r requirements-quality.txt python-docx 'cryptography>=44,<48'
       - name: Compile changed code
         run: python -m py_compile src/editorial_brain.py src/editorial_free_fallback.py src/editorial_memory.py src/editorial_delivery.py tests/test_editorial_quota_fallback.py tests/test_editorial_interrupted_provider.py tests/test_editorial_atomic_delivery.py
       - name: Verify free fallback without API calls or publication
