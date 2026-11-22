@@ -290,28 +290,61 @@ def photo(scene, subject, path, index):
 
 
 def generated(scene, subject, path, index, task, article, channel):
+    """Generate a scene; optional three-model feedback is an isolated experiment.
+
+    Default production behavior is unchanged. No bogus image-edit API: each retry
+    is a NEW text-to-image Klein generation, charged against existing daily caps.
+    """
+    import os
     warm_visual_matcher()
     style = ("Cinematic realistic urban mystery, restrained color grading and atmospheric lighting."
              if channel == "legends" else
              "Modern moderately stylized science editorial illustration with a coherent muted palette. "
              "Explanatory concept art with accurate geometry where applicable. Do not mimic documentary "
              "evidence, scientific measurements or labeled diagrams.")
-    for attempt in range(2):
+    experimental = os.getenv("EDITORIAL_IMAGE_FEEDBACK_EXPERIMENT") == "true"
+    max_attempts = 3 if experimental else 2
+    feedback = None
+    if experimental:
+        from .editorial_image_feedback import inspect_visual, review_decision, repair_prompt
+    for attempt in range(max_attempts):
         if index.memory.time_left() < 150:
             raise Blocked("production_deadline")
         prompt = f"{scene['brief']} Depict {scene['subject']}. {style} Landscape. No text or watermark."
         if attempt:
-            prompt += " Isolate the main subject in a clear composition with distinct foreground and background."
+            if experimental and feedback is not None:
+                prompt = repair_prompt(scene, feedback, style=style)
+            else:
+                prompt += " Isolate the main subject in a clear composition with distinct foreground and background."
         raw, params = index.memory.call(task, article, "klein", lambda: klein(prompt))
+        if experimental:
+            # Fail closed when the additional models cannot run: never silently
+            # bypass the selected review mode.
+            feedback = inspect_visual(raw, scene)
+            decision = review_decision(scene, feedback)
+            if not decision["passed"]:
+                if attempt + 1 == max_attempts:
+                    raise Blocked("generated_image_semantic_feedback_exhausted")
+                continue
         try:
-            return index.save(raw, {"kind": "illustration", "source": "Cloudflare Workers AI",
-                                    "model": KLEIN, "prompt": prompt, "parameters": params,
-                                    "rights_status": "rights_review_pending",
-                                    "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
-                                    "label": "ИИ-иллюстрация" if channel != "legends" else None},
-                              scene, subject, path)
+            metadata = {"kind": "illustration", "source": "Cloudflare Workers AI",
+                        "model": KLEIN, "prompt": prompt, "parameters": params,
+                        "rights_status": "rights_review_pending",
+                        "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
+                        "label": "ИИ-иллюстрация" if channel != "legends" else None}
+            if experimental:
+                metadata["visual_feedback"] = {
+                    "siglip_model": feedback["siglip_model"],
+                    "florence_model": feedback["florence_model"],
+                    "siglip_relative_margin": feedback["siglip_relative_margin"],
+                    "florence_caption": feedback["florence_caption"],
+                    "candidate_status": decision["status"],
+                    "not_fact_or_rights_proof": True,
+                    "generation_attempt": attempt + 1,
+                }
+            return index.save(raw, metadata, scene, subject, path)
         except (OSError, ValueError):
-            if attempt:
+            if attempt + 1 == max_attempts:
                 raise Blocked("generated_image_quality_or_match_failed") from None
     raise AssertionError("unreachable image attempt")
 
