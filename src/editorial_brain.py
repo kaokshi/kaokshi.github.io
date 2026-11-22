@@ -114,10 +114,30 @@ class Article:
                     raise
                 return send(task, tokens)
 
-        result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
-                                           "prompt_sha256": digest(prompt), **(metadata or {})},
-                           execute, minimum_seconds=130,
-                           validator=(lambda response: validate(json_reply(response))) if validate else None)
+        try:
+            result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
+                                               "prompt_sha256": digest(prompt), **(metadata or {})},
+                               execute, minimum_seconds=130,
+                               validator=(lambda response: validate(json_reply(response))) if validate else None)
+        except Blocked as exc:
+            # Route a quota-stopped Groq stage to a separately recorded, verified-free
+            # OpenRouter task. Do not hide authentication failures, malformed answers,
+            # incomplete previous requests or any editorial validation errors.
+            reason = str(exc)
+            quota_blockers = {
+                "call_budget_exhausted",
+                "groq_quota_wait_exceeds_deadline",
+                "groq_daily_quota_reset_pending",
+                "http_429_groq_daily_quota",
+                "provider_stopped_http_429_groq_daily_quota",
+            }
+            if (provider != "groq" or stage.startswith("editorial-audit")
+                    or reason not in quota_blockers):
+                raise
+            return self.model(stage, "openrouter", prompt, validate=validate,
+                              tokens=max(7800, tokens),
+                              metadata={**(metadata or {}), "fallback_from": "groq",
+                                        "fallback_reason": reason}, repair=repair)
         return json_reply(result) if validate else result["text"]
 
     def source_seed(self, history):
