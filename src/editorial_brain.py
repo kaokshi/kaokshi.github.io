@@ -430,7 +430,7 @@ class Article:
                 self.pictures.append(result)
             except Blocked as exc:
                 self.blockers.append(f"image_{index:02d}: {exc}")
-                if str(exc) in ("production_deadline", "visual_matcher_unavailable"):
+                if str(exc) == "production_deadline" or str(exc).startswith("visual_matcher_unavailable"):
                     break
         if len(self.pictures) != len(plan["images"]):
             self.blockers.append("incomplete_image_plan")
@@ -541,6 +541,7 @@ def status(memory):
             "calls": dict(Counter(x["provider"] for x in memory.data["calls"])),
             "production_started_at": memory.data.get("started_at"),
             "late_start_seconds": memory.data.get("late_start_seconds"),
+            "provider_stops": memory.data["provider_stops"],
             "delivery": memory.data.get("delivery", {"status": "not_connected"}),
             "publication_authorized": False}
 

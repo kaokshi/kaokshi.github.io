@@ -312,6 +312,8 @@ def main():
         else:
             result = save_outputs(private_path(args.root), args.date, private_path(args.output))
         print(json.dumps(result, ensure_ascii=False))
+        if args.command == "reference":
+            return 2
     except (Blocked, OSError, ValueError, KeyError) as exc:
         print(json.dumps({"status": str(exc) if isinstance(exc, Blocked) else type(exc).__name__}))
         return 2

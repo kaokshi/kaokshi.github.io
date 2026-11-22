@@ -106,10 +106,10 @@ def clip_model():
     try:
         from transformers import CLIPModel, CLIPProcessor
         model_id = "openai/clip-vit-base-patch32"
-        processor = CLIPProcessor.from_pretrained(model_id)
+        processor = CLIPProcessor.from_pretrained(model_id, use_fast=False)
         return model_id, processor, CLIPModel.from_pretrained(model_id).eval()
-    except (ImportError, OSError, ValueError, RuntimeError):
-        raise Blocked("visual_matcher_unavailable") from None
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        raise Blocked("visual_matcher_unavailable_" + type(exc).__name__) from None
 
 
 VISUAL_LOCK = Lock()
@@ -131,8 +131,8 @@ def similarity(image, captions):
                 result = model(**batch)
                 scores = (result.logits_per_image / model.logit_scale.exp())[0].tolist()
                 embedding = result.image_embeds[0].tolist()
-    except (ImportError, OSError, ValueError, RuntimeError, TypeError):
-        raise Blocked("visual_matcher_unavailable") from None
+    except (ImportError, OSError, ValueError, RuntimeError, TypeError) as exc:
+        raise Blocked("visual_matcher_unavailable_" + type(exc).__name__) from None
     return model_id, [round(x, 4) for x in scores], [round(x, 4) for x in embedding]
 
 
