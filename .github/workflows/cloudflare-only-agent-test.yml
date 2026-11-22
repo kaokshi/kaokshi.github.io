@@ -1,0 +1,46 @@
+name: Isolated Cloudflare-only existing editorial agent
+on:
+  push:
+    branches: [test/cloudflare-only-agent-20261122]
+    paths: [.github/workflows/cloudflare-only-agent-test.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  cloudflare-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 160
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ZEN_TEST_PUBLIC_KEY: 50dbd2297b182f4d14678f6649d82d97780f8548457c532b3e83a0bd0511ea02
+      EDITORIAL_CF_FREE_ONLY: 'true'
+      HF_HUB_DISABLE_XET: '1'
+      OMP_NUM_THREADS: '2'
+      TOKENIZERS_PARALLELISM: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install editorial agents and visual tools
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
+          python -m pip install -r requirements-production.txt
+          aiw-ru models install modernbert lightgbm transformer || echo 'Detector setup incomplete; article must remain draft.'
+      - name: Execute existing agent with a Cloudflare-only text adapter
+        timeout-minutes: 125
+        run: python -m research.zen_cloudflare_only_e2e
+      - name: Upload encrypted article and image package only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-cloudflare-only-sealed-owner-review
+          path: |
+            benchmark/owner-review.enc
+            benchmark/public-status.json
+          if-no-files-found: warn
+          retention-days: 2
