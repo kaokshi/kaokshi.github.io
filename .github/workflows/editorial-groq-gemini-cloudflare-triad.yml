@@ -1,0 +1,50 @@
+name: Zen Groq Gemini Cloudflare three-stage pilot
+on:
+  pull_request:
+    paths:
+      - 'research/compare_groq_gemini_cloudflare_triad.py'
+      - 'tests/test_groq_gemini_cloudflare_triad.py'
+      - '.github/workflows/editorial-groq-gemini-cloudflare-triad.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: zen-cloudflare-linked-pilot
+  cancel-in-progress: false
+jobs:
+  three-stage-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 27
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ZEN_REVIEW_PUBLIC_KEY_HEX: c4a92b34baaf877160714955f32ea81021f066d63e6c1ae1587323c2e8a0d561
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install owner-only encryption
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Verify no-network triad tests
+        run: python -m unittest discover -s tests -p test_groq_gemini_cloudflare_triad.py -v
+      - name: Compare Groq author Gemini expander Cloudflare independent editor
+        run: python research/compare_groq_gemini_cloudflare_triad.py
+      - name: Save only metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-groq-gemini-cloudflare-triad-metrics
+          path: ${{ runner.temp }}/zen-triad-pilot/metrics.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Save only owner-encrypted article versions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-groq-gemini-cloudflare-triad-owner-encrypted
+          path: ${{ runner.temp }}/zen-triad-pilot/private-triad-review.enc
+          if-no-files-found: ignore
+          retention-days: 7
