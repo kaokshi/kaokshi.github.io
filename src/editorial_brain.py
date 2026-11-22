@@ -423,6 +423,8 @@ class Article:
             existing = read_json(path.with_suffix(".json"))
             if existing and path.is_file() and digest(path.read_bytes()) == existing["sha256"]:
                 self.pictures.append(existing)
+                if (existing.get("visual_feedback") or {}).get("candidate_status") == "owner_review_required":
+                    self.blockers.append(f"image_{index:02d}: visual_constraints_owner_review_required")
                 continue
             try:
                 if self.film:
@@ -442,6 +444,8 @@ class Article:
                 if not path.is_file() or digest(path.read_bytes()) != result["sha256"]:
                     raise Blocked("stored_image_unavailable_or_sha_mismatch")
                 self.pictures.append(result)
+                if (result.get("visual_feedback") or {}).get("candidate_status") == "owner_review_required":
+                    self.blockers.append(f"image_{index:02d}: visual_constraints_owner_review_required")
             except Blocked as exc:
                 self.blockers.append(f"image_{index:02d}: {exc}")
                 if str(exc) == "production_deadline" or str(exc).startswith("visual_matcher_unavailable"):
