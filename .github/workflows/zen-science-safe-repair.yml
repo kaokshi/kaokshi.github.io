@@ -1,0 +1,52 @@
+name: Zen science owner article precise safety correction
+on:
+  pull_request:
+    paths:
+      - 'research/zen_science_safe_repair.py'
+      - '.github/workflows/zen-science-safe-repair.yml'
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  repair-existing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TOKENIZERS_PARALLELISM: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-editorial.txt
+      - run: |
+          python -m pip install -r requirements-editorial.txt
+          python -m pip install Pillow python-docx
+          aiw-ru models install modernbert lightgbm transformer
+      - name: Read the exact finished prior science artifact; no extra Groq/OpenRouter/NASA requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-science"
+          gh run download 45027517283 --repo kaokshi/kaokshi.github.io --name zen-science-owner-readable --dir "$RUNNER_TEMP/source-science"
+          test -f "$RUNNER_TEMP/source-science/owner-review-readable.zip"
+      - name: Remove unverified numeric prediction, recheck final SHA, rebuild owner DOCX
+        run: python research/zen_science_safe_repair.py "$RUNNER_TEMP/source-science/owner-review-readable.zip"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zen-science-corrected-readable
+          path: ${{ runner.temp }}/zen-science-repaired/science-corrected-owner-review.zip
+          if-no-files-found: ignore
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zen-science-corrected-status
+          path: |
+            ${{ runner.temp }}/zen-science-repaired/report.json
+            ${{ runner.temp }}/zen-science-repaired/failure.json
+          if-no-files-found: warn
+          retention-days: 2
