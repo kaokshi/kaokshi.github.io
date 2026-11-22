@@ -46,6 +46,18 @@ class AtomicOwnerDeliveryTests(unittest.TestCase):
             publish_verified_directory(source, final)
             self.assertEqual((final / "Статья.html").read_text(encoding="utf-8"), "исходник")
 
+    def test_conflicting_zip_paths_rejected_before_any_write(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            destination = root / "restored"
+            buffer = BytesIO()
+            with ZipFile(buffer, "w") as archive:
+                archive.writestr("article", "looks like a file")
+                archive.writestr("article/images/1.jpg", "image")
+            with self.assertRaisesRegex(Blocked, "unsafe_encrypted_archive"):
+                unpack(buffer.getvalue(), destination)
+            self.assertFalse((destination / "article").exists())
+
     def test_restore_does_not_follow_symlinked_directory(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)
