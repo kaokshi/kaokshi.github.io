@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: zen-cloudflare-linked-pilot
+  group: zen-groq-gemini-cloudflare-triad
   cancel-in-progress: false
 jobs:
   three-stage-benchmark:
