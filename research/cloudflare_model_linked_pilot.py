@@ -24,7 +24,7 @@ MODELS={
  "gemma4":"@cf/google/gemma-4-26b-a4b-it",
  "mistral24":"@cf/mistralai/mistral-small-3.1-24b-instruct",
 }
-LIMITS={"cloudflare":12,"groq":3,"gemini":3}
+LIMITS={"cloudflare":12,"groq":6,"gemini":3}
 RULES=("Русский Яндекс Дзен. Живой оригинальный текст, без шаблонных фраз. "
        "3000–6000 символов без пробелов, 4–8 разделов с **жирными заголовками**. "
        "Каждый блок добавляет новые факты или события. Подписка на канал в финале. "
@@ -98,7 +98,7 @@ def run(root,env=None,cf=call_cf,external=generate,select_model="qwen38"):
         for channel,task in TASKS.items():
             if result["calls"]["cloudflare"]>=LIMITS["cloudflare"]:
                 break
-            prompt="Канал: "+CHANNEL_NAMES[channel]+"\\nЗаголовок: "+task["title"]+"\\n"+task["brief"]
+            prompt="Канал: "+CHANNEL_NAMES[channel]+"\nЗаголовок: "+task["title"]+"\n"+task["brief"]
             start=monotonic()
             try:
                 result["calls"]["cloudflare"]+=1
@@ -132,7 +132,7 @@ def run(root,env=None,cf=call_cf,external=generate,select_model="qwen38"):
                     "ниже 3000 знаков без пробелов. 3000–6000 знаков; 4–8 "
                     "блоков с **жирным заголовком**, CTA в конце. "
                     "Ограничения: "+task["brief"]+
-                    "\\nОригинал для редактуры:\\n"+source)
+                    "\nОригинал для редактуры:\n"+source)
             started=monotonic()
             try:
                 result["calls"][provider]+=1
@@ -149,8 +149,8 @@ def run(root,env=None,cf=call_cf,external=generate,select_model="qwen38"):
             try:
                 result["calls"]["groq"]+=1
                 initial,_=external("groq","Канал: "+CHANNEL_NAMES[channel]+
-                    "\\nТема: "+task["title"]+"\\n"+task["brief"]+
-                    "\\n"+RULES,env=env)
+                    "\nТема: "+task["title"]+"\n"+task["brief"]+
+                    "\n"+RULES,env=env)
                 if not initial:
                     raise ValueError("empty_groq_draft")
                 save("groq",channel,"author",initial,0)
@@ -159,7 +159,7 @@ def run(root,env=None,cf=call_cf,external=generate,select_model="qwen38"):
                 modified,_=cf(MODELS[chosen],"Разверни и улучши этот черновик, "
                     "проверь связность и детали, не выдумывай факты. "
                     "Сохрани 3000–6000 символов без пробелов, жирные заголовки "
-                    "каждого раздела, CTA в конце.\\n"+initial,env)
+                    "каждого раздела, CTA в конце.\n"+initial,env)
                 save("groq->"+chosen,channel,"edited",modified,monotonic()-begin)
             except (HTTPError,URLError,TimeoutError,OSError,ValueError,KeyError,TypeError) as exc:
                 failed("groq->"+chosen,channel,"edited",exc)
@@ -186,7 +186,7 @@ def main():
         encrypted.write_bytes(encrypt(stream.getvalue(),pubkey))
         encrypted.chmod(0o600)
         result["encrypted_packet"]=True
-    (root/"metrics.json").write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\\n",
+    (root/"metrics.json").write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",
                                       encoding="utf-8")
     print(json.dumps({"status":result["status"],"calls":result["calls"],
         "results":[{k:v for k,v in row.items() if k in
