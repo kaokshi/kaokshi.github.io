@@ -1,0 +1,39 @@
+name: Zen real article Groq OpenRouter limited pilot
+on:
+  pull_request:
+    paths:
+      - 'research/zen_real_article_groq_openrouter.py'
+      - '.github/workflows/zen-real-article-groq-openrouter.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  editorial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      ZEN_REVIEW_PUBLIC_KEY_HEX: c4a92b34baaf877160714955f32ea81021f066d63e6c1ae1587323c2e8a0d561
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'cryptography>=44,<48'
+      - name: One Groq article, one free OpenRouter critique, at most one Groq edit
+        run: python research/zen_real_article_groq_openrouter.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zen-groq-openrouter-numeric-report
+          path: ${{ runner.temp }}/zen-real-article/metrics.json
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zen-groq-openrouter-owner-encrypted-article
+          path: ${{ runner.temp }}/zen-real-article/owner-review.enc
+          if-no-files-found: ignore
+          retention-days: 7
