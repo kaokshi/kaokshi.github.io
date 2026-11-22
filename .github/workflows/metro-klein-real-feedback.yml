@@ -1,5 +1,5 @@
 name: Real Klein metro scene repair (free-only, review-only)
-# Repeat with isolated diagnostics of visual reviewer error
+# Fix long text truncation in SigLIP reviewer and repeat bounded generation
 on:
   push:
     branches: [experiment/editorial-image-feedback-loop-20261123]
