@@ -18,7 +18,9 @@ from PIL import Image
 
 from src.editorial_brain import Memory, review, settings
 from src.editorial_delivery import restore_blob, retrieve, save_outputs
-from src.editorial_memory import digest
+from src.editorial_groq_budget import snapshot
+from src.editorial_groq_ledger import archive_document, collection
+from src.editorial_memory import digest, read_json, write_json
 from src.editorial_package import ArticleHTML, package
 from src.editorial_providers import Blocked
 from src.editorial_review import canonical, parse_article
@@ -113,6 +115,27 @@ class StorageTests(unittest.TestCase):
             self.assertFalse((root / "wrong").exists())
 
 
+def write_quota_fixture(out, run):
+    now = datetime.now(timezone.utc)
+    base = {"lane": "production", "at": now.isoformat()}
+    docs = [archive_document("reservation", run, [{**base, "request_id": "a" * 32,
+            "status": "run_reservation", "estimated_total_tokens": 50000, "estimated_requests": 34}]),
+            archive_document("usage", run, [{**base, "request_id": "b" * 32,
+            "status": "responded", "total_tokens": 6280, "input_tokens": 3000, "output_tokens": 3280}])]
+    write_json(out / "groq-synthetic.json", docs)
+
+
+def check_quota_fixture(source):
+    documents = read_json(source / "groq-synthetic.json")
+    now = datetime.fromisoformat(documents[0]["rows"][0]["at"])
+    before = snapshot(collection(documents[:1]), now)
+    after = snapshot(collection(documents + documents), now)
+    if before["accounted_tokens"] != 50000 or after["known_tokens"] != 6280 or after["requests"] != 1:
+        raise ValueError("fixture_groq_settlement_mismatch")
+    return {"fixture_groq_reserved_tokens": before["accounted_tokens"],
+            "fixture_groq_settled_tokens": after["known_tokens"]}
+
+
 def run_ci_fixture(command, encrypted):
     """Public, reproducible fixture credentials apply exclusively to the synthetic texts above."""
     run = os.environ["GITHUB_RUN_ID"].encode()
@@ -124,8 +147,9 @@ def run_ci_fixture(command, encrypted):
             root = workspace / "synthetic-state"
             build_fixture(root)
             result = save_outputs(root, DAY, encrypted)
+            write_quota_fixture(encrypted, os.environ["GITHUB_RUN_ID"] + "." + os.environ["GITHUB_RUN_ATTEMPT"])
         elif command == "restore":
-            result = validate_restored(encrypted, workspace, key)
+            result = {**validate_restored(encrypted, workspace, key), **check_quota_fixture(encrypted)}
         else:
             raise ValueError("unknown_fixture_command")
         print(json.dumps(result))

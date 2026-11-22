@@ -239,7 +239,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: editorial-storage-fixture
-          path: ${{ runner.temp }}/editorial-storage-fixture/*.enc
+          path: |
+            ${{ runner.temp }}/editorial-storage-fixture/*.enc
+            ${{ runner.temp }}/editorial-storage-fixture/groq-synthetic.json
           if-no-files-found: error
           retention-days: 1
       - name: Check the existing encrypted review at delivery time
@@ -359,7 +361,7 @@ jobs:
         with:
           name: editorial-storage-fixture
           path: ${{ runner.temp }}/editorial-storage-fixture
-      - name: Restore, verify SHA-256 and open DOCX and HTML on the second runner
+      - name: Restore package and settle synthetic Groq accounting on the second runner
         run: |
           python -m pip install -r requirements-quality.txt 'python-docx==1.2.0' 'cryptography>=44,<48'
           PYTHONPATH=. python tests/test_editorial_storage.py restore "$RUNNER_TEMP/editorial-storage-fixture"

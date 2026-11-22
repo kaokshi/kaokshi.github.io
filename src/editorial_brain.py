@@ -15,7 +15,7 @@ import fcntl
 from . import editorial_cinema as cinema
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
-from .editorial_groq_budget import forecast, snapshot
+from .editorial_groq_budget import forecast
 from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
@@ -169,9 +169,13 @@ class Article:
                        f"Публичные сигналы интереса: {json.dumps(signals, ensure_ascii=False)}. "
                        f"Недавние релизы: {json.dumps(releases, ensure_ascii=False)}.")
         for shift in range(2):
-            if shift and snapshot(self.memory.groq_rows(), datetime.now(timezone.utc))["accounted_tokens"] >= (
-                    self.config["groq_budget"]["target_daily_tokens"][1]):
-                raise Blocked("groq_optional_topic_retry_deferred")
+            if shift:
+                with self.memory.lock:
+                    projection = groq_plan(self.memory)
+                if (projection["groq_usage"]["accounted_tokens"] >= self.config["groq_budget"]["target_daily_tokens"][1]
+                        or not all(projection[key] for key in ("fits_editorial_budget",
+                            "fits_observed_organization_headroom", "deadline_estimate_fits"))):
+                    raise Blocked("groq_optional_topic_retry_deferred")
             def is_valid(plan):
                 if not isinstance(plan.get("topics"), list):
                     raise Blocked("topic_list_missing")
