@@ -92,6 +92,14 @@ class Article:
         return self.memory.task(self.id, stage, executor, inputs, fn, **kwargs)
 
     def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
+        if provider == "groq" and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
+            # Authenticated, zero-price OpenRouter catalog was checked by the workflow.
+            # Do not contact Groq at all when its daily capacity is unavailable.
+            return self.model(stage, "openrouter", prompt, validate=validate,
+                              tokens=max(7800, tokens or 0),
+                              metadata={**(metadata or {}), "fallback_from": "groq",
+                                        "fallback_reason": "groq_preflight_capacity_unavailable"},
+                              repair=repair)
         if tokens is None:
             tokens = 3700 if provider == "groq" else 7800
 
