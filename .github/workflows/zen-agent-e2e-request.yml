@@ -1,0 +1,25 @@
+name: Request isolated production comparison (no publish)
+on:
+  push:
+    branches: [test/zen-agent-e2e-20261122]
+    paths: [.github/workflows/zen-agent-e2e-request.yml]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Request existing reviewed agent's isolated full cycle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run editorial-production.yml \
+            --repo "${{ github.repository }}" \
+            --ref codex/editorial-production \
+            --field command=daily \
+            --field isolated_validation=true \
+            --field validation_free_accounts_confirmed=true \
+            --field validation_label=compareqwen
+          echo "Requested existing production workflow in isolated validation mode."
