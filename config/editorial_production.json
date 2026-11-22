@@ -60,5 +60,23 @@
   "groq_quota_last_known_block": {
     "utc_day": "2026-11-22",
     "run_id": 45032321936
+  },
+  "groq_budget": {
+    "daily_tokens": 50000,
+    "repair_reserve_tokens": 15000,
+    "experimental_daily_tokens": 25000,
+    "target_daily_tokens": [
+      10000,
+      25000
+    ],
+    "organization_limits": {},
+    "forecast_tokens": {
+      "topics": 2100,
+      "draft": 4500,
+      "editorial-audit": 4300,
+      "image-plan": 2400,
+      "repair": 4700
+    },
+    "forecast_non_groq_seconds": 1200
   }
 }

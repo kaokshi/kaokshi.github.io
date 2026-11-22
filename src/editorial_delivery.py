@@ -215,12 +215,15 @@ def trusted_run(run_id, validation=False, refs=None):
             and row["event"] in {"workflow_dispatch", "schedule"})
 
 
-def artifact_rows(prefix, *, refs=None, day=None):
+def artifact_rows(prefix, *, refs=None, day=None, run_attempt_suffix=False):
     suffix = f"&name={prefix}{day}" if day else ""
     pages = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/artifacts?per_page=100{suffix}",
                           "--paginate", "--slurp"))
+    pattern = re.escape(prefix) + r"\d{4}-\d{2}-\d{2}"
+    if run_attempt_suffix:
+        pattern += r"(?:-[1-9]\d*)?"
     rows = sorted((row for page in pages for row in page.get("artifacts", [])
-                  if re.fullmatch(re.escape(prefix) + r"\d{4}-\d{2}-\d{2}", row["name"])
+                  if re.fullmatch(pattern, row["name"])
                   and (not day or row["name"] == prefix + day) and not row["expired"]), key=lambda row: (row["name"], row["created_at"], row["id"]),
                   reverse=True)
     checked = {}

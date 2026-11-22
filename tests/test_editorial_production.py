@@ -209,7 +209,7 @@ class ProductionTests(unittest.TestCase):
             before = article.current["text_sha256"]
             candidates = (f"**Начало**\n\nКандидат {i}." for i in range(5))
             with patch.object(article, "model", side_effect=lambda *a, **k: next(candidates)) as edit, \
-                    patch.object(article, "inspect", side_effect=lambda candidate, reference: report(candidate["raw"])):
+                    patch.object(article, "inspect", side_effect=lambda candidate, reference, **kwargs: report(candidate["raw"])):
                 article.revise("Сюжет")
             self.assertEqual(edit.call_count, 5)
             self.assertEqual(article.assistant, "assistant_handoff_pending")

@@ -15,6 +15,7 @@ import fcntl
 from . import editorial_cinema as cinema
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
+from .editorial_groq_budget import forecast, snapshot
 from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
@@ -90,23 +91,28 @@ class Article:
     def task(self, stage, executor, inputs, fn, **kwargs):
         return self.memory.task(self.id, stage, executor, inputs, fn, **kwargs)
 
-    def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None):
+    def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
         if tokens is None:
             tokens = 3700 if provider == "groq" else 7800
+
+        def send(task, ceiling):
+            callback = lambda: text_call(provider, prompt, ceiling)
+            if provider == "groq":
+                return self.memory.call_groq(task, self.id, stage, prompt, ceiling, callback,
+                                             repair=repair or stage.startswith("repair-"))
+            return self.memory.call(task, self.id, provider, callback)
 
         def execute(task):
             seen = self.memory.response(task)
             if seen is not None:
                 return seen
             try:
-                return self.memory.call(task, self.id, provider, lambda: text_call(provider, prompt, tokens))
+                return send(task, tokens)
             except ProviderError as exc:
-                if str(exc) == "http_429_groq_request_exceeds_token_window" and tokens > 2700:
-                    return self.memory.call(task, self.id, provider,
-                                            lambda: text_call(provider, prompt, max(2600, tokens * 2 // 3)))
+                # Never shrink a required article merely to fit a provider window.
                 if exc.retry_after is None or self.memory.time_left() < exc.retry_after + 125:
                     raise
-                return self.memory.call(task, self.id, provider, lambda: text_call(provider, prompt, tokens))
+                return send(task, tokens)
 
         result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
                                            "prompt_sha256": digest(prompt), **(metadata or {})},
@@ -163,6 +169,9 @@ class Article:
                        f"Публичные сигналы интереса: {json.dumps(signals, ensure_ascii=False)}. "
                        f"Недавние релизы: {json.dumps(releases, ensure_ascii=False)}.")
         for shift in range(2):
+            if shift and snapshot(self.memory.groq_rows(), datetime.now(timezone.utc))["accounted_tokens"] >= (
+                    self.config["groq_budget"]["target_daily_tokens"][1]):
+                raise Blocked("groq_optional_topic_retry_deferred")
             def is_valid(plan):
                 if not isinstance(plan.get("topics"), list):
                     raise Blocked("topic_list_missing")
@@ -227,7 +236,7 @@ class Article:
         self.memory.save()
         return {"raw": raw, "article": structured, "text_sha256": sha, "report": report}
 
-    def inspect(self, candidate, reference=None):
+    def inspect(self, candidate, reference=None, *, repair=False):
         raw, sha = candidate["raw"], candidate["text_sha256"]
         facts = source_context(self.records)
         def audit(text, language_issues):
@@ -254,7 +263,8 @@ class Article:
             for provider in ("groq", "openrouter"):
                 try:
                     return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
-                                      metadata={"text_sha256": sha}, tokens=2900 if provider == "groq" else 8300)
+                                      metadata={"text_sha256": sha}, tokens=2900 if provider == "groq" else 8300,
+                                      repair=repair)
                 except Blocked as exc:
                     last_error = exc
                     if provider == "openrouter" and str(exc) == "empty_visible_content":
@@ -361,7 +371,7 @@ class Article:
                                       "before": self.current["text_sha256"], "after": candidate["text_sha256"]})
                 continue
             seen.add(candidate["text_sha256"])
-            candidate = self.inspect(candidate, self.current)
+            candidate = self.inspect(candidate, self.current, repair=True)
             accepted = improves(report, candidate["report"])
             self.attempts.append(self.change("agent", provider, self.current, candidate, accepted))
             if accepted:
@@ -525,11 +535,44 @@ def settings():
         raise Blocked("invalid_active_channel")
     if any(type(n) is not int or not 0 <= n <= 6 for n in cfg["articles_per_channel"].values()):
         raise Blocked("invalid_article_count")
+    budget = cfg["groq_budget"]
+    lower, upper = budget["target_daily_tokens"]
+    if (not 0 < lower <= upper <= budget["daily_tokens"] or
+            not 0 < budget["repair_reserve_tokens"] < budget["daily_tokens"] or
+            not 0 < budget["experimental_daily_tokens"] or
+            not all(key in {"rpd", "tpd", "rpm", "tpm", "itpm", "otpm"}
+                    and type(value) is int and value > 0 for key, value in budget["organization_limits"].items())):
+        raise Blocked("invalid_groq_budget")
     return cfg
 
 
 def deadline(day, hour, tz):
     return datetime.combine(date.fromisoformat(day), time.fromisoformat(hour), tz).astimezone(timezone.utc)
+
+
+def groq_plan(memory):
+    ready = {"review_pending", "rights_review_pending"}
+    pending = Counter()
+    count = 0
+    for channel, amount in memory.config["articles_per_channel"].items():
+        for index in range(1, amount + 1):
+            article = f"{channel}-{index:02d}"
+            entry = memory.data["articles"].get(article, {})
+            if entry.get("status") in ready:
+                continue
+            count += 1
+            tasks = [t for t in memory.data["tasks"].values() if t["article"] == article and
+                     t["status"] == "completed"]
+            done = {t["operation"] for t in tasks}
+            if not entry.get("title") and channel == "legends":
+                pending["topics"] += 1
+            for stage in ("draft", "editorial-audit", "image-plan"):
+                if not any(stage == name or name.startswith(stage + "-") for name in done):
+                    pending[stage] += 1
+            if not any(name.startswith("repair-") for name in done):
+                pending["repair"] += 1
+    return forecast(memory.groq_rows(), memory.config["groq_budget"], memory.groq_lane,
+                    datetime.now(timezone.utc), memory.time_left(), count, pending)
 
 
 def status(memory):
@@ -542,6 +585,7 @@ def status(memory):
             "production_started_at": memory.data.get("started_at"),
             "late_start_seconds": memory.data.get("late_start_seconds"),
             "provider_stops": memory.data["provider_stops"],
+            "groq_forecast": groq_plan(memory),
             "delivery": memory.data.get("delivery", {"status": "not_connected"}),
             "publication_authorized": False}
 
@@ -644,7 +688,8 @@ def execute(command, state, private_git=None, day=None, validation_window=None, 
         cutoff = deadline(day, cfg["production_stop"], tz)
         if validation_window:
             cutoff = datetime.now(timezone.utc) + timedelta(minutes=validation_window)
-        memory = Memory(state, day, cutoff, cfg, private_git, retry=command == "retry")
+        memory = Memory(state, day, cutoff, cfg, private_git, retry=command == "retry",
+                        lane="experiment" if validation_window else "production")
         if command == "health":
             return health(private_git)
         if command == "status":
@@ -676,6 +721,8 @@ def execute(command, state, private_git=None, day=None, validation_window=None, 
             memory.data["late_start_seconds"] = max(0, round((datetime.now(timezone.utc) -
                                                               deadline(day, cfg["start"], tz)).total_seconds()))
             memory.save()
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(json.dumps({"initial_groq_forecast": groq_plan(memory)}), flush=True)
         prior = archive(state, day)
         image_index = ImageIndex(memory, prior[2])
 

@@ -7,11 +7,12 @@ import os
 from pathlib import Path
 import re
 import subprocess
-from threading import RLock
-from time import monotonic
+from threading import Lock, RLock
+from time import monotonic, sleep
 from uuid import uuid4
 
-from .editorial_providers import Blocked, ProviderError
+from .editorial_groq_budget import assessment, estimate_tokens, operation, usage_fields
+from .editorial_providers import Blocked, GROQ, ProviderError
 
 
 def now():
@@ -145,7 +146,7 @@ class PrivateGit:
 
 
 class Memory:
-    def __init__(self, root, day, cutoff, config, private_git=None, retry=False):
+    def __init__(self, root, day, cutoff, config, private_git=None, retry=False, lane="production"):
         self.root, self.day, self.cutoff, self.config = root, day, cutoff, config
         self.folder = root / day
         self.file = self.folder / "state.json"
@@ -153,6 +154,51 @@ class Memory:
                                         "provider_stops": {}, "created_at": now()})
         self.private_git, self.retry = private_git, retry
         self.lock = RLock()
+        self.groq_lock = Lock()
+        self.groq_lane = lane
+        self.groq_prior = {}
+        if ledger := os.environ.get("EDITORIAL_GROQ_LEDGER"):
+            self.groq_prior.update({row["request_id"]: row for row in read_json(Path(ledger), [])})
+        if probe := os.environ.get("EDITORIAL_GROQ_CURRENT_PROBE"):
+            self.groq_prior.update({row["request_id"]: row for row in read_json(Path(probe), [])})
+        for file in sorted(root.glob("????-??-??/state.json"))[-14:]:
+            if file != self.file:
+                for row in read_json(file).get("calls", []):
+                    if row.get("provider") == "groq" and row.get("request_id"):
+                        self.groq_prior[row["request_id"]] = row
+
+    def groq_rows(self):
+        with self.lock:
+            rows = dict(self.groq_prior)
+            for index, row in enumerate(self.data["calls"]):
+                if row["provider"] == "groq":
+                    rows[row.get("request_id", f"{self.day}-legacy-{index}")] = row
+            return list(rows.values())
+
+    def call_groq(self, task, article, stage, prompt, max_tokens, callback, *, repair=False):
+        with self.groq_lock:
+            with self.lock:
+                if any(row["task"] == task and row["provider"] == "groq" and row["status"] == "reserved"
+                       for row in self.data["calls"]):
+                    raise Blocked("groq_previous_request_outcome_unknown")
+            rows = self.groq_rows()
+            estimate = estimate_tokens(prompt, max_tokens, rows, stage)
+            mode = self.config["groq_budget"]
+            while True:
+                utc_now = datetime.now(timezone.utc)
+                reason, delay = assessment(rows, mode, self.groq_lane, utc_now, estimate, reserve=repair)
+                if reason:
+                    raise ProviderError(reason)
+                if self.time_left() < delay + 105:
+                    raise ProviderError("groq_quota_wait_exceeds_deadline")
+                if not delay:
+                    break
+                sleep(min(delay, 30))
+            metrics = {"request_id": uuid4().hex, "model": GROQ, "lane": self.groq_lane,
+                       "operation": operation(stage), "repair": repair, "prompt_bytes": estimate[2],
+                       "estimated_input_tokens": estimate[0], "estimated_output_tokens": estimate[1],
+                       "estimated_total_tokens": sum(estimate[:2]), "sent_at": now()}
+            return self.call(task, article, "groq", callback, metrics=metrics)
 
     def save(self, durable=True):
         with self.lock:
@@ -218,7 +264,7 @@ class Memory:
                    result_ref=f"state.json#tasks/{task_id}", elapsed_seconds=round(monotonic() - started, 2))
         return result
 
-    def call(self, task_id, article, provider, callback):
+    def call(self, task_id, article, provider, callback, *, metrics=None):
         with self.lock:
             stopped = self.data["provider_stops"].get(provider)
             if stopped:
@@ -230,22 +276,25 @@ class Memory:
                     or for_article[provider] >= self.config["per_article_calls"][provider]):
                 raise ProviderError("call_budget_exhausted", stop=True)
             reservation = {"task": task_id, "article": article, "provider": provider,
-                           "at": now(), "status": "reserved"}
+                           "at": now(), "status": "reserved", **(metrics or {})}
             self.data["calls"].append(reservation)
             self.save()
         try:
             answer = callback()
         except ProviderError as exc:
             with self.lock:
-                reservation.update(status="failed", error=str(exc))
+                reservation.update(status="failed", error=str(exc), completed_at=now(), **exc.telemetry)
                 if exc.stop:
                     self.data["provider_stops"][provider] = str(exc)
                 self.save()
             raise
         with self.lock:
-            reservation.update(status="responded")
+            reservation.update(status="responded", completed_at=now())
             if isinstance(answer, dict):
                 reservation["usage"] = answer.get("usage", {})
+                if provider == "groq":
+                    reservation.update(usage_fields(reservation["usage"]))
+                    reservation.update(answer.get("telemetry", {}))
                 # Persist the completed response before downstream validation.
                 reservation["answer"] = answer
                 self.save()

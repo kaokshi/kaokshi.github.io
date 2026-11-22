@@ -1,16 +1,17 @@
 """Bounded provider adapters. Provider errors never include prompts or secret headers."""
 import base64
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 import json
 import os
 import re
-from threading import Lock
-from time import monotonic, sleep
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import uuid4
+
+from .editorial_groq_budget import instant, rate_headers, seconds, usage_fields
 
 GROQ = "openai/gpt-oss-120b"
 NEMOTRON = "nvidia/nemotron-3-ultra-550b-a55b:free"
@@ -24,10 +25,11 @@ class Blocked(RuntimeError):
 
 
 class ProviderError(Blocked):
-    def __init__(self, code, *, stop=False, retry_after=None):
+    def __init__(self, code, *, stop=False, retry_after=None, telemetry=None):
         super().__init__(code)
         self.stop = stop
         self.retry_after = retry_after
+        self.telemetry = telemetry or {}
 
 
 def check_url(url, domains):
@@ -39,32 +41,50 @@ def check_url(url, domains):
         raise ProviderError("url_outside_allowed_sources", stop=True)
 
 
-def groq_throttle(error):
+def groq_throttle(error, at=None):
+    at = at or datetime.now(timezone.utc)
+    limits = rate_headers(error.headers, at)
     try:
         raw = json.loads(error.read(4500))
         detail = ((raw.get("error") or {}).get("message") or "").casefold()
-        header = error.headers.get("retry-after", "")
     except (ValueError, AttributeError, OSError, TypeError):
-        return ProviderError("http_429_groq_unclassified", stop=True)
-    if ("per day" in detail or "daily" in detail
-            or error.headers.get("x-ratelimit-remaining-requests") == "0"):
-        return ProviderError("http_429_groq_daily_quota", stop=True)
-    limit = re.search(r"limit[ :]+([0-9,]+)", detail)
-    requested = re.search(r"requested[ :]+([0-9,]+)", detail)
-    number = lambda match: int(match[1].replace(",", "")) if match else None
-    minute = any(marker in detail for marker in ("per minute", "tpm", "rpm"))
-    if ("request too large" in detail or
-            (minute and limit and requested and number(requested) > number(limit))):
-        return ProviderError("http_429_groq_request_exceeds_token_window")
-    if minute:
-        message_delay = re.search(r"try again in (\d+(?:\.\d+)?)s", detail)
-        try:
-            delay = float(header or (message_delay[1] if message_delay else 62))
-        except ValueError:
-            delay = 62
-        if 0 < delay <= 75:
-            return ProviderError("http_429_groq_minute_rate_limit", retry_after=delay + 1)
-    return ProviderError("http_429_groq_unclassified", stop=True)
+        detail, raw = "", {}
+    code = "rate_limit_type_unknown"
+    if limits.get("x-ratelimit-remaining-requests") == 0:
+        code = "rpd"
+    elif match := re.search(r"\b(itpm|otpm|tpd|rpd|tpm|rpm)\b", detail):
+        code = match[1]
+    elif "per day" in detail:
+        code = "daily"
+    elif "per minute" in detail:
+        code = "minute"
+    retry = instant(limits.get("retry-after"))
+    reset_key = ("requests" if code == "rpd" else
+                 "tokens" if code in {"tpm", "itpm", "otpm"} else None)
+    reset = instant(limits.get("x-ratelimit-reset-" + reset_key)) if reset_key else None
+    if match := re.search(r"try again in ([0-9a-z.]+)", detail):
+        delay = seconds(match[1].rstrip("."), at)
+        if delay is not None:
+            retry = max(retry or at, at + timedelta(seconds=delay))
+    available_at = max((x for x in (retry, reset) if x), default=None)
+    if match := re.search(r"\blimit[ :]+([0-9][0-9,]*)", detail):
+        reported = {code: int(match[1].replace(",", ""))}
+    else:
+        reported = {}
+    telemetry = {**usage_fields(raw.get("usage")), "http_status": 429, "reported_limits": reported,
+                 "rate_limits": limits, "limit_code": code,
+                 "resets_at": available_at.isoformat() if available_at else None}
+    if code in {"rpd", "tpd", "daily"}:
+        return ProviderError("http_429_groq_daily_quota", stop=True, telemetry=telemetry)
+    if code == "rate_limit_type_unknown":
+        return ProviderError(code, stop=True, telemetry=telemetry)
+    if "request too large" in detail:
+        return ProviderError("http_429_groq_request_exceeds_token_window", telemetry=telemetry)
+    if not available_at:
+        available_at = at + timedelta(seconds=60)
+    return ProviderError("http_429_groq_minute_rate_limit",
+                         retry_after=max(0, (available_at-at).total_seconds()) + .1,
+                         telemetry={**telemetry, "resets_at": available_at.isoformat()})
 
 
 def request(url, domains, *, data=None, headers=None, timeout=25, limit=12_000_000,
@@ -84,14 +104,17 @@ def request(url, domains, *, data=None, headers=None, timeout=25, limit=12_000_0
             body = response.read(limit + 1)
             if len(body) > limit:
                 raise ProviderError("oversize_response")
-            return (body, response.headers) if with_headers else body
+            return (body, response.headers, response.status) if with_headers else body
     except HTTPError as exc:
         if exc.code == 429 and domains == ("api.groq.com",):
             raise groq_throttle(exc) from None
         codes = {401: "authorization", 402: "payment_required", 403: "forbidden",
                  429: "quota_or_rate_limit"}
         raise ProviderError(f"http_{exc.code}_{codes.get(exc.code, 'request_failed')}",
-                            stop=exc.code in codes) from None
+                            stop=exc.code in codes,
+                            telemetry={"http_status": exc.code,
+                                       "rate_limits": rate_headers(exc.headers, datetime.now(timezone.utc))}
+                            if domains == ("api.groq.com",) else None) from None
     except (URLError, TimeoutError, OSError):
         raise ProviderError("connection_failed") from None
 
@@ -134,43 +157,6 @@ def require_free_router():
         raise ProviderError("nemotron_zero_price_not_confirmed", stop=True)
 
 
-class GroqPacer:
-    """Serialize free-token calls and honor explicit, short minute-rate cooldowns."""
-
-    def __init__(self):
-        self.lock = Lock()
-        self.next_at = 0
-        self.stopped = None
-        self.remaining_tokens = None
-
-    def run(self, send, estimate):
-        with self.lock:
-            if self.stopped:
-                raise ProviderError("provider_stopped_" + self.stopped, stop=True)
-            if self.remaining_tokens is None or estimate > self.remaining_tokens:
-                delay = self.next_at - monotonic()
-                while delay > 0:
-                    sleep(min(delay, 45))
-                    delay = self.next_at - monotonic()
-            started = monotonic()
-            try:
-                body, headers = send()
-            except ProviderError as exc:
-                if exc.retry_after is not None:
-                    self.next_at = monotonic() + exc.retry_after
-                    self.remaining_tokens = None
-                if exc.stop:
-                    self.stopped = str(exc)
-                raise
-            left = headers.get("x-ratelimit-remaining-tokens", "")
-            self.remaining_tokens = int(left) if left.isdecimal() else None
-            self.next_at = started + 62
-            return body
-
-
-GROQ_PACER = GroqPacer()
-
-
 def text_call(provider, prompt, max_tokens=7500):
     if provider == "groq":
         if os.environ.get("EDITORIAL_GROQ_FREE_ONLY") != "true":
@@ -196,19 +182,37 @@ def text_call(provider, prompt, max_tokens=7500):
                        headers={**authorization(secret), "Content-Type": "application/json"},
                        timeout=95, with_headers=provider == "groq")
 
-    estimate = len(prompt.encode("utf-8")) // 3 + max_tokens + 150
-    result = parse_json(GROQ_PACER.run(send, estimate) if provider == "groq" else send())
+    response = send()
+    telemetry = {}
+    if provider == "groq":
+        body, headers, response_status = response
+        telemetry = {"http_status": response_status,
+                     "rate_limits": rate_headers(headers, datetime.now(timezone.utc))}
+    else:
+        body = response
+    try:
+        result = parse_json(body)
+    except ProviderError as exc:
+        exc.telemetry = telemetry
+        raise
+    if not isinstance(result, dict):
+        raise ProviderError("invalid_json_object", telemetry=telemetry)
+    usage = result.get("usage")
+    usage = {k: v for k, v in usage.items() if type(v) is int and v >= 0} if isinstance(usage, dict) else {}
+    if telemetry:
+        telemetry.update(usage_fields(usage))
+        telemetry["model"] = result.get("model") or MODELS[provider]
     try:
         choice = result["choices"][0]
         content = choice["message"]["content"].strip()
     except (KeyError, IndexError, AttributeError, TypeError):
-        raise ProviderError("empty_visible_content") from None
+        raise ProviderError("empty_visible_content", telemetry=telemetry) from None
     if not content:
-        raise ProviderError("empty_visible_content")
+        raise ProviderError("empty_visible_content", telemetry=telemetry)
     if choice.get("finish_reason") == "length":
-        raise ProviderError("truncated_response")
-    return {"text": content, "model": result.get("model") or MODELS[provider],
-            "usage": {k: v for k, v in (result.get("usage") or {}).items() if isinstance(v, (int, float))}}
+        raise ProviderError("truncated_response", telemetry=telemetry)
+    return {"text": content, "model": result.get("model") or MODELS[provider], "usage": usage,
+            "telemetry": telemetry}
 
 
 def klein(prompt):
