@@ -173,6 +173,7 @@ jobs:
           mkdir -p "$EDITORIAL_QUOTA_DIR"
           history="$EDITORIAL_QUOTA_DIR/probe-history.json"
           python -m src.editorial_groq_ledger collect --file "$history"
+          EDITORIAL_QUOTA_PROBE_HISTORY="$history" python -m src.editorial_quota check-probe
           echo "EDITORIAL_QUOTA_PROBE_HISTORY=$history" >> "$GITHUB_ENV"
           printf '%s\n' attempted > "$EDITORIAL_QUOTA_DIR/attempted.txt"
       - name: Record the quota probe reservation before contacting Groq

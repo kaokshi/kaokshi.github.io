@@ -65,12 +65,15 @@ def ensure_probe_budget(path, now):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "require-ready", "probe", "record"))
+    parser.add_argument("command", choices=("status", "require-ready", "check-probe", "probe", "record"))
     parser.add_argument("--markers", type=Path)
     parser.add_argument("--state", type=Path)
     args = parser.parse_args()
     day = datetime.now(timezone.utc).date().isoformat()
     try:
+        if args.command == "check-probe":
+            ensure_probe_budget(os.environ.get("EDITORIAL_QUOTA_PROBE_HISTORY"), datetime.now(timezone.utc))
+            return 0
         if args.command == "record":
             if args.state:
                 for path in args.state.glob("????-??-??/state.json"):
