@@ -15,7 +15,7 @@ DETAILED = {"retelling", "plot_analysis"}
 WIKI = ("wikimedia.org",)
 STUDIO_DOMAINS = ("paramount.com", "universalpictures.com", "warnerbros.com", "sonypictures.com",
                   "disney.com", "a24films.com", "focusfeatures.com", "lionsgate.com", "bfi.org.uk",
-                  "rogerebert.com", "bbc.com", "independent.co.uk", "theguardian.com")
+                  "rogerebert.com", "rottentomatoes.com", "bbc.com", "independent.co.uk", "theguardian.com")
 WIFI = "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/ru.wikipedia/all-access/"
 
 

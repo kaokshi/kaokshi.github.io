@@ -240,7 +240,9 @@ jobs:
           assert settings()["articles_per_channel"]["cinema"] == 0
           check = evidence({"film_title": "Шоу Трумана", "original_title": "The Truman Show",
                             "year": 1998, "qid": "Q214801", "format": "retelling", "spoilers": True,
-                            "sources": ["https://www.rogerebert.com/reviews/the-truman-show-1998"]}, {})
+                            "sources": ["https://www.rogerebert.com/reviews/the-truman-show-1998",
+                                        "https://www.paramount.com/movies/the-truman-show",
+                                        "https://www.rottentomatoes.com/m/truman_show"]}, {})
           assert check["film"]["imdb_id"] == "tt0120382"
           assert check["film"]["title_ru"] == "Шоу Трумана"
           assert check["format"] == "review" and check["spoilers"] is False
