@@ -128,6 +128,9 @@ class Article:
                 "call_budget_exhausted",
                 "groq_quota_wait_exceeds_deadline",
                 "groq_daily_quota_reset_pending",
+                "groq_editorial_budget_exhausted",
+                "groq_daily_budget_exhausted",
+                "groq_editorial_reserve_protected",
                 "http_429_groq_daily_quota",
                 "provider_stopped_http_429_groq_daily_quota",
             }
