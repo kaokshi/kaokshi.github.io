@@ -95,7 +95,7 @@ def describe_pixels(image):
     processor, model = load_model("florence")
     inputs = processor(text=FLORENCE_TASK, images=image, return_tensors="pt")
     with torch.inference_mode():
-        sequence = model.generate(**inputs, max_new_tokens=32, num_beams=1, do_sample=False)
+        sequence = model.generate(**inputs, max_new_tokens=48, num_beams=1, do_sample=False)
     raw = processor.batch_decode(sequence, skip_special_tokens=False)[0]
     parsed = processor.post_process_generation(raw, task=FLORENCE_TASK,
                                                image_size=(image.width, image.height))

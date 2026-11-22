@@ -31,6 +31,10 @@ on:
         description: Allow one bounded Groq quota probe on an unverified UTC day.
         default: false
         type: boolean
+      validate_cinema:
+        description: Include one test film in the encrypted isolated daily or retry run.
+        default: false
+        type: boolean
       validate_klein:
         description: Run one free real Klein image and semantic validation in isolated health mode.
         default: false
@@ -78,6 +82,7 @@ jobs:
       EDITORIAL_DAY: ${{ inputs.day }}
       EDITORIAL_ISOLATED_VALIDATION: ${{ inputs.isolated_validation && 'true' || 'false' }}
       EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      EDITORIAL_VALIDATE_CINEMA: ${{ inputs.validate_cinema && 'true' || 'false' }}
       EDITORIAL_VALIDATE_KLEIN: ${{ inputs.isolated_validation && inputs.validate_klein && 'true' || 'false' }}
       EDITORIAL_VALIDATION_LABEL: ${{ inputs.isolated_validation && inputs.validation_label || '' }}
       EDITORIAL_TEST_PUBLIC_KEY: ${{ inputs.isolated_validation && inputs.validation_public_key || '' }}
@@ -110,6 +115,12 @@ jobs:
       - name: Resolve Moscow date and storage mode
         if: env.EDITORIAL_EFFECTIVE_COMMAND != 'skip'
         run: |
+          if [ "$EDITORIAL_VALIDATE_CINEMA" = true ] &&
+            { [ "$EDITORIAL_ISOLATED_VALIDATION" != true ] ||
+              { [ "$EDITORIAL_EFFECTIVE_COMMAND" != daily ] && [ "$EDITORIAL_EFFECTIVE_COMMAND" != retry ]; }; }; then
+            echo "::error::Cinema generation requires an encrypted isolated daily or retry run"
+            exit 2
+          fi
           day="${EDITORIAL_DAY:-$(TZ=Europe/Moscow date +%F)}"
           if ! [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
             echo "::error::Invalid Moscow date"
@@ -120,6 +131,7 @@ jobs:
           if [ "$EDITORIAL_ISOLATED_VALIDATION" = true ]; then
             repository=""
             suffix="validation-"
+            if [ "$EDITORIAL_VALIDATE_CINEMA" = true ]; then suffix="validation-cinema-"; fi
             if [ -n "$EDITORIAL_VALIDATION_LABEL" ]; then
               if ! [[ "$EDITORIAL_VALIDATION_LABEL" =~ ^[a-z0-9]{1,18}$ ]]; then
                 echo "::error::Invalid isolated validation label"
@@ -307,6 +319,7 @@ jobs:
           if [ "$EDITORIAL_ISOLATED_VALIDATION" = true ] &&
             { [ "$EDITORIAL_EFFECTIVE_COMMAND" = daily ] || [ "$EDITORIAL_EFFECTIVE_COMMAND" = retry ]; }; then
             args+=(--validation-window 120)
+            if [ "$EDITORIAL_VALIDATE_CINEMA" = true ]; then args+=(--validate-cinema); fi
           fi
           python -m src.editorial_brain "${args[@]}"
       - name: Record a confirmed daily Groq stop without publishing editorial data

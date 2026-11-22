@@ -691,8 +691,19 @@ def audit(memory, storage):
                 if re.search(r"(?m)^  schedule:", path.read_text(encoding="utf-8"))]}
 
 
-def execute(command, state, private_git=None, day=None, validation_window=None, encrypted_mode=False):
+def cycle_settings(command, validation_window=None, encrypted_mode=False, validate_cinema=False):
     cfg = settings()
+    if validate_cinema:
+        if (command not in {"daily", "retry"} or not validation_window or not encrypted_mode
+                or os.environ.get("EDITORIAL_ISOLATED_VALIDATION") != "true"):
+            raise Blocked("cinema_validation_requires_isolated_encrypted_cycle")
+        cfg = {**cfg, "articles_per_channel": {**cfg["articles_per_channel"], "cinema": 1}}
+    return cfg
+
+
+def execute(command, state, private_git=None, day=None, validation_window=None, encrypted_mode=False,
+            *, validate_cinema=False):
+    cfg = cycle_settings(command, validation_window, encrypted_mode, validate_cinema)
     tz = ZoneInfo(cfg["timezone"])
     today = datetime.now(tz).date().isoformat()
     day = day or today
@@ -764,6 +775,8 @@ def main():
     parser.add_argument("command", choices=("daily", "retry", "review", "status", "audit", "learn", "health"))
     parser.add_argument("--date")
     parser.add_argument("--encrypted-mode", action="store_true")
+    parser.add_argument("--validate-cinema", action="store_true",
+                        help="Include one test film in an encrypted isolated validation cycle")
     parser.add_argument("--validate-klein", action="store_true",
                         help="One authorized free isolated image call; do not store the image")
     parser.add_argument("--local-state", type=Path, help="Private local inspection directory outside this repository")
@@ -800,9 +813,11 @@ def main():
                 raise Blocked("local_state_must_be_outside_repository")
             storage = PrivateGit(storage_repo, Path(temporary) / "storage", token) if storage_repo or token else None
             state = args.local_state or Path(temporary) / "editorial"
-            result = execute(args.command, state, storage, args.date, args.validation_window, args.encrypted_mode)
+            result = execute(args.command, state, storage, args.date, args.validation_window, args.encrypted_mode,
+                             validate_cinema=args.validate_cinema)
             if args.encrypted_mode and args.command in {"daily", "retry"}:
-                memory = Memory(state, result["day"], datetime.now(timezone.utc), settings())
+                cfg = cycle_settings(args.command, args.validation_window, args.encrypted_mode, args.validate_cinema)
+                memory = Memory(state, result["day"], datetime.now(timezone.utc), cfg)
                 review(memory)
         public = result
         if os.environ.get("GITHUB_ACTIONS") == "true":

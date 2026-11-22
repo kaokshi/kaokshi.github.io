@@ -1,6 +1,7 @@
 """Reproducible offline model comparison over a frozen, human-labelled image pool."""
 import argparse
 from collections import Counter
+import faulthandler
 from io import BytesIO
 from pathlib import Path
 import resource
@@ -82,6 +83,7 @@ def run_model(kind, data, workspace):
     import torch
 
     torch.set_num_threads(2)
+    torch.set_num_interop_threads(1)
     start = perf_counter()
     load_model(kind)
     initialization = perf_counter() - start
@@ -92,7 +94,11 @@ def run_model(kind, data, workspace):
         selected = sorted({row["id"] for case in siglip.values() for row in shortlist(case)})
         for position, key in enumerate(selected, 1):
             before = perf_counter()
-            output[key] = describe_pixels(pixels(workspace, key))
+            faulthandler.dump_traceback_later(60)
+            try:
+                output[key] = describe_pixels(pixels(workspace, key))
+            finally:
+                faulthandler.cancel_dump_traceback_later()
             times[key] = perf_counter() - before
             durations.append(times[key])
             print(f"Florence-2 {position}/{len(selected)} {key}: {times[key]:.2f} s", flush=True)
