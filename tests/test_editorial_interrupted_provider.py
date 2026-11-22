@@ -4,8 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from src.editorial_memory import Memory
-from src.editorial_providers import ProviderError
+from src.editorial_memory import Memory, digest, json_bytes
+from src.editorial_providers import ProviderError, Blocked
 
 
 class InterruptedProviderTests(unittest.TestCase):
@@ -17,6 +17,26 @@ class InterruptedProviderTests(unittest.TestCase):
                              datetime.now(timezone.utc) + timedelta(hours=1),
                              {"daily_calls": {"groq": 5, "openrouter": 5, "klein": 5},
                               "per_article_calls": {"groq": 3, "openrouter": 3, "klein": 3}})
+
+    def test_completed_task_checkpoint_integrity(self):
+        inputs = {"prompt": "контроль"}
+        task_id = "science-01.draft." + digest(json_bytes(inputs))[:16]
+        answer = {"text": "исходный результат"}
+        self.memory.data["tasks"][task_id] = {
+            "id": task_id, "article": "science-01", "operation": "draft",
+            "executor": "openrouter", "attempts": 1,
+            "status": "completed", "result": answer,
+            "result_sha256": digest(json_bytes(answer)),
+        }
+        invoked = []
+        self.assertEqual(self.memory.task("science-01", "draft", "openrouter", inputs,
+                                           lambda _: invoked.append(1)), answer)
+        self.assertEqual(invoked, [])
+        self.memory.data["tasks"][task_id]["result"] = {"text": "поврежденный результат"}
+        with self.assertRaisesRegex(Blocked, "completed_task_result_integrity_failed"):
+            self.memory.task("science-01", "draft", "openrouter", inputs,
+                             lambda _: invoked.append(1))
+        self.assertEqual(invoked, [])
 
     def test_unknown_openrouter_request_never_repeated(self):
         self.memory.data["calls"].append({
