@@ -1,4 +1,5 @@
 name: Real Klein metro scene repair (free-only, review-only)
+# Repeat with isolated diagnostics of visual reviewer error
 on:
   push:
     branches: [experiment/editorial-image-feedback-loop-20261123]
