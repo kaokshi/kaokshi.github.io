@@ -66,6 +66,60 @@ def evaluate_cases(rows, minimum):
     return {"verified_cases": len(unique), "proposals": proposals, "production_modified": False}
 
 
+def historical_observations(root):
+    """Summarize verified local version pairs without treating them as owner-approved holdout."""
+    article_count, valid_pairs = 0, 0
+    issues, calls, decisions, comparisons = Counter(), Counter(), Counter(), Counter()
+    for state_file in sorted(root.glob("????-??-??/state.json")):
+        try:
+            data = read_json(state_file)
+            for call in data.get("calls", []):
+                if call.get("provider") in {"groq", "openrouter"} and call.get("status") in {
+                        "responded", "failed", "reserved"}:
+                    calls[(call["provider"], call["status"])] += 1
+            for article_id, article in data.get("articles", {}).items():
+                if not re.fullmatch(r"(?:legends|science|cinema)-\d{2}", article_id):
+                    continue
+                article_count += 1
+                genre = article_id.split("-")[0]
+                for change in article.get("history", []):
+                    model = change.get("provider")
+                    if model not in {"groq", "openrouter"} or change.get("status") not in {"accepted", "rejected"}:
+                        continue
+                    before, after = change.get("before"), change.get("after")
+                    if not all(isinstance(x, str) and SHA.fullmatch(x) for x in (before, after)) or before == after:
+                        continue
+                    reports = []
+                    for sha in (before, after):
+                        versions = state_file.parent / article_id / "versions"
+                        raw = read_json(versions / (sha + ".json"), {})
+                        text = versions / (sha + ".txt")
+                        if (raw.get("text_sha256") == sha and text.is_file()
+                                and digest(text.read_bytes()) == sha and isinstance(raw.get("issues"), list)):
+                            reports.append(raw)
+                    if len(reports) != 2:
+                        continue
+                    valid_pairs += 1
+                    decisions[(model, change["status"])] += 1
+                    for issue in {x.partition(":")[0] for x in reports[0]["issues"]} & CATEGORIES.keys():
+                        issues[(genre, issue)] += 1
+                    complete = all(all(report.get(k, {}).get("status") == "completed"
+                                       for k in ("model_a", "grammar", "editorial")) for report in reports)
+                    comparisons[(model, "checked" if complete else "incomplete")] += 1
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            continue
+
+    return {"articles": article_count, "verified_revision_pairs": valid_pairs,
+            "provider_calls": [{"provider": model, "status": status, "count": n}
+                               for (model, status), n in sorted(calls.items())],
+            "decisions": [{"provider": model, "status": status, "count": n}
+                          for (model, status), n in sorted(decisions.items())],
+            "comparison": [{"provider": model, "checks": status, "count": n}
+                           for (model, status), n in sorted(comparisons.items())],
+            "recurrent_issues": [{"channel": genre, "issue": issue, "count": n}
+                                 for (genre, issue), n in issues.most_common()]}
+
+
 def learn(root: Path, minimum):
     feedback = []
     invalid = 0
@@ -96,7 +150,8 @@ def learn(root: Path, minimum):
             feedback.append(row)
         except (OSError, ValueError, KeyError, TypeError):
             invalid += 1
-    return {**evaluate_cases(feedback, minimum), "invalid_or_unavailable_cases": invalid}
+    return {**evaluate_cases(feedback, minimum), "invalid_or_unavailable_cases": invalid,
+            "observations": historical_observations(root)}
 
 
 def propose_pull_requests(result, token):

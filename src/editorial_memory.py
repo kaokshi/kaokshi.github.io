@@ -89,7 +89,7 @@ class PrivateGit:
             raise StorageError("storage_repository_must_be_private")
 
     def restore(self, root, day):
-        from .editorial_delivery import owner_key, state_key, unseal_state, unpack
+        from .editorial_delivery import owner_key, restore_blob, state_key
         self.state_root, self.day = root, day
         owner_key()
         if not state_key():
@@ -97,7 +97,7 @@ class PrivateGit:
         checkpoints = sorted((self.path / "editorial-sealed").glob("????-??-??/checkpoint.enc"), reverse=True)
         for path in checkpoints:
             if path.parent.name <= day:
-                unpack(unseal_state(path.read_bytes()), root)
+                restore_blob(path.read_bytes(), root, path.parent.name)
                 break
 
     def checkpoint(self):
@@ -113,6 +113,16 @@ class PrivateGit:
         if self.command(*command, "rev-list", f"origin/{self.branch}..HEAD"):
             self.verify()
             self.command(*command, "push", "origin", f"HEAD:refs/heads/{self.branch}")
+
+    def owner_packet(self, day):
+        self.verify()
+        base = self.path / "editorial-sealed"
+        path = base / day / "owner-review.enc"
+        if (not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day)
+                or not path.is_file() or path.is_symlink()
+                or not path.resolve().is_relative_to(base.resolve())):
+            raise StorageError("delivery_integration_pending: private_edition_not_found")
+        return path
 
     def review_url(self, day):
         return f"https://github.com/{self.name}/tree/{self.branch}/editorial-sealed/{day}"

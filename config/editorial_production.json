@@ -45,5 +45,20 @@
     "fws.gov",
     "inaturalist.org",
     "eol.org"
-  ]
+  ],
+  "schedule": {
+    "enabled": false,
+    "owner_approved": false,
+    "successful_validation_run": null,
+    "owner_access_verified": false,
+    "legacy_automation_retired": false,
+    "private_repository": null,
+    "owner_public_key": null,
+    "groq_free_only": true,
+    "klein_free_only": true
+  },
+  "groq_quota_last_known_block": {
+    "utc_day": "2026-11-22",
+    "run_id": 45032321936
+  }
 }

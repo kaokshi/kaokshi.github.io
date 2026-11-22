@@ -1,6 +1,6 @@
 """Authenticated checkpoints and retrieval of verified owner review packages."""
 import argparse
-from datetime import date
+from datetime import date, datetime
 import io
 import json
 import os
@@ -9,10 +9,11 @@ import re
 import shutil
 import subprocess
 from tempfile import TemporaryDirectory
+from zoneinfo import ZoneInfo
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from .editorial_encrypted_review import MAX_INPUT, decrypt, encrypt
-from .editorial_memory import digest, write
+from .editorial_memory import PrivateGit, StorageError, digest, read_json, write
 from .editorial_providers import Blocked
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,7 +79,7 @@ def safe_zip(data):
     for entry in archive.infolist():
         path = PurePosixPath(entry.filename)
         total += entry.file_size
-        if (not entry.filename or path.is_absolute() or "\\" in entry.filename
+        if (not path.parts or path.as_posix() != entry.filename or path.is_absolute() or "\\" in entry.filename
                 or ".." in path.parts or entry.filename in names or entry.is_dir()
                 or total > MAX_INPUT * 3):
             archive.close()
@@ -130,15 +131,37 @@ def unpack(data, target):
             write(target / entry.filename, archive.read(entry))
 
 
+def restore_blob(payload, root, day):
+    data = unseal_state(payload)
+    with safe_zip(data) as archive:
+        name = day + "/state.json"
+        if name not in archive.namelist() or json.loads(archive.read(name))["day"] != day:
+            raise Blocked("checkpoint_date_mismatch")
+        packet = day + "/Комплект согласования.zip"
+        if packet in archive.namelist():
+            raw = archive.read(packet)
+            report = verify_review(raw, allow_incomplete=True)
+            sha = archive.read(day + "/Комплект согласования.sha256").decode().strip()
+            if report["date"] != day or report["package_sha256"] != sha:
+                raise Blocked("checkpoint_review_mismatch")
+    unpack(data, root)
+
+
 def verify_review(data, *, allow_incomplete=False):
     with safe_zip(data) as archive:
         names = set(archive.namelist())
         index = json.loads(archive.read("Статус комплекта.json"))
         expected = index["articles"]
+        if (not isinstance(expected, dict) or not all(re.fullmatch(r"(?:legends|science|cinema)-\d{2}", x)
+                                                        for x in expected)):
+            raise Blocked("invalid_review_article_index")
         present = {name.split("/")[0] for name in names if name.endswith("/SHA256SUMS.txt")}
         if not allow_incomplete and (present != expected.keys() or any(
                 value not in {"review_pending", "rights_review_pending"} for value in expected.values())):
             raise Blocked("review_packet_incomplete")
+        if not present <= expected.keys() or any(name != "Статус комплекта.json" and
+                ("/" not in name or name.split("/", 1)[0] not in present) for name in names):
+            raise Blocked("unindexed_review_file")
         for article in present:
             manifest = archive.read(article + "/SHA256SUMS.txt").decode("utf-8")
             verified = set()
@@ -183,27 +206,28 @@ def namespace():
     return f"validation-{label}-" if label else "validation-"
 
 
-def trusted_run(run_id, validation=False):
+def trusted_run(run_id, validation=False, refs=None):
     row = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}"))
     ref = os.environ.get("EDITORIAL_VALIDATION_REF", "codex/editorial-production") if validation else "main"
     return (row["path"].split("@")[0] == ".github/workflows/" + WORKFLOW
             and row["head_repository"]["full_name"] == PUBLIC_REPOSITORY
-            and row["head_branch"] == ref
+            and row["head_branch"] in (refs or {ref})
             and row["event"] in {"workflow_dispatch", "schedule"})
 
 
-def artifact_rows(prefix):
-    pages = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/artifacts?per_page=100", "--paginate",
-                          "--slurp"))
+def artifact_rows(prefix, *, refs=None, day=None):
+    suffix = f"&name={prefix}{day}" if day else ""
+    pages = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/artifacts?per_page=100{suffix}",
+                          "--paginate", "--slurp"))
     rows = sorted((row for page in pages for row in page.get("artifacts", [])
                   if re.fullmatch(re.escape(prefix) + r"\d{4}-\d{2}-\d{2}", row["name"])
-                  and not row["expired"]), key=lambda row: (row["name"], row["created_at"], row["id"]),
+                  and (not day or row["name"] == prefix + day) and not row["expired"]), key=lambda row: (row["name"], row["created_at"], row["id"]),
                   reverse=True)
     checked = {}
     for row in rows:
         run_id = row["workflow_run"]["id"]
         if run_id not in checked:
-            checked[run_id] = trusted_run(run_id, bool(namespace()))
+            checked[run_id] = trusted_run(run_id, bool(namespace()), refs)
         if checked[run_id]:
             yield row
 
@@ -224,11 +248,12 @@ def restore_checkpoint(root, day, command):
         return {"status": "storage_configuration_pending", "artifact_id": latest["id"]}
     with TemporaryDirectory(prefix="zen-restore-") as work:
         download_artifact(latest, work)
-        unpack(unseal_state((Path(work) / "checkpoint.enc").read_bytes()), root)
+        restore_blob((Path(work) / "checkpoint.enc").read_bytes(), root, latest["name"].removeprefix(prefix))
     return {"status": "checkpoint_restored"}
 
 
-def retrieve(output, key_path, *, day, artifact=None, run_id=None, allow_incomplete=False):
+def retrieve(output, key_path, *, day, artifact=None, run_id=None, allow_incomplete=False,
+             private_repository=None):
     from cryptography.exceptions import InvalidTag
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
@@ -242,9 +267,15 @@ def retrieve(output, key_path, *, day, artifact=None, run_id=None, allow_incompl
     except (OSError, ValueError, TypeError):
         raise Blocked("delivery_integration_pending: authorized_key_unavailable") from None
     prefix = "editorial-review-" + namespace()
-    items = [None] if artifact else artifact_rows(prefix)
+    if private_repository and (artifact or run_id or not day):
+        raise Blocked("private_retrieval_requires_exact_date")
     with TemporaryDirectory(prefix="zen-owner-download-") as workspace:
         work = Path(workspace)
+        if private_repository:
+            store = PrivateGit(private_repository, work / "storage",
+                               os.environ.get("EDITORIAL_PRIVATE_TOKEN") or os.environ.get("GH_TOKEN"))
+            artifact = store.owner_packet(day)
+        items = [None] if artifact else artifact_rows(prefix, day=day)
         for index, row in enumerate(items):
             if index >= 20:
                 break
@@ -282,6 +313,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("restore", "seal", "retrieve", "reference"))
     parser.add_argument("--date", help="Omit on retrieval to select the latest complete package")
+    parser.add_argument("--today", action="store_true", help="Retrieve today's exact Moscow edition")
+    parser.add_argument("--private-repository",
+                        help="Read the private GitHub store with the authorized gh account")
     parser.add_argument("--root", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--private-key", type=Path,
@@ -293,6 +327,10 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     try:
+        if args.today:
+            if args.command != "retrieve" or args.date:
+                raise Blocked("invalid_today_option")
+            args.date = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
         if (args.command != "retrieve" and not args.date) or (
                 args.date and date.fromisoformat(args.date).isoformat() != args.date):
             raise Blocked("invalid_review_date")
@@ -305,8 +343,12 @@ def main():
         elif args.command == "retrieve":
             if not args.output or not args.private_key:
                 raise Blocked("delivery_integration_pending: authorized_key_and_output_required")
+            repository = args.private_repository
+            if not repository and not args.artifact and not args.run_id:
+                repository = read_json(ROOT / "config" / "editorial_production.json")["schedule"]["private_repository"]
             result = retrieve(args.output, args.private_key, day=args.date, artifact=args.artifact,
-                              run_id=args.run_id, allow_incomplete=args.allow_incomplete)
+                              run_id=args.run_id, allow_incomplete=args.allow_incomplete,
+                              private_repository=repository)
         elif args.command == "restore":
             result = restore_checkpoint(private_path(args.root), args.date, args.cycle_command)
         else:
@@ -314,8 +356,8 @@ def main():
         print(json.dumps(result, ensure_ascii=False))
         if args.command == "reference":
             return 2
-    except (Blocked, OSError, ValueError, KeyError) as exc:
-        print(json.dumps({"status": str(exc) if isinstance(exc, Blocked) else type(exc).__name__}))
+    except (Blocked, StorageError, OSError, ValueError, KeyError) as exc:
+        print(json.dumps({"status": str(exc) if isinstance(exc, (Blocked, StorageError)) else type(exc).__name__}))
         return 2
     return 0
 

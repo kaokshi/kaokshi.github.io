@@ -17,7 +17,7 @@ on:
     inputs:
       command:
         type: choice
-        options: [health, daily, retry, review, status, audit, learn]
+        options: [health, daily, retry, review, status, audit, learn, quota, storage-test]
         default: health
       day:
         description: Moscow date (YYYY-MM-DD)
@@ -25,6 +25,10 @@ on:
         type: string
       isolated_validation:
         description: Run a manual end-to-end validation with a separate artifact namespace or private repository.
+        default: false
+        type: boolean
+      verify_quota:
+        description: Allow one bounded Groq quota probe on an unverified UTC day.
         default: false
         type: boolean
       validate_klein:
@@ -60,9 +64,7 @@ jobs:
       - run: python -m pip install -r requirements-quality.txt 'python-docx==1.2.0' 'cryptography>=44,<48'
       - run: python -m unittest discover -s tests -v
   production:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'schedule' && vars.EDITORIAL_AUTONOMOUS_ENABLED == 'true')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     concurrency:
       group: editorial-production-private
       cancel-in-progress: false
@@ -75,15 +77,12 @@ jobs:
       EDITORIAL_COMMAND: ${{ github.event_name == 'schedule' && 'scheduled' || inputs.command }}
       EDITORIAL_DAY: ${{ inputs.day }}
       EDITORIAL_ISOLATED_VALIDATION: ${{ inputs.isolated_validation && 'true' || 'false' }}
-      EDITORIAL_DAILY_REPOSITORY: ${{ vars.EDITORIAL_PRIVATE_REPOSITORY }}
-      EDITORIAL_VALIDATION_REPOSITORY: ${{ vars.EDITORIAL_VALIDATION_REPOSITORY }}
       EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
       EDITORIAL_VALIDATE_KLEIN: ${{ inputs.isolated_validation && inputs.validate_klein && 'true' || 'false' }}
       EDITORIAL_VALIDATION_LABEL: ${{ inputs.isolated_validation && inputs.validation_label || '' }}
-      EDITORIAL_REVIEW_PUBLIC_KEY: ${{ inputs.isolated_validation && inputs.validation_public_key || vars.EDITORIAL_REVIEW_PUBLIC_KEY }}
+      EDITORIAL_TEST_PUBLIC_KEY: ${{ inputs.isolated_validation && inputs.validation_public_key || '' }}
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
-      EDITORIAL_CF_FREE_ONLY: ${{ inputs.isolated_validation && inputs.validation_free_accounts_confirmed && 'true' || vars.EDITORIAL_CF_FREE_ONLY }}
-      EDITORIAL_GROQ_FREE_ONLY: ${{ inputs.isolated_validation && inputs.validation_free_accounts_confirmed && 'true' || vars.EDITORIAL_GROQ_FREE_ONLY }}
+      EDITORIAL_TEST_FREE_ONLY: ${{ inputs.isolated_validation && inputs.validation_free_accounts_confirmed && 'true' || 'false' }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -104,18 +103,13 @@ jobs:
             requirements-editorial.txt
             requirements-quality.txt
             requirements-production.txt
-      - name: Resolve Moscow date and storage mode
+      - name: Resolve reviewed schedule and activation
         env:
           EDITORIAL_CRON: ${{ github.event.schedule }}
+        run: python -m src.editorial_schedule --github-env "$GITHUB_ENV"
+      - name: Resolve Moscow date and storage mode
+        if: env.EDITORIAL_EFFECTIVE_COMMAND != 'skip'
         run: |
-          command="$EDITORIAL_COMMAND"
-          if [ "$command" = scheduled ]; then
-            if [ "$EDITORIAL_CRON" = '0 5 * * *' ]; then
-              command=daily
-            else
-              command=review
-            fi
-          fi
           day="${EDITORIAL_DAY:-$(TZ=Europe/Moscow date +%F)}"
           if ! [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
             echo "::error::Invalid Moscow date"
@@ -124,7 +118,7 @@ jobs:
           repository="$EDITORIAL_DAILY_REPOSITORY"
           suffix=
           if [ "$EDITORIAL_ISOLATED_VALIDATION" = true ]; then
-            repository="$EDITORIAL_VALIDATION_REPOSITORY"
+            repository=""
             suffix="validation-"
             if [ -n "$EDITORIAL_VALIDATION_LABEL" ]; then
               if ! [[ "$EDITORIAL_VALIDATION_LABEL" =~ ^[a-z0-9]{1,18}$ ]]; then
@@ -132,10 +126,6 @@ jobs:
                 exit 2
               fi
               suffix="$suffix$EDITORIAL_VALIDATION_LABEL-"
-            fi
-            if [ -n "$repository" ] && [ "$repository" = "$EDITORIAL_DAILY_REPOSITORY" ]; then
-              echo "::error::Validation requires a separate private repository"
-              exit 2
             fi
           fi
           if [ -n "$repository" ]; then
@@ -145,21 +135,86 @@ jobs:
             echo 'EDITORIAL_PRIVATE_TOKEN=' >> "$GITHUB_ENV"
           fi
           {
-            echo "EDITORIAL_EFFECTIVE_COMMAND=$command"
             echo "EDITORIAL_MOSCOW_DAY=$day"
             echo "EDITORIAL_MODE=$mode"
             echo "EDITORIAL_PRIVATE_REPOSITORY=$repository"
             echo "EDITORIAL_NAMESPACE=$suffix"
             echo "EDITORIAL_STATE_DIR=$RUNNER_TEMP/editorial-state"
             echo "EDITORIAL_SEALED_DIR=$RUNNER_TEMP/editorial-sealed"
+            echo "EDITORIAL_QUOTA_DIR=$RUNNER_TEMP/editorial-quota"
           } >> "$GITHUB_ENV"
       - name: Install storage and review utilities
+        if: env.EDITORIAL_EFFECTIVE_COMMAND != 'skip' && env.EDITORIAL_EFFECTIVE_COMMAND != 'quota'
         run: python -m pip install 'cryptography>=44,<48'
+      - name: Verify production storage credentials and visibility before provider calls
+        if: env.EDITORIAL_MODE == 'private' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'review')
+        run: |
+          python - <<'PYTHON'
+          import os
+          from src.editorial_delivery import owner_key, state_key
+          assert os.environ.get("EDITORIAL_PRIVATE_TOKEN"), "storage_configuration_pending: missing private token"
+          assert state_key(), "storage_configuration_pending: missing state key"
+          owner_key()
+          PYTHON
+          visibility="$(GH_TOKEN="$EDITORIAL_PRIVATE_TOKEN" gh api "repos/$EDITORIAL_PRIVATE_REPOSITORY" --jq '.visibility')"
+          test "$visibility" = private
+      - name: Inspect shared Groq quota status without model calls
+        id: quota
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'quota'
+        run: python -m src.editorial_quota status
+      - name: Reserve the single bounded Groq quota probe
+        id: reserve_probe
+        if: >-
+          steps.quota.outputs.state == 'unverified' &&
+          env.EDITORIAL_GROQ_FREE_ONLY == 'true' &&
+          ((github.event_name == 'schedule' && env.EDITORIAL_EFFECTIVE_COMMAND == 'daily') ||
+          (inputs.isolated_validation && inputs.verify_quota && env.EDITORIAL_EFFECTIVE_COMMAND == 'quota'))
+        run: |
+          mkdir -p "$EDITORIAL_QUOTA_DIR"
+          printf '%s\n' attempted > "$EDITORIAL_QUOTA_DIR/attempted.txt"
+      - name: Record the quota probe reservation before contacting Groq
+        id: upload_reservation
+        if: steps.reserve_probe.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-groq-attempted-${{ steps.quota.outputs.day }}
+          path: ${{ env.EDITORIAL_QUOTA_DIR }}/attempted.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Verify restored Groq capacity with one short free request
+        id: probe
+        if: steps.upload_reservation.outcome == 'success'
+        env:
+          EDITORIAL_QUOTA_PROBE_RESERVED: 'true'
+        run: python -m src.editorial_quota probe --markers "$EDITORIAL_QUOTA_DIR"
+      - name: Publish the successful quota marker
+        if: steps.probe.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-groq-ready-${{ steps.quota.outputs.day }}
+          path: ${{ env.EDITORIAL_QUOTA_DIR }}/ready.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Require observed free capacity before a full run
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
+        env:
+          QUOTA_STATE: ${{ steps.quota.outputs.state }}
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          if [ "$QUOTA_STATE" != ready ] && [ "$PROBE_OUTCOME" != success ]; then
+            echo "::error::Groq capacity is blocked or unverified. Full production was gated before provider calls."
+            exit 2
+          fi
+      - name: Exercise package recovery in separate processes without providers
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'storage-test'
+        run: |
+          python -m pip install -r requirements-quality.txt 'python-docx==1.2.0'
+          python -m unittest discover -s tests -p test_editorial_storage.py -v
       - name: Check the existing encrypted review at delivery time
         if: env.EDITORIAL_MODE == 'encrypted' && env.EDITORIAL_EFFECTIVE_COMMAND == 'review'
         run: python -m src.editorial_delivery reference --date "$EDITORIAL_MOSCOW_DAY"
       - name: Restore the authenticated state checkpoint
-        if: env.EDITORIAL_MODE == 'encrypted' && env.EDITORIAL_EFFECTIVE_COMMAND != 'review' && env.EDITORIAL_EFFECTIVE_COMMAND != 'health'
+        if: env.EDITORIAL_MODE == 'encrypted' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'learn' || env.EDITORIAL_EFFECTIVE_COMMAND == 'audit' || env.EDITORIAL_EFFECTIVE_COMMAND == 'status')
         run: |
           umask 077
           mkdir -p "$EDITORIAL_STATE_DIR"
@@ -181,18 +236,33 @@ jobs:
         env:
           EDITORIAL_LEARNING_PR_TOKEN: ${{ env.EDITORIAL_EFFECTIVE_COMMAND == 'learn' && secrets.EDITORIAL_LEARNING_PR_TOKEN || '' }}
         timeout-minutes: 145
-        if: env.EDITORIAL_MODE != 'encrypted' || env.EDITORIAL_EFFECTIVE_COMMAND != 'review'
+        if: >-
+          env.EDITORIAL_EFFECTIVE_COMMAND != 'skip' && env.EDITORIAL_EFFECTIVE_COMMAND != 'quota' &&
+          env.EDITORIAL_EFFECTIVE_COMMAND != 'storage-test' &&
+          (env.EDITORIAL_MODE != 'encrypted' || env.EDITORIAL_EFFECTIVE_COMMAND != 'review')
         run: |
           args=("$EDITORIAL_EFFECTIVE_COMMAND" --date "$EDITORIAL_MOSCOW_DAY")
           if [ "$EDITORIAL_VALIDATE_KLEIN" = true ]; then args+=(--validate-klein); fi
-          if [ "$EDITORIAL_MODE" = encrypted ] && [ "$EDITORIAL_EFFECTIVE_COMMAND" != health ]; then
-            args+=(--local-state "$EDITORIAL_STATE_DIR" --encrypted-mode)
+          if [ "$EDITORIAL_EFFECTIVE_COMMAND" != health ]; then
+            args+=(--local-state "$EDITORIAL_STATE_DIR")
+            if [ "$EDITORIAL_MODE" = encrypted ]; then args+=(--encrypted-mode); fi
           fi
           if [ "$EDITORIAL_ISOLATED_VALIDATION" = true ] &&
             { [ "$EDITORIAL_EFFECTIVE_COMMAND" = daily ] || [ "$EDITORIAL_EFFECTIVE_COMMAND" = retry ]; }; then
             args+=(--validation-window 120)
           fi
           python -m src.editorial_brain "${args[@]}"
+      - name: Record a confirmed daily Groq stop without publishing editorial data
+        if: always() && steps.command.outcome != 'skipped' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry')
+        run: python -m src.editorial_quota record --state "$EDITORIAL_STATE_DIR" --markers "$EDITORIAL_QUOTA_DIR"
+      - name: Publish the daily Groq stop marker
+        if: always() && steps.quota.outputs.day != '' && (steps.probe.outcome == 'failure' || steps.command.outcome == 'failure')
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-groq-blocked-${{ steps.quota.outputs.day }}
+          path: ${{ env.EDITORIAL_QUOTA_DIR }}/blocked.txt
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Seal new checkpoints and available review material
         if: always() && steps.command.outcome != 'skipped' && env.EDITORIAL_MODE == 'encrypted' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'learn')
         run: |
