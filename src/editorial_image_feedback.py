@@ -67,7 +67,7 @@ def inspect_visual(raw, scene, *, reviewer=None):
         with VISUAL_REVIEW_LOCK, torch.inference_mode():
             sig, sp = _siglip()
             tokens = sp(text=[target, distractor], images=photo,
-                        padding="max_length", max_length=64, return_tensors="pt")
+                        padding="max_length", truncation=True, max_length=64, return_tensors="pt")
             raw_scores = sig(**tokens).logits_per_image[0].tolist()
             # SigLIP logits are not comparable to CLIP absolute thresholds.
             margin = float(raw_scores[0] - raw_scores[1])
