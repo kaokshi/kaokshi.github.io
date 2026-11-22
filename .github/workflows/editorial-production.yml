@@ -136,7 +136,6 @@ jobs:
             echo "EDITORIAL_SEALED_DIR=$RUNNER_TEMP/editorial-sealed"
           } >> "$GITHUB_ENV"
       - name: Install storage and review utilities
-        if: env.EDITORIAL_MODE == 'encrypted'
         run: python -m pip install 'cryptography>=44,<48'
       - name: Check the existing encrypted review at delivery time
         if: env.EDITORIAL_MODE == 'encrypted' && env.EDITORIAL_EFFECTIVE_COMMAND == 'review'
@@ -158,6 +157,8 @@ jobs:
           aiw-ru models install modernbert lightgbm transformer || echo "::warning::One or more local detectors could not be installed"
       - name: Execute editorial command
         id: command
+        env:
+          EDITORIAL_LEARNING_PR_TOKEN: ${{ env.EDITORIAL_EFFECTIVE_COMMAND == 'learn' && secrets.EDITORIAL_LEARNING_PR_TOKEN || '' }}
         timeout-minutes: 145
         if: env.EDITORIAL_MODE != 'encrypted' || env.EDITORIAL_EFFECTIVE_COMMAND != 'review'
         run: |

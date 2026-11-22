@@ -68,3 +68,58 @@ def evaluate_cases(rows, minimum):
 def learn(root: Path, minimum):
     feedback = [read_json(path) for path in (root / "feedback").glob("*.json")]
     return evaluate_cases(feedback, minimum)
+
+
+def propose_pull_requests(result, token):
+    """Submit independent evidence summaries to a review branch, without artifacts or texts."""
+    import json
+    import os
+    import subprocess
+
+    repository = "kaokshi/kaokshi.github.io"
+    root = f"repos/{repository}"
+    env = {**os.environ, "GH_TOKEN": token}
+
+    def api(route, method="GET", payload=None, absent=False):
+        args = ["gh", "api", "-X", method, f"{root}/{route}"]
+        if payload is not None:
+            args.extend(["--input", "-"])
+        invocation = subprocess.run(args, input=json.dumps(payload) if payload is not None else None,
+                                    env=env, capture_output=True, text=True, timeout=30, check=False)
+        response = json.loads(invocation.stdout or "{}")
+        if invocation.returncode and not (absent and str(response.get("status")) == "404"):
+            raise RuntimeError("learning_proposal_github_rejected")
+        return response if not invocation.returncode else None
+
+    proposed = []
+    for row in result["proposals"]:
+        if row["status"] != "candidate_improved":
+            continue
+        # The record contains aggregates and a checked-in instruction. Private
+        # feedback, article identifiers and source hashes never enter the PR.
+        tag = f'{row["channel"]}-{row["issue"]}'
+        branch = "editorial/learning-" + tag
+        prior = api("pulls?state=open&head=kaokshi:" + branch)
+        if prior:
+            proposed.append(prior[0]["html_url"])
+            continue
+        base = api("git/ref/heads/main")["object"]["sha"]
+        if api("git/ref/heads/" + branch, absent=True):
+            raise RuntimeError("learning_proposal_branch_exists_without_open_pr")
+        document = {"candidate": row["instruction"], "channel": row["channel"], "issue": row["issue"],
+                    "holdout_cases": row["held_out_cases"], "baseline_resolved": row["baseline_resolved"],
+                    "candidate_resolved": row["candidate_resolved"], "regressions": row["regressions"],
+                    "deployment": "requires_owner_review", "rollback": row["rollback"]}
+        tree = api("git/commits/" + base)["tree"]["sha"]
+        new_tree = api("git/trees", "POST", {"base_tree": tree, "tree": [{
+            "path": f"config/editorial_prompt_candidates/{tag}.json", "mode": "100644",
+            "type": "blob", "content": json.dumps(document, indent=2) + "\n"}]})["sha"]
+        commit = api("git/commits", "POST", {"message": f"Propose editorial instruction for {tag}",
+                     "tree": new_tree, "parents": [base]})["sha"]
+        api("git/refs", "POST", {"ref": "refs/heads/" + branch, "sha": commit})
+        pr = api("pulls", "POST", {"title": f"Editorial learning proposal: {tag}", "head": branch,
+                 "base": "main", "draft": True,
+                 "body": "Independent holdout results and rollback are recorded in the proposal. "
+                         "The production prompt remains subject to owner approval."})
+        proposed.append(pr["html_url"])
+    return proposed

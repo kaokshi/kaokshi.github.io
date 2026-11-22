@@ -15,7 +15,7 @@ import fcntl
 from . import editorial_cinema as cinema
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, validate_plan
-from .editorial_learning import learn
+from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
 from .editorial_package import package, zip_packet
@@ -83,7 +83,6 @@ class Article:
         self.film = None
         self.cinema_registry = read_json(CONFIG / "editorial_cinema.json", {})
         self.attempts = []
-        self.edit_attempted = False
         self.assistant = "not_required"
         self.config = memory.config
         self.escalation = read_json(CONFIG / "ai_revision_policy.json")["editorial_escalation"]
@@ -91,7 +90,10 @@ class Article:
     def task(self, stage, executor, inputs, fn, **kwargs):
         return self.memory.task(self.id, stage, executor, inputs, fn, **kwargs)
 
-    def model(self, stage, provider, prompt, *, validate=None, tokens=7200, metadata=None):
+    def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None):
+        if tokens is None:
+            tokens = 4800 if provider == "groq" else 7800
+
         def execute(task):
             seen = self.memory.response(task)
             if seen is not None:
@@ -218,7 +220,7 @@ class Article:
             for provider in ("groq", "openrouter"):
                 try:
                     return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
-                                      metadata={"text_sha256": sha}, tokens=6300)
+                                      metadata={"text_sha256": sha}, tokens=4300 if provider == "groq" else 6300)
                 except Blocked as exc:
                     last_error = exc
             raise last_error
@@ -256,10 +258,18 @@ class Article:
         try:
             edited = self.model("full-edit", "openrouter", edit_prompt,
                                 metadata={"source_sha256": original["text_sha256"]})
-            self.edit_attempted = True
             self.remember_version(edited)
         except Blocked as exc:
-            self.blockers.append(f"independent_edit_unavailable: {exc}")
+            can_retry = str(exc) in {"empty_visible_content", "connection_failed", "truncated_response"}
+            if can_retry:
+                try:
+                    edited = self.model("full-edit-retry", "openrouter", edit_prompt,
+                                        metadata={"source_sha256": original["text_sha256"]})
+                    self.remember_version(edited)
+                except Blocked as last:
+                    self.blockers.append(f"independent_edit_unavailable: {last}")
+            else:
+                self.blockers.append(f"independent_edit_unavailable: {exc}")
         self.current = self.inspect(original)
         if edited and canonical(parse_article(edited)) != canonical(original["article"]):
             candidate = self.inspect(self.remember_version(edited), self.current)
@@ -337,7 +347,8 @@ class Article:
             guide = ("Только photo: официальные кадры или пресс-материалы именно этого фильма. "
                      "Описывай подлинную сцену, актёров и визуальный контекст; не придумывай эпизоды.")
         prompt = (f"{guide} Для каждого из {count} разделов минимум один кадр, для насыщенных "
-                  "два. Первая секция должна поддерживать сильную обложку. Верни JSON "
+                  "два. Когда остаются свободные кадры, выдели два разных кандидата на обложку "
+                  "в первом разделе. Первая секция должна поддерживать сильную обложку. Верни JSON "
                   '{"subject":"English overall theme","images":[{"section":1,"kind":"photo|illustration",'
                   '"subject":"English concrete scene or subject","brief":"English detailed visual brief",'
                   '"query":"English search phrase for photo"}]}.\n'
@@ -349,7 +360,7 @@ class Article:
                 plan = self.model(f"image-plan-{attempt}", "groq",
                                   prompt + (f"\nИсправь: {last}." if last else ""),
                                   validate=lambda x: validate_plan(x, count, self.channel, self.config),
-                                  metadata={"text_sha256": self.current["text_sha256"]}, tokens=4200)
+                                  metadata={"text_sha256": self.current["text_sha256"]}, tokens=2800)
                 break
             except Blocked as exc:
                 last = exc
@@ -564,6 +575,8 @@ def execute(command, state, private_git=None, day=None, validation_window=None, 
     if date.fromisoformat(day).isoformat() != day:
         raise Blocked("invalid_cycle_date")
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if isinstance(private_git, PrivateGit) and command != "health":
+        private_git.restore(state, day)
     with (state / ".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         cutoff = deadline(day, cfg["production_stop"], tz)
@@ -578,6 +591,15 @@ def execute(command, state, private_git=None, day=None, validation_window=None, 
             return audit(memory, private_git)
         if command == "learn":
             result = learn(state, cfg["learning_min_cases"])
+            token = os.environ.get("EDITORIAL_LEARNING_PR_TOKEN")
+            if any(row["status"] == "candidate_improved" for row in result["proposals"]):
+                if token:
+                    try:
+                        result["proposal_pull_requests"] = propose_pull_requests(result, token)
+                    except (RuntimeError, OSError, ValueError):
+                        result["proposal_status"] = "github_proposal_integration_pending"
+                else:
+                    result["proposal_status"] = "github_proposal_integration_pending"
             write_json(memory.folder / "learning.json", result)
             memory.save()
             return result
@@ -604,6 +626,9 @@ def execute(command, state, private_git=None, day=None, validation_window=None, 
                     for channel, n in cfg["articles_per_channel"].items() if n]
             for job in jobs:
                 job.result()
+        write_json(memory.folder / "audit.json", audit(memory, private_git))
+        write_json(memory.folder / "learning.json", learn(state, cfg["learning_min_cases"]))
+        memory.save()
         return status(memory)
 
 
@@ -635,7 +660,7 @@ def main():
             if args.local_state and args.local_state.resolve().is_relative_to(ROOT):
                 raise Blocked("local_state_must_be_outside_repository")
             storage = PrivateGit(storage_repo, Path(temporary) / "storage", token) if storage_repo or token else None
-            state = storage.path / "editorial" if storage else args.local_state or Path(temporary) / "editorial"
+            state = args.local_state or Path(temporary) / "editorial"
             result = execute(args.command, state, storage, args.date, args.validation_window, args.encrypted_mode)
             if args.encrypted_mode and args.command in {"daily", "retry"}:
                 memory = Memory(state, result["day"], datetime.now(timezone.utc), settings())

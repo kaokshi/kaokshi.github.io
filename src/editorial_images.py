@@ -75,7 +75,8 @@ def commons_photos(query):
                "rights_status": "license_metadata_verified" if verified else "rights_review_pending",
                "license": row["license_claimed"], "license_url": terms,
                "attribution": row["attribution"] or row["artist"],
-               "description": row["title"] + ": " + row["description"], "domains": COMMONS}
+               "description": row["title"] + ": " + row["description"],
+               "original_asset_url": row["original_asset_url"], "domains": COMMONS}
 
 
 def nasa_photos(query):
@@ -124,9 +125,10 @@ def similarity(image, captions):
             with torch.inference_mode():
                 result = model(**batch)
                 scores = (result.logits_per_image / model.logit_scale.exp())[0].tolist()
+                embedding = result.image_embeds[0].tolist()
     except (ImportError, OSError, ValueError, RuntimeError, TypeError):
         raise Blocked("visual_matcher_unavailable") from None
-    return model_id, [round(x, 4) for x in scores]
+    return model_id, [round(x, 4) for x in scores], [round(x, 4) for x in embedding]
 
 
 def image_hashes(path):
@@ -155,7 +157,7 @@ class ImageIndex:
             if file.format not in ("JPEG", "PNG", "WEBP") or getattr(file, "is_animated", False):
                 raise ValueError("image_format")
             image = ImageOps.exif_transpose(file).convert("RGB")
-        model, scores = similarity(image, [scene["subject"], subject,
+        model, scores, embedding = similarity(image, [scene["subject"], subject,
                                             "an unrelated image with no connection with this topic"])
         if scores[0] < .19 or scores[0] <= scores[2] + .015:
             raise ValueError("image_scene_match_below_threshold")
@@ -172,16 +174,21 @@ class ImageIndex:
         raw_sha, sha, phash = digest(raw), digest(rendered), str(imagehash.phash(image))
         with self.memory.lock:
             hashes = list(self.archive)
+            vectors = []
             for existing in self.memory.root.glob("*/*/images/*.json"):
                 if existing != path.with_suffix(".json"):
                     row = read_json(existing)
                     hashes.extend([(row["sha256"], row["perceptual_hash"]),
                                    (row["original_sha256"], row["perceptual_hash"])])
+                    if row.get("match_model") == model and row.get("image_embedding"):
+                        vectors.append(row["image_embedding"])
             if any(previous in (sha, raw_sha) or (int(phash, 16) ^ int(near, 16)).bit_count() <= 6
                    for previous, near in hashes):
                 raise ValueError("image_duplicate")
+            if any(sum(a * b for a, b in zip(embedding, previous)) > .965 for previous in vectors):
+                raise ValueError("image_semantically_near_duplicate")
             row = {**metadata, "file": path.name, "sha256": sha, "original_sha256": raw_sha,
-                   "perceptual_hash": phash, "size": list(image.size), "match_model": model,
+                   "perceptual_hash": phash, "size": list(image.size), "match_model": model, "image_embedding": embedding,
                    "scene_similarity": scores[0], "topic_similarity": scores[1],
                    "cover_score": round(scores[1] * 2 + scores[0] * .3 + quality * .3, 4),
                    "section": scene["section"], "scene": scene["subject"]}
@@ -234,7 +241,7 @@ def generated(scene, subject, path, index, task, article, channel):
                                     "model": KLEIN, "prompt": prompt, "parameters": params,
                                     "rights_status": "rights_review_pending",
                                     "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
-                                    "label": "ИИ-иллюстрация"},
+                                    "label": "ИИ-иллюстрация" if channel != "legends" else None},
                               scene, subject, path)
         except (OSError, ValueError):
             if attempt:

@@ -88,11 +88,25 @@ class PrivateGit:
         if self.command("gh", "api", f"repos/{self.name}", "-q", ".visibility") != "private":
             raise StorageError("storage_repository_must_be_private")
 
+    def restore(self, root, day):
+        from .editorial_delivery import owner_key, state_key, unseal_state, unpack
+        self.state_root, self.day = root, day
+        owner_key()
+        if not state_key():
+            raise StorageError("storage_configuration_pending: private_checkpoint_key_required")
+        checkpoints = sorted((self.path / "editorial-sealed").glob("????-??-??/checkpoint.enc"), reverse=True)
+        for path in checkpoints:
+            if path.parent.name <= day:
+                unpack(unseal_state(path.read_bytes()), root)
+                break
+
     def checkpoint(self):
+        from .editorial_delivery import save_outputs
+        sealed = self.path / "editorial-sealed" / self.day
+        save_outputs(self.state_root, self.day, sealed)
         command = [*self.git, "-C", str(self.path)]
-        self.command(*command, "add", "--", "editorial",
-                     ":(exclude,glob)editorial/**/*.tmp", ":(exclude)editorial/.lock")
-        if self.command(*command, "status", "--porcelain", "--", "editorial"):
+        self.command(*command, "add", "--", "editorial-sealed")
+        if self.command(*command, "status", "--porcelain", "--", "editorial-sealed"):
             self.command(*command, "-c", "user.name=Editorial Workflow",
                          "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                          "commit", "-m", "Checkpoint editorial state")
@@ -101,7 +115,7 @@ class PrivateGit:
             self.command(*command, "push", "origin", f"HEAD:refs/heads/{self.branch}")
 
     def review_url(self, day):
-        return f"https://github.com/{self.name}/tree/{self.branch}/editorial/{day}/review"
+        return f"https://github.com/{self.name}/tree/{self.branch}/editorial-sealed/{day}"
 
     def notify(self, day, status):
         # The private issue is an owner notification. A matching issue prevents
@@ -116,7 +130,7 @@ class PrivateGit:
         owner = self.name.split("/")[0]
         return self.command("gh", "api", "-X", "POST", f"repos/{self.name}/issues",
                             "-f", f"title={title}", "-f", f"assignees[]={owner}",
-                            "-f", f"body=Статус комплекта: {status}.\n\n{self.review_url(day)}",
+                            "-f", f"body=Статус комплекта: {status}. Расшифровка выполняется в авторизованной среде.\n\n{self.review_url(day)}",
                             "-q", ".html_url")
 
 
@@ -139,7 +153,12 @@ class Memory:
     def state(self, task, status, *, durable=True, **fields):
         with self.lock:
             task.update(status=status, **fields)
-            task["events"].append({"at": now(), "status": status})
+            event = {"at": now(), "status": status}
+            task["events"].append(event)
+            if os.environ.get("GITHUB_ACTIONS") == "true" and status in {
+                    "running", "completed", "blocked", "failed", "retry_pending"}:
+                print(json.dumps({**event, "operation": task["operation"], "article": task["article"],
+                                  "executor": task["executor"], "attempt": task["attempts"]}), flush=True)
             if status in {"completed", "failed", "blocked"}:
                 task["used_calls"] = sum(call["task"] == task["id"] for call in self.data["calls"])
             self.save(durable)

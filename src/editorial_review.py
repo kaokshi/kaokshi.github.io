@@ -15,7 +15,12 @@ HEADING = re.compile(r"\*\*([^*\n]{2,125})\*\*")
 CTA = re.compile(
     r"\b(?:подпиш(?:итесь|ись)|подписывай(?:тесь|ся)|подписаться|"
     r"следите за (?:каналом|новыми (?:историями|выпусками|статьями))|"
-    r"присоединяйтесь к (?:нашему )?каналу)\b", re.I)
+    r"присоединяйтесь к (?:нашему )?каналу|оформ(?:ите|ить) подписку)\b", re.I)
+NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def numbers(text):
+    return {token.replace(",", ".") for token in NUMBER.findall(text)}
 RULES = (
     "Русская статья, 3000–6000 непробельных знаков, ориентир 4300–4900. "
     "Обычно 6–7 смысловых разделов (допустимо 4–8). Первая строка каждого раздела, "
@@ -98,8 +103,8 @@ def sources(urls, domains):
 
 
 def source_context(records):
-    return "\n\n".join(f"S{i} {row['url']}\n{row['text']}"
-                        for i, row in enumerate(records, 1) if row["status"] == "accessible")
+    available = [(i, row) for i, row in enumerate(records, 1) if row["status"] == "accessible"][:3]
+    return "\n\n".join(f"S{i} {row['url']}\n{row['text'][:2600]}" for i, row in available)
 
 
 def fact_evidence(text, audit, records):
@@ -117,6 +122,7 @@ def fact_evidence(text, audit, records):
             ok = (len(claim) > 10 and claim in text and len(quote) >= 18
                   and evidence["status"] == "accessible"
                   and normalize(quote) in normalize(evidence["text"])
+                  and numbers(claim) <= numbers(quote)
                   and row.get("verdict") == "supported")
         except (KeyError, IndexError, TypeError, AttributeError, ValueError):
             claim, ok = str(row)[:100], False
@@ -124,10 +130,11 @@ def fact_evidence(text, audit, records):
             verified.append({"claim": claim, "source": evidence["url"], "quote": quote})
         else:
             issues.append("unsupported_claim: " + claim)
-    numeric = re.findall(r"[^.!?\n]*\d[^.!?\n]+", text)
-    for sentence in numeric:
-        if not any(row["claim"] in sentence or sentence.strip() in row["claim"]
-                   for row in verified):
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
+        values = numbers(sentence)
+        supported = {value for row in verified if row["claim"] in sentence or sentence.strip() in row["claim"]
+                     for value in numbers(row["claim"])}
+        if values - supported:
             issues.append("unsupported_numeric_claim: " + sentence.strip()[:240])
     return verified, issues
 

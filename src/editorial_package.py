@@ -150,7 +150,7 @@ def package(folder, title, version, report, images, image_folder, summary):
     write_json(folder / "Статус и проверки.json", {**summary, "cover": cover,
                "text_sha256": report["text_sha256"], "document_roundtrip": "completed",
                "article_checks": {k: v for k, v in report.items() if k != "article"},
-               "images": ordered})
+               "images": [{k: v for k, v in row.items() if k != "image_embedding"} for row in ordered]})
     versions = folder / "Версии"
     versions.mkdir(exist_ok=True)
     for row in version:
