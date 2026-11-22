@@ -152,8 +152,11 @@ def unpack(data, target):
                     raise Blocked("unsafe_restore_symlink")
             if not candidate.resolve().is_relative_to(target_root):
                 raise Blocked("unsafe_restore_destination")
-        for entry in entries:
-            write(target / entry.filename, archive.read(entry))
+        # Read and authenticate every member before modifying any files.
+        # A corrupt late ZIP member must not leave an earlier state.json updated.
+        contents = [(entry.filename, archive.read(entry)) for entry in entries]
+        for name, raw in contents:
+            write(target / name, raw)
 
 
 def restore_blob(payload, root, day):
