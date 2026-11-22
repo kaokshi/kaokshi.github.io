@@ -4,6 +4,8 @@ on:
     paths:
       - 'src/editorial_brain.py'
       - 'src/editorial_groq_budget.py'
+      - 'src/editorial_free_fallback.py'
+      - '.github/workflows/editorial-production.yml'
       - 'tests/test_editorial_quota_fallback.py'
       - '.github/workflows/editorial-free-fallback-tests.yml'
   workflow_dispatch:
@@ -24,6 +26,6 @@ jobs:
       - name: Install minimal CPU test dependencies
         run: python -m pip install -r requirements-quality.txt python-docx
       - name: Compile changed code
-        run: python -m py_compile src/editorial_brain.py tests/test_editorial_quota_fallback.py
+        run: python -m py_compile src/editorial_brain.py src/editorial_free_fallback.py tests/test_editorial_quota_fallback.py
       - name: Verify free fallback without API calls or publication
         run: python -m unittest -v tests.test_editorial_quota_fallback
