@@ -63,6 +63,7 @@ class RelevanceRanking(unittest.TestCase):
             v = image.getpixel((10, 10))[0] / 255
             return "mock", [.2 + .5 * v, .2, .02], [v]
         index = Index()
+        real_rank = images.rank_photo_candidates
         with patch.object(images, "commons_photos", find), \
              patch.object(images, "nasa_photos", lambda _: iter(())), \
              patch.object(images, "warm_visual_matcher", lambda: None), \
