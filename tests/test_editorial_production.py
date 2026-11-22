@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from docx import Document
 from PIL import Image
@@ -250,6 +250,23 @@ class ProductionTests(unittest.TestCase):
                     {"file": "cover.jpg", "section": 3, "cover_score": .8, "sha256": "c"},
                     {"file": "other.jpg", "section": 3, "cover_score": .3, "sha256": "d"}]
         self.assertEqual(editorial_images.select_cover(pictures), "cover.jpg")
+
+    def test_generated_image_replacement_is_checked_again(self):
+        scene = {"brief": "The stationary tram at the empty terminal",
+                 "subject": "empty tram terminal", "section": 1}
+        index = Mock()
+        index.memory.time_left.return_value = 200
+        index.memory.call.side_effect = lambda task, article, provider, invoke: invoke()
+        accepted = {"sha256": digest(b"replacement")}
+        index.save.side_effect = [ValueError("image_scene_match_below_threshold"), accepted]
+        with patch.object(editorial_images, "warm_visual_matcher"), patch.object(
+                editorial_images, "klein", side_effect=[(b"first", {}), (b"replacement", {})]) as klein:
+            result = editorial_images.generated(scene, "urban transport", Path("image.jpg"), index,
+                                               "image-01", "legends-01", "legends")
+        self.assertEqual(result, accepted)
+        self.assertEqual([call.args[0] for call in index.save.call_args_list], [b"first", b"replacement"])
+        self.assertNotEqual(klein.call_args_list[0].args[0], klein.call_args_list[1].args[0])
+        self.assertEqual(index.save.call_args.args[2], scene)
 
     def test_corrupt_image_cannot_be_accepted(self):
         with TemporaryDirectory() as directory:
