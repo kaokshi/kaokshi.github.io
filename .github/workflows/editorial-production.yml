@@ -144,7 +144,7 @@ jobs:
             echo "EDITORIAL_QUOTA_DIR=$RUNNER_TEMP/editorial-quota"
           } >> "$GITHUB_ENV"
       - name: Install storage and review utilities
-        if: env.EDITORIAL_EFFECTIVE_COMMAND != 'skip' && env.EDITORIAL_EFFECTIVE_COMMAND != 'quota'
+        if: env.EDITORIAL_EFFECTIVE_COMMAND != 'skip'
         run: python -m pip install 'cryptography>=44,<48'
       - name: Verify production storage credentials and visibility before provider calls
         if: env.EDITORIAL_MODE == 'private' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'review')
@@ -246,7 +246,7 @@ jobs:
           EDITORIAL_LEARNING_PR_TOKEN: ${{ env.EDITORIAL_EFFECTIVE_COMMAND == 'learn' && secrets.EDITORIAL_LEARNING_PR_TOKEN || '' }}
         timeout-minutes: 145
         if: >-
-          env.EDITORIAL_EFFECTIVE_COMMAND != 'skip' && env.EDITORIAL_EFFECTIVE_COMMAND != 'quota' &&
+          env.EDITORIAL_EFFECTIVE_COMMAND != 'skip' &&
           env.EDITORIAL_EFFECTIVE_COMMAND != 'storage-test' &&
           (env.EDITORIAL_MODE != 'encrypted' || env.EDITORIAL_EFFECTIVE_COMMAND != 'review')
         run: |
