@@ -14,12 +14,12 @@ import fcntl
 
 from . import editorial_cinema as cinema
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
-from .editorial_images import ImageIndex, generated, photo, validate_plan
+from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
 from .editorial_package import package, zip_packet
-from .editorial_providers import Blocked, MODELS, ProviderError, text_call
+from .editorial_providers import Blocked, MODELS, ProviderError, klein, text_call
 from .editorial_review import RULES, canonical, improves, parse_article, qa, source_context, sources, structural_checks
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -587,6 +587,29 @@ def health(storage):
             "assistant_handoff": "not_connected"}
 
 
+def validate_klein():
+    """One owner-authorized free request with a generic, unpublished test scene."""
+    import io
+    from PIL import Image, ImageOps
+
+    scene = "an empty tram stop in the rain with a red shelter and tram rails at night"
+    raw, params = klein(f"Editorial test image of {scene}. Clean composition, no text or logos.")
+    with Image.open(io.BytesIO(raw)) as source:
+        image = ImageOps.exif_transpose(source).convert("RGB")
+    if image.size != (params["width"], params["height"]):
+        raise Blocked("klein_image_dimension_mismatch")
+    result = {"klein": "completed", "model": MODELS["klein"], "parameters": params,
+              "image_sha256": digest(raw), "publication_authorized": False}
+    try:
+        model, values, vector = similarity(image, [scene, "a portrait of a cat indoors"])
+        result["visual_check"] = {"model": model, "scene_score": values[0],
+                                  "unrelated_score": values[1], "vector_size": len(vector),
+                                  "status": "completed" if values[0] > values[1] else "findings"}
+    except Blocked as exc:
+        result["visual_check"] = {"status": "unavailable", "reason": str(exc)}
+    return result
+
+
 def audit(memory, storage):
     report = status(memory)
     incidents, durations = Counter(), {}
@@ -675,12 +698,20 @@ def main():
     parser.add_argument("command", choices=("daily", "retry", "review", "status", "audit", "learn", "health"))
     parser.add_argument("--date")
     parser.add_argument("--encrypted-mode", action="store_true")
+    parser.add_argument("--validate-klein", action="store_true",
+                        help="One authorized free isolated image call; do not store the image")
     parser.add_argument("--local-state", type=Path, help="Private local inspection directory outside this repository")
     parser.add_argument("--validation-window", type=int, choices=(90, 120),
                         help="Manual validation only, with a separate private state repository")
     args = parser.parse_args()
     os.umask(0o077)
     try:
+        if args.validate_klein:
+            if args.command != "health" or os.environ.get("EDITORIAL_ISOLATED_VALIDATION") != "true":
+                raise Blocked("klein_validation_requires_isolated_health")
+            probe = validate_klein()
+            print(json.dumps(probe, sort_keys=True))
+            return 0 if probe["visual_check"]["status"] == "completed" else 2
         with TemporaryDirectory(prefix="zen-editorial-") as temporary:
             storage_repo = os.environ.get("EDITORIAL_PRIVATE_REPOSITORY")
             token = os.environ.get("EDITORIAL_PRIVATE_TOKEN")

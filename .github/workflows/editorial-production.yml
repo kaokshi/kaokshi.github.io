@@ -27,6 +27,10 @@ on:
         description: Run a manual end-to-end validation with a separate artifact namespace or private repository.
         default: false
         type: boolean
+      validate_klein:
+        description: Run one free real Klein image and semantic validation in isolated health mode.
+        default: false
+        type: boolean
       validation_label:
         description: Optional isolated test label for a new diagnostic cycle (lowercase letters and digits).
         default: ''
@@ -74,6 +78,7 @@ jobs:
       EDITORIAL_DAILY_REPOSITORY: ${{ vars.EDITORIAL_PRIVATE_REPOSITORY }}
       EDITORIAL_VALIDATION_REPOSITORY: ${{ vars.EDITORIAL_VALIDATION_REPOSITORY }}
       EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      EDITORIAL_VALIDATE_KLEIN: ${{ inputs.isolated_validation && inputs.validate_klein && 'true' || 'false' }}
       EDITORIAL_VALIDATION_LABEL: ${{ inputs.isolated_validation && inputs.validation_label || '' }}
       EDITORIAL_REVIEW_PUBLIC_KEY: ${{ inputs.isolated_validation && inputs.validation_public_key || vars.EDITORIAL_REVIEW_PUBLIC_KEY }}
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
@@ -163,10 +168,12 @@ jobs:
           python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" \
             --date "$EDITORIAL_MOSCOW_DAY" --cycle-command "$EDITORIAL_EFFECTIVE_COMMAND"
       - name: Install QA, document and visual tools
-        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_VALIDATE_KLEIN == 'true'
         run: |
           python -m pip install -r requirements-production.txt
-          aiw-ru models install modernbert lightgbm transformer || echo "::warning::One or more local detectors could not be installed"
+          if [ "$EDITORIAL_EFFECTIVE_COMMAND" != health ]; then
+            aiw-ru models install modernbert lightgbm transformer || echo "::warning::One or more local detectors could not be installed"
+          fi
       - name: Execute editorial command
         id: command
         env:
@@ -175,6 +182,7 @@ jobs:
         if: env.EDITORIAL_MODE != 'encrypted' || env.EDITORIAL_EFFECTIVE_COMMAND != 'review'
         run: |
           args=("$EDITORIAL_EFFECTIVE_COMMAND" --date "$EDITORIAL_MOSCOW_DAY")
+          if [ "$EDITORIAL_VALIDATE_KLEIN" = true ]; then args+=(--validate-klein); fi
           if [ "$EDITORIAL_MODE" = encrypted ] && [ "$EDITORIAL_EFFECTIVE_COMMAND" != health ]; then
             args+=(--local-state "$EDITORIAL_STATE_DIR" --encrypted-mode)
           fi
