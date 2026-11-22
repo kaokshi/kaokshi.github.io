@@ -54,7 +54,10 @@ class FeedbackTests(unittest.TestCase):
             {"siglip_model":"sig","florence_model":"flo","siglip_relative_margin":-1.5,
              "florence_caption":"An empty train tunnel with no carriage."},
             {"siglip_model":"sig","florence_model":"flo","siglip_relative_margin":3.0,
-             "florence_caption":"An old train at a deserted station."},
+             "florence_caption":"An old train at a deserted station.",
+             "detail_evidence":{"verified_independently":True,
+                 "present":["old train","open doors","metro platform"],
+                 "absent":["empty tunnel without train","crowds"],"counts":{}}},
         ])
         prompts=[]
         def fake_klein(prompt):
