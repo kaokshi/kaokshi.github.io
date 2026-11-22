@@ -1,5 +1,5 @@
 name: Strict visual constraint regression (no image API)
-# Includes best-of-three owner-review hold regression cases.
+# Includes best-of-three owner-review hold regression and confirmed evidence bypass.
 on:
   push:
     branches: [experiment/editorial-image-strict-20261123]
