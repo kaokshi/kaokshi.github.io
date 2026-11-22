@@ -210,6 +210,15 @@ jobs:
         run: |
           python -m pip install -r requirements-quality.txt 'python-docx==1.2.0'
           python -m unittest discover -s tests -p test_editorial_storage.py -v
+          PYTHONPATH=. python tests/test_editorial_storage.py seal "$RUNNER_TEMP/editorial-storage-fixture"
+      - name: Upload encrypted synthetic fixture for an independent runner
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'storage-test'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-storage-fixture
+          path: ${{ runner.temp }}/editorial-storage-fixture/*.enc
+          if-no-files-found: error
+          retention-days: 1
       - name: Check the existing encrypted review at delivery time
         if: env.EDITORIAL_MODE == 'encrypted' && env.EDITORIAL_EFFECTIVE_COMMAND == 'review'
         run: python -m src.editorial_delivery reference --date "$EDITORIAL_MOSCOW_DAY"
@@ -285,3 +294,24 @@ jobs:
           path: ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
           if-no-files-found: ignore
           retention-days: 14
+
+  storage-restore:
+    if: github.event_name == 'workflow_dispatch' && inputs.command == 'storage-test'
+    needs: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: editorial-storage-fixture
+          path: ${{ runner.temp }}/editorial-storage-fixture
+      - name: Restore, verify SHA-256 and open DOCX and HTML on the second runner
+        run: |
+          python -m pip install -r requirements-quality.txt 'python-docx==1.2.0' 'cryptography>=44,<48'
+          PYTHONPATH=. python tests/test_editorial_storage.py restore "$RUNNER_TEMP/editorial-storage-fixture"
