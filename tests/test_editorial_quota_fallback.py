@@ -59,7 +59,7 @@ class QuotaFallbackTests(unittest.TestCase):
 
     def test_preflight_free_only_skips_groq_entirely(self):
         article = self.article(AssertionError("Groq must not be called"))
-        with patch.dict("os.environ", {"EDITORIAL_GROQ_FALLBACK_ONLY": "true"}), \\
+        with patch.dict("os.environ", {"EDITORIAL_GROQ_FALLBACK_ONLY": "true"}), \
                 patch.object(brain, "text_call", return_value={
                     "text": "Завершённый фрагмент", "model": "free", "usage": {}}) as call:
             result = article.model("draft", "groq", "Напиши")
