@@ -160,11 +160,9 @@ def main():
         if fixed:
             if len(stats(fixed)["flags"]) <= len(stats(chosen)["flags"]):chosen=fixed
             else:result["rejected_worsening_fix"]=True
-    # Encrypted temporary delivery of the real edited story to the assistant assembling
-    # the local owner-facing illustrated document; only the ephemeral public key is in source.
-    ephemeral_public="3623d74a77566548809162e850e4b5bf1d1da83bf0b5eb2e7c9a73f990631361"
-    safe_transport=encrypt(zlib.compress(chosen.encode("utf8"),9),ephemeral_public)
-    print("ZEN_EPHEMERAL_ARTICLE_B64="+base64.b64encode(safe_transport).decode("ascii"))
+    # Review file stays in ephemeral GitHub runner, NEVER in git, RSS or job logs.
+    if env.get("ZEN_OWNER_REVIEW_EPHEMERAL")=="1":
+        (work/"selected_final.md").write_text(chosen,encoding="utf8")
     result["selected_text_hash"]=hashlib.sha256(chosen.encode()).hexdigest()
     result["selected_mechanical_checks"]=stats(chosen)
     result["historical_uniqueness_proxy"]=uniqueness(chosen)
