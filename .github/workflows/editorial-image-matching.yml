@@ -50,7 +50,7 @@ jobs:
       - name: Verify the shortlist with Florence-2
         run: |
           ulimit -v 12582912
-          timeout --kill-after=15s 8m python -m src.editorial_image_benchmark florence --workspace "$RUNNER_TEMP/image-bench"
+          timeout --kill-after=15s 12m python -m src.editorial_image_benchmark florence --workspace "$RUNNER_TEMP/image-bench"
       - name: Compare the results with the frozen visual labels
         run: python -m src.editorial_image_benchmark report --workspace "$RUNNER_TEMP/image-bench"
       - name: Archive scores and reusable thumbnails

@@ -90,11 +90,12 @@ def run_model(kind, data, workspace):
     if kind == "florence":
         siglip = read_json(workspace / "siglip.json")["cases"]
         selected = sorted({row["id"] for case in siglip.values() for row in shortlist(case)})
-        for key in selected:
+        for position, key in enumerate(selected, 1):
             before = perf_counter()
             output[key] = describe_pixels(pixels(workspace, key))
             times[key] = perf_counter() - before
             durations.append(times[key])
+            print(f"Florence-2 {position}/{len(selected)} {key}: {times[key]:.2f} s", flush=True)
     else:
         for case in cases_for_inference(data):
             scene = Scene.read(case)
