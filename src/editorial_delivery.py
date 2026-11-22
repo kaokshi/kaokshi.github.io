@@ -127,8 +127,25 @@ def save_outputs(root, day, outgoing):
 
 
 def unpack(data, target):
+    # Archive path validation alone cannot protect a destination with pre-existing
+    # symlinked directories or files. Never extract through one, even in a
+    # restored workspace; a failure must not write outside the chosen state root.
+    target = Path(target)
+    if target.is_symlink():
+        raise Blocked("unsafe_restore_symlink")
+    target_root = target.resolve()
     with safe_zip(data) as archive:
-        for entry in archive.infolist():
+        entries = archive.infolist()
+        for entry in entries:
+            candidate = target / entry.filename
+            for parent in (candidate, *candidate.parents):
+                if parent == target.parent:
+                    break
+                if parent.is_symlink():
+                    raise Blocked("unsafe_restore_symlink")
+            if not candidate.resolve().is_relative_to(target_root):
+                raise Blocked("unsafe_restore_destination")
+        for entry in entries:
             write(target / entry.filename, archive.read(entry))
 
 
