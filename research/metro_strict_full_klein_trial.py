@@ -58,7 +58,7 @@ def main():
         if os.environ.get("EDITORIAL_IMAGE_FEEDBACK_EXPERIMENT")!="true" or os.environ.get("EDITORIAL_OBJECT_DETECTION_EXPERIMENT")!="true":
             raise Blocked("experimental_review_flags_missing")
         index=ImageIndex(memory,[])
-        result=generated(SCENE,"metro mystery","unused",index,"image-4",
+        result=generated(SCENE,"metro mystery",OUT/"selected.jpg",index,"image-4",
                          "metro-strict-test","legends")
         record["status"]="completed"
         record["selected"]=result
