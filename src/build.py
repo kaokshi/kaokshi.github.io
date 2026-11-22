@@ -105,7 +105,7 @@ def read_posts(now):
         # Publication is still separately forbidden before an explicit project launch.
         if post.get("ai_editorial_escalation_unresolved") is True:
             continue
-        if len(re.sub(r"\s", "", strip_tags(post.get("body_html", "")))) < 3000:
+        if not 3000 <= len(re.sub(r"\s", "", strip_tags(post.get("body_html", "")))) <= 6000:
             continue
         images = post.get("image_files", [])
         if len(images) < 7 or any(not (BASE / f).is_file() for f in images):
