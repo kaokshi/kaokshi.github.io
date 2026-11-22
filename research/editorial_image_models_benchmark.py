@@ -28,26 +28,37 @@ TIMES = {}
 
 def images():
     rows, seen = [], set()
+    variants = {
+        "aurora": ["aurora borealis", "northern lights", "aurora photography", "aurora sky", "aurora norway"],
+        "coral": ["coral reef", "coral reef fish", "underwater coral", "coral reef underwater", "reef marine biology"],
+        "tornado": ["tornado", "tornado funnel", "tornado storm", "tornado photograph", "funnel cloud"],
+    }
     for label, caption, query in SCENES:
-        for candidate in commons_photos(query):
+        for phrase in variants[label]:
             if sum(x["weak_label"] == label for x in rows) >= 10:
                 break
-            if candidate["asset_url"] in seen:
-                continue
-            seen.add(candidate["asset_url"])
             try:
-                raw = request(candidate["asset_url"], COMMONS, timeout=9, limit=4_000_000)
-                with Image.open(io.BytesIO(raw)) as im:
-                    if min(im.size) < 150 or im.width*im.height > 15_000_000:
+                for candidate in commons_photos(phrase):
+                    if sum(x["weak_label"] == label for x in rows) >= 10:
+                        break
+                    if candidate["asset_url"] in seen:
                         continue
-                    rgb = ImageOps.exif_transpose(im).convert("RGB")
-                    rgb.thumbnail((640, 640))
-                rows.append({"image": rgb.copy(), "weak_label": label,
-                             "source_page": candidate["source_page"],
-                             "license": candidate["license"], "caption": caption})
-                print("CANDIDATE_COLLECTED", label, len(rows), flush=True)
+                    seen.add(candidate["asset_url"])
+                    try:
+                        raw = request(candidate["asset_url"], COMMONS, timeout=9, limit=4_000_000)
+                        with Image.open(io.BytesIO(raw)) as im:
+                            if min(im.size) < 150 or im.width*im.height > 15_000_000:
+                                continue
+                            rgb = ImageOps.exif_transpose(im).convert("RGB")
+                            rgb.thumbnail((640, 640))
+                        rows.append({"image": rgb.copy(), "weak_label": label,
+                                     "source_page": candidate["source_page"],
+                                     "license": candidate["license"], "caption": caption})
+                        print("CANDIDATE_COLLECTED", label, len(rows), flush=True)
+                    except Exception as exc:
+                        print("IMAGE_REJECTED", type(exc).__name__, flush=True)
             except Exception as exc:
-                print("IMAGE_REJECTED", type(exc).__name__, flush=True)
+                print("SEARCH_UNAVAILABLE", label, phrase, type(exc).__name__, flush=True)
     return rows
 
 
