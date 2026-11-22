@@ -1,0 +1,66 @@
+name: Isolated Qwen3.5 CPU editorial benchmark
+on:
+  push:
+    branches:
+      - test/qwen35-cpu-benchmark-20261122
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cpu-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect CPU and RAM
+        run: |
+          nproc
+          free -h
+          df -h .
+      - name: Build llama.cpp CPU CLI
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git /tmp/llama.cpp
+          cmake -S /tmp/llama.cpp -B /tmp/llama.cpp/build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DLLAMA_CURL=OFF
+          cmake --build /tmp/llama.cpp/build --target llama-cli -j 4
+      - name: Download free Qwen3.5 4B Q4_K_M weights
+        run: |
+          python -m pip install -q huggingface_hub
+          python - <<'PY'
+          from huggingface_hub import hf_hub_download
+          p=hf_hub_download(repo_id='bartowski/Qwen_Qwen3.5-4B-GGUF',filename='Qwen_Qwen3.5-4B-Q4_K_M.gguf',local_dir='/tmp/qwen-model')
+          print('MODEL_PATH='+p)
+          PY
+      - name: Test all three editorial roles and collect measurements
+        run: |
+          mkdir -p benchmark
+          python - <<'PY'
+          import subprocess,time,pathlib,json,re
+          model='/tmp/qwen-model/Qwen_Qwen3.5-4B-Q4_K_M.gguf'
+          cli='/tmp/llama.cpp/build/bin/llama-cli'
+          tasks=[
+            ('legends','Напиши начало оригинальной мистической истории на естественном русском языке. Место: ночная трамвайная остановка, где каждую ночь появляется чужая фотография. 2 абзаца, без штампов, с живыми деталями, не менее 500 русских символов.'),
+            ('science','Напиши научно-популярное вступление для Дзена на русском о гидротермальных источниках и жизни без солнечного света. 2 абзаца, без вымышленных данных, с понятным объяснением хемосинтеза. Не менее 500 русских символов.'),
+            ('cinema','Напиши живое вступление к обзору фильма «Шоу Трумана» (1998), без спойлеров: два абзаца, без придумывания сцен, с интригой и акцентом на наблюдении и свободе человека. Не менее 500 русских символов.')
+          ]
+          metrics=[]
+          for name,prompt in tasks:
+            cmd=[cli,'-m',model,'-t','4','-c','2048','-n','400','--temp','0.65','-p',prompt,'--no-display-prompt','--simple-io','--no-warmup']
+            start=time.monotonic()
+            try:
+              p=subprocess.run(cmd,capture_output=True,text=True,timeout=440)
+              output=p.stdout
+              (pathlib.Path('benchmark')/(name+'.txt')).write_text(output,encoding='utf8')
+              result={'role':name,'returncode':p.returncode,'seconds':round(time.monotonic()-start,1),'characters_nonspace':len(re.sub(r'\\s','',output)),'preview':output[:250], 'stderr_tail':p.stderr[-1000:]}
+            except subprocess.TimeoutExpired:
+              result={'role':name,'status':'timeout','seconds':round(time.monotonic()-start,1)}
+            metrics.append(result)
+            print(json.dumps(result,ensure_ascii=False))
+          (pathlib.Path('benchmark')/'metrics.json').write_text(json.dumps(metrics,ensure_ascii=False,indent=2),encoding='utf8')
+          PY
+      - name: Upload nonsecret results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen35-cpu-editorial-benchmark
+          path: benchmark/
+          if-no-files-found: ignore
