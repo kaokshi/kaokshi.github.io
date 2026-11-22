@@ -1,6 +1,7 @@
 """Quota-only Groq failover must preserve attribution and never bypass free-model checks."""
 import unittest
 from unittest.mock import patch
+from src.editorial_free_fallback import verify_fallback
 
 from src import editorial_brain as brain
 from src.editorial_providers import Blocked, ProviderError
@@ -55,6 +56,22 @@ class QuotaFallbackTests(unittest.TestCase):
             result = article.model("topics-1", "groq", "Выбери темы",
                                    validate=lambda data: self.assertIn("topics", data))
         self.assertEqual(result, {"topics": []})
+
+    def test_preflight_free_only_skips_groq_entirely(self):
+        article = self.article(AssertionError("Groq must not be called"))
+        with patch.dict("os.environ", {"EDITORIAL_GROQ_FALLBACK_ONLY": "true"}), \\
+                patch.object(brain, "text_call", return_value={
+                    "text": "Завершённый фрагмент", "model": "free", "usage": {}}) as call:
+            result = article.model("draft", "groq", "Напиши")
+        self.assertEqual(result, "Завершённый фрагмент")
+        self.assertEqual(article.memory.calls, [("openrouter", "draft:openrouter")])
+        self.assertEqual(call.call_args.args[0], "openrouter")
+
+    def test_free_catalog_check_fails_closed(self):
+        self.assertEqual(verify_fallback(lambda: None), "free_route_confirmed")
+        def denied():
+            raise ProviderError("nemotron_zero_price_not_confirmed", stop=True)
+        self.assertEqual(verify_fallback(denied), "free_route_unavailable")
 
     def test_authentication_error_never_falls_back(self):
         article = self.article(ProviderError("http_401_authorization", stop=True))
