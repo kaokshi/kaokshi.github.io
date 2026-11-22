@@ -68,10 +68,7 @@ class RelevanceRanking(unittest.TestCase):
              patch.object(images, "warm_visual_matcher", lambda: None), \
              patch.object(images, "similarity", score), \
              patch.object(images, "request", side_effect=lambda url, *_args, **kwargs: strong if "strong" in url else weak), \
-             patch.object(images, "rank_photo_candidates", wraps=images.rank_photo_candidates) as rank:
-            # The default scorer arg was bound before patching; pass patched scorer explicitly.
-            original_rank = rank
-            rank.side_effect = lambda candidates, scene, topic: original_rank.__wrapped__(candidates, scene, topic, scorer=score)
+             patch.object(images, "rank_photo_candidates", side_effect=lambda candidates, scene, topic: real_rank(candidates, scene, topic, scorer=score)):
             result = images.photo({"subject": "specific scene", "query": "scene", "section": 1},
                                   "overall topic", "unused.jpg", index)
         self.assertEqual(result["source_page"], "https://commons.wikimedia.org/wiki/File:Strong")
