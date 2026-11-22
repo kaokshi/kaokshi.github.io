@@ -6,7 +6,9 @@ on:
       - 'src/editorial_groq_budget.py'
       - 'src/editorial_free_fallback.py'
       - 'src/editorial_memory.py'
-      - 'tests/test_editorial_interrupted_provider.py'
+      - 'src/editorial_delivery.py'
+      - 'tests/test_editorial_atomic_delivery.py'
+      - 'tests/test_editorial_interrupted_provider.py tests/test_editorial_atomic_delivery.py'
       - '.github/workflows/editorial-production.yml'
       - 'tests/test_editorial_quota_fallback.py'
       - '.github/workflows/editorial-free-fallback-tests.yml'
@@ -30,4 +32,4 @@ jobs:
       - name: Compile changed code
         run: python -m py_compile src/editorial_brain.py src/editorial_free_fallback.py src/editorial_memory.py tests/test_editorial_quota_fallback.py tests/test_editorial_interrupted_provider.py
       - name: Verify free fallback without API calls or publication
-        run: python -m unittest discover -s tests -p 'test_editorial_*provider.py' -v && python -m unittest -v tests.test_editorial_quota_fallback
+        run: python -m unittest discover -s tests -p 'test_editorial_*provider.py' -v && python -m unittest -v tests.test_editorial_quota_fallback tests.test_editorial_atomic_delivery
