@@ -1,0 +1,185 @@
+name: Editorial production
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/editorial-production.yml'
+      - 'src/editorial_*.py'
+      - 'src/movie_autonomous_research.py'
+      - 'tests/test_editorial_*.py'
+      - 'config/*editorial*'
+      - 'config/ai_revision_policy.json'
+      - 'requirements-production.txt'
+  schedule:
+    # Europe/Moscow is UTC+03:00 throughout the year.
+    - cron: '0 5 * * *'
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      command:
+        type: choice
+        options: [health, daily, retry, review, status, audit, learn]
+        default: health
+      day:
+        description: Moscow date (YYYY-MM-DD)
+        default: ''
+        type: string
+      isolated_validation:
+        description: Run a manual end-to-end validation with a separate artifact namespace or private repository.
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  regression:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-quality.txt 'python-docx==1.2.0' 'cryptography>=44,<48'
+      - run: python -m unittest discover -s tests -v
+  production:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && vars.EDITORIAL_AUTONOMOUS_ENABLED == 'true')
+    concurrency:
+      group: editorial-production-private
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 165
+    env:
+      EDITORIAL_COMMAND: ${{ github.event_name == 'schedule' && 'scheduled' || inputs.command }}
+      EDITORIAL_DAY: ${{ inputs.day }}
+      EDITORIAL_ISOLATED_VALIDATION: ${{ inputs.isolated_validation && 'true' || 'false' }}
+      EDITORIAL_DAILY_REPOSITORY: ${{ vars.EDITORIAL_PRIVATE_REPOSITORY }}
+      EDITORIAL_VALIDATION_REPOSITORY: ${{ vars.EDITORIAL_VALIDATION_REPOSITORY }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      EDITORIAL_REVIEW_PUBLIC_KEY: ${{ vars.EDITORIAL_REVIEW_PUBLIC_KEY }}
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      EDITORIAL_CF_FREE_ONLY: ${{ vars.EDITORIAL_CF_FREE_ONLY }}
+      EDITORIAL_GROQ_FREE_ONLY: ${{ vars.EDITORIAL_GROQ_FREE_ONLY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      TOKENIZERS_PARALLELISM: 'false'
+      OMP_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements-editorial.txt
+            requirements-quality.txt
+            requirements-production.txt
+      - name: Resolve Moscow date and storage mode
+        env:
+          EDITORIAL_CRON: ${{ github.event.schedule }}
+        run: |
+          command="$EDITORIAL_COMMAND"
+          if [ "$command" = scheduled ]; then
+            if [ "$EDITORIAL_CRON" = '0 5 * * *' ]; then
+              command=daily
+            else
+              command=review
+            fi
+          fi
+          day="${EDITORIAL_DAY:-$(TZ=Europe/Moscow date +%F)}"
+          if ! [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::Invalid Moscow date"
+            exit 2
+          fi
+          repository="$EDITORIAL_DAILY_REPOSITORY"
+          suffix=
+          if [ "$EDITORIAL_ISOLATED_VALIDATION" = true ]; then
+            repository="$EDITORIAL_VALIDATION_REPOSITORY"
+            suffix="validation-"
+            if [ -n "$repository" ] && [ "$repository" = "$EDITORIAL_DAILY_REPOSITORY" ]; then
+              echo "::error::Validation requires a separate private repository"
+              exit 2
+            fi
+          fi
+          if [ -n "$repository" ]; then
+            mode=private
+          else
+            mode=encrypted
+            echo 'EDITORIAL_PRIVATE_TOKEN=' >> "$GITHUB_ENV"
+          fi
+          {
+            echo "EDITORIAL_EFFECTIVE_COMMAND=$command"
+            echo "EDITORIAL_MOSCOW_DAY=$day"
+            echo "EDITORIAL_MODE=$mode"
+            echo "EDITORIAL_PRIVATE_REPOSITORY=$repository"
+            echo "EDITORIAL_NAMESPACE=$suffix"
+            echo "EDITORIAL_STATE_DIR=$RUNNER_TEMP/editorial-state"
+            echo "EDITORIAL_SEALED_DIR=$RUNNER_TEMP/editorial-sealed"
+          } >> "$GITHUB_ENV"
+      - name: Install storage and review utilities
+        if: env.EDITORIAL_MODE == 'encrypted'
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Check the existing encrypted review at delivery time
+        if: env.EDITORIAL_MODE == 'encrypted' && env.EDITORIAL_EFFECTIVE_COMMAND == 'review'
+        run: python -m src.editorial_delivery reference --date "$EDITORIAL_MOSCOW_DAY"
+      - name: Restore the authenticated state checkpoint
+        if: env.EDITORIAL_MODE == 'encrypted' && env.EDITORIAL_EFFECTIVE_COMMAND != 'review' && env.EDITORIAL_EFFECTIVE_COMMAND != 'health'
+        run: |
+          mkdir -m 700 -p "$EDITORIAL_STATE_DIR"
+          if [ "$EDITORIAL_EFFECTIVE_COMMAND" = daily ] || [ "$EDITORIAL_EFFECTIVE_COMMAND" = retry ]; then
+            python -c 'from src.editorial_delivery import owner_key; owner_key()'
+          fi
+          python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" \
+            --date "$EDITORIAL_MOSCOW_DAY" --cycle-command "$EDITORIAL_EFFECTIVE_COMMAND"
+      - name: Install QA, document and visual tools
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
+        run: |
+          python -m pip install -r requirements-production.txt
+          aiw-ru models install modernbert lightgbm transformer || echo "::warning::One or more local detectors could not be installed"
+      - name: Execute editorial command
+        id: command
+        timeout-minutes: 145
+        if: env.EDITORIAL_MODE != 'encrypted' || env.EDITORIAL_EFFECTIVE_COMMAND != 'review'
+        run: |
+          args=("$EDITORIAL_EFFECTIVE_COMMAND" --date "$EDITORIAL_MOSCOW_DAY")
+          if [ "$EDITORIAL_MODE" = encrypted ] && [ "$EDITORIAL_EFFECTIVE_COMMAND" != health ]; then
+            args+=(--local-state "$EDITORIAL_STATE_DIR" --encrypted-mode)
+          fi
+          if [ "$EDITORIAL_ISOLATED_VALIDATION" = true ] &&
+            { [ "$EDITORIAL_EFFECTIVE_COMMAND" = daily ] || [ "$EDITORIAL_EFFECTIVE_COMMAND" = retry ]; }; then
+            args+=(--validation-window 120)
+          fi
+          python -m src.editorial_brain "${args[@]}"
+      - name: Seal new checkpoints and available review material
+        if: always() && steps.command.outcome != 'skipped' && env.EDITORIAL_MODE == 'encrypted' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'learn')
+        run: |
+          umask 077
+          python -m src.editorial_delivery seal --root "$EDITORIAL_STATE_DIR" \
+            --date "$EDITORIAL_MOSCOW_DAY" --output "$EDITORIAL_SEALED_DIR"
+      - name: Store only the encrypted state checkpoint
+        if: always() && env.EDITORIAL_MODE == 'encrypted' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'learn')
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-state-${{ env.EDITORIAL_NAMESPACE }}${{ env.EDITORIAL_MOSCOW_DAY }}
+          path: ${{ env.EDITORIAL_SEALED_DIR }}/checkpoint.enc
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Store only the encrypted owner review package
+        if: always() && env.EDITORIAL_MODE == 'encrypted' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry')
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-review-${{ env.EDITORIAL_NAMESPACE }}${{ env.EDITORIAL_MOSCOW_DAY }}
+          path: ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
+          if-no-files-found: ignore
+          retention-days: 14

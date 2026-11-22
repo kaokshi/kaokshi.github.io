@@ -14,7 +14,10 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-from editorial_ai_check import extract_text, ROOT, CONTENT
+if __package__:
+    from .editorial_ai_check import extract_text, ROOT, CONTENT
+else:
+    from editorial_ai_check import extract_text, ROOT, CONTENT
 
 CHANNELS = {"cinema", "legends", "science"}
 MIN_CHARS = 3000

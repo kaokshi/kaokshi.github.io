@@ -130,10 +130,9 @@ def threshold_review(results):
                  "a score alone cannot verify a defect or authorize publication."),
     }
 
-def evaluate(path):
-    article = json.loads(path.read_text(encoding="utf-8"))
-    article_text = extract_text(article.get("body_html", ""))
-    if not article_text:
+def measure_text(article_text):
+    """Run the four diagnostics on the exact supplied plain-text bytes."""
+    if not article_text.strip():
         raise ValueError("Empty article text")
     results = {}
     with tempfile.TemporaryDirectory(prefix="editorial-ai-") as work:
@@ -144,6 +143,13 @@ def evaluate(path):
                 ["aiw-ru", "classify", "--model", model, "--json"], document)
         results["ai_accent_detector"] = tool_result(
             ["ai-accent-detector", "--json", "--lang", "ru"], document)
+    return results
+
+
+def evaluate(path):
+    article = json.loads(path.read_text(encoding="utf-8"))
+    article_text = extract_text(article.get("body_html", ""))
+    results = measure_text(article_text)
     review = threshold_review(results)
     return {
         "schema": "editorial-ai-check-model-a-v2",

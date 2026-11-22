@@ -15,8 +15,10 @@ from editorial_ai_check import extract_text
 MODEL_A = ("modernbert", "lightgbm", "transformer")
 THRESHOLD = 80.0
 ACTIVE = ("legends", "science")
-MAX_AGENT = 2
-MAX_ASSISTANT = 1
+ESCALATION = json.loads((Path(__file__).resolve().parents[1] / "config" /
+                         "ai_revision_policy.json").read_text(encoding="utf-8"))["editorial_escalation"]
+MAX_AGENT = ESCALATION["agent_revision_limit"]
+MAX_ASSISTANT = ESCALATION["assistant_revision_limit"]
 
 def article_digest(article):
     raw = extract_text(article.get("body_html", ""))
@@ -45,12 +47,14 @@ def validate_history(history):
     if not isinstance(history, list) or len(history) > MAX_AGENT + MAX_ASSISTANT:
         raise ValueError("Invalid revision history length")
     stages = [x.get("stage") for x in history if isinstance(x, dict)]
-    if any(stage not in ("agent", "assistant") for stage in stages):
+    if len(stages) != len(history) or any(stage not in ("agent", "assistant") for stage in stages):
         raise ValueError("Invalid history stage")
     if stages != ["agent"] * min(stages.count("agent"), MAX_AGENT) + ["assistant"] * stages.count("assistant"):
         raise ValueError("Revision stages out of order")
     if stages.count("agent") > MAX_AGENT or stages.count("assistant") > MAX_ASSISTANT:
         raise ValueError("Attempt limit exceeded")
+    if "assistant" in stages and stages.count("agent") != MAX_AGENT:
+        raise ValueError("Assistant stage requires exhaustion of the agent stage")
     digests = set()
     for entry in history:
         before, after = entry.get("before_text_sha256"), entry.get("after_text_sha256")
@@ -105,11 +109,12 @@ def route(article, report, history=None, substantive_issues=None):
                 "next_agent_attempt": stages.count("agent")+1,
                 "requires_new_text_and_fresh_all_checks": True}
     if stages.count("assistant") < MAX_ASSISTANT:
-        return {**common, "decision": "chatgpt_one_revision_handoff",
-                "transport_status": "not_connected", "requires_new_text_and_fresh_all_checks": True}
+        return {**common, "decision": "assistant_handoff_pending",
+                "transport_status": "not_connected", "next_assistant_attempt": stages.count("assistant") + 1,
+                "requires_new_text_and_fresh_all_checks": True}
     return {**common, "decision": "owner_review_final",
             "transport_status": "not_connected",
-            "reason": "two_agent_and_one_chatgpt_attempts_exhausted"}
+            "reason": "agent_and_chatgpt_attempt_limits_exhausted"}
 
 def main():
     p=argparse.ArgumentParser()

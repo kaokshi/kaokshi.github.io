@@ -3,7 +3,10 @@
 import argparse
 import json
 from pathlib import Path
-from editorial_ai_check import CONTENT, extract_text
+if __package__:
+    from .editorial_ai_check import CONTENT, extract_text
+else:
+    from editorial_ai_check import CONTENT, extract_text
 
 
 def serialize_match(m):

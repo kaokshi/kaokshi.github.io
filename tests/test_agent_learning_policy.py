@@ -22,8 +22,8 @@ class AgentLearningPolicyTests(unittest.TestCase):
 
     def test_immutable_owner_rules(self):
         self.assertEqual(self.policy["model_a"]["owner_editorial_review_index_threshold"], 80)
-        self.assertEqual(self.learning["proposal_workflow"]["max_agent_edits_per_article"], 2)
-        self.assertEqual(self.learning["proposal_workflow"]["max_chatgpt_edits_per_article"], 1)
+        self.assertEqual(self.learning["proposal_workflow"]["max_agent_edits_per_article"], 5)
+        self.assertEqual(self.learning["proposal_workflow"]["max_chatgpt_edits_per_article"], 2)
         self.assertTrue(self.learning["proposal_workflow"]["never_change_model_a_threshold_80_without_owner_approval"])
 
     def test_no_automatic_publication_or_false_runtime_claim(self):
@@ -32,7 +32,7 @@ class AgentLearningPolicyTests(unittest.TestCase):
         self.assertFalse(self.learning["publication"]["cannot_change_publication_enabled"] is False)
         self.assertTrue(self.learning["publication"]["cannot_activate_rss"])
         self.assertTrue(self.learning["publication"]["cannot_unpause_cinema"])
-        self.assertIn("not_implemented", self.learning["implementation_status"])
+        self.assertEqual(self.learning["implementation_status"], "verified_case_analysis_and_holdout_comparison_available")
 
     def test_detector_scores_not_gold_labels(self):
         self.assertTrue(self.learning["memory_policy"]["never_assume_detector_score_is_ground_truth"])

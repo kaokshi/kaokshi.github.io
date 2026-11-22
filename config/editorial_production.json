@@ -1,0 +1,49 @@
+{
+  "timezone": "Europe/Moscow",
+  "start": "08:00",
+  "production_stop": "10:48",
+  "delivery": "11:00",
+  "articles_per_channel": {
+    "legends": 1,
+    "science": 1,
+    "cinema": 0
+  },
+  "per_article_calls": {
+    "groq": 17,
+    "openrouter": 3,
+    "klein": 12
+  },
+  "daily_calls": {
+    "groq": 34,
+    "openrouter": 6,
+    "klein": 20
+  },
+  "minimum_images": 7,
+  "maximum_images": 8,
+  "learning_min_cases": 20,
+  "science_source_domains": [
+    "nasa.gov",
+    "noaa.gov",
+    "usgs.gov",
+    "esa.int",
+    "smithsonianmag.com",
+    "si.edu",
+    "whoi.edu",
+    "nsf.gov",
+    "esawebb.org",
+    "noirlab.edu",
+    "nature.com",
+    "pnas.org",
+    "nps.gov",
+    "usda.gov",
+    "metoffice.gov.uk",
+    "bas.ac.uk",
+    "nhm.ac.uk",
+    "nationalgeographic.org",
+    "amnh.org",
+    "eso.org",
+    "fws.gov",
+    "inaturalist.org",
+    "eol.org"
+  ]
+}

@@ -1,0 +1,4 @@
+-r requirements-editorial.txt
+-r requirements-quality.txt
+python-docx==1.2.0
+cryptography>=44,<48

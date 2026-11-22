@@ -6,9 +6,9 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 
 - The owner has three channels; only `legends` and `science` are currently active for drafts. `cinema` stays paused.
 - Do not change `publication_enabled=false`, publish content, activate RSS delivery, or remove release holds without an explicit owner launch instruction. A successful check is not publication authorization.
-- Articles: natural original Russian prose, at least 3000 characters without whitespace, meaningful source checks, original channel CTA, usually 7–8 verified rights-cleared illustrations.
+- Articles: natural original Russian prose, 3000–6000 characters without whitespace, meaningful source checks, original channel CTA, usually 7–8 verified rights-cleared illustrations.
 - The current diagnostic Model A is `modernbert + lightgbm + transformer`; the reported index is the arithmetic mean of three 0–100 classifier scores. `ai_accent_detector` remains a separate style score. The **owner-selected review flag** is strictly >80 on this **uncalibrated index**, NOT 80% of AI authorship. Never claim detector scores prove origin or optimize prose to evade classifiers.
-- Up to two genuine editorial-agent revisions, followed by at most one ChatGPT revision. Every attempt needs an actual text change, immutable SHA-256, a documented substantive issue, and complete fresh checks. If unresolved, escalate to the owner. Do not falsely claim ChatGPT handoff or user delivery: these transports are not yet fully integrated.
+- Up to five genuine editorial-agent revisions, followed by at most two ChatGPT revisions through a connected transport. Every attempt needs an actual text change, immutable SHA-256, a documented substantive issue, and complete fresh checks. If unresolved, escalate to the owner. Do not falsely claim ChatGPT handoff or user delivery: these transports are not yet fully integrated.
 
 ## Self-learning feature (requested 20 November 2026)
 
@@ -17,11 +17,11 @@ Self-learning is **feedback-driven improvement**, not uncontrolled online model 
 1. Gather verified reviewer feedback, concrete factual/style corrections, full revision provenance, and successful/failed quality checks into structured cases. Retain failures and never treat a ZeroGPT or Model A score as human-written ground truth.
 2. Identify recurring editorial defects by genre; recommend improvements to drafting prompts, checking rules, source vetting, and image rights. Only use lawfully reusable, provenance-verified training samples; avoid contamination of independent holdouts.
 3. Propose experiments in separate branches and demonstrate improvements on an untouched holdout with regression tests and a clear rollback plan. Present before/after evidence and uncertainty; human approval required to deploy new weights, prompts or thresholds.
-4. Do not automatically retrain or swap classifier weights, autonomously change the >80 review threshold, create open-ended revision loops, or change publication policies. The self-learning runtime is **not yet implemented**; treat `enabled=true` as permission to collect learning evidence and prepare proposals, not as a promise that the agent trains itself in the background.
+4. Do not automatically retrain or swap classifier weights, autonomously change the >80 review threshold, create open-ended revision loops, or change publication policies. The learning runtime counts verified cases and evaluates candidate instructions against supplied independent holdout results. It does not train in the background.
 5. Never store private data, credentials, unlicensed datasets or personal information in public repository files.
 
 ## Development expectations
 
-Develop in a dedicated branch with clear tests and a pull request. Prefer free local CPU tools. Use fail-closed semantics for missing model scores, stale text hashes, unverified claims and rights. Do not alter existing schedules or publish drafts automatically. If the required integration for an action is unavailable, return a real `not_connected`/pending result rather than marking success.
+Develop in a dedicated branch with clear tests and a pull request. Prefer free local CPU tools. Use fail-closed semantics for missing model scores, stale text hashes, unverified claims and rights. Avoid duplicate schedules at cutover. Do not publish drafts automatically. If the required integration for an action is unavailable, return a real `not_connected`/pending result rather than marking success.
 
 Relevant implementation: `src/editorial_ai_check.py`, `src/editorial_agent_v1.py`, `src/editorial_auto_route.py`, `tests/test_editorial_agent_v1.py`.
