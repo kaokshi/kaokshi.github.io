@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-22",
+  "status": "topic_plan_only_not_articles",
+  "publication_authorized": false,
+  "rights_status": "not_checked",
+  "checks_status": "not_run",
+  "notes": "Nine distinct new topics; no generated articles or completed checks are claimed. Owner review only; never publish or merge.",
+  "tasks": [
+    {
+      "channel": "legends",
+      "topic": "Соседка с пятого этажа, которой не существовало в домовой книге"
+    },
+    {
+      "channel": "legends",
+      "topic": "Ночная смена в прачечной, где возвращались вещи пропавших людей"
+    },
+    {
+      "channel": "legends",
+      "topic": "Часы на вокзале, показывавшие время завтрашнего происшествия"
+    },
+    {
+      "channel": "science",
+      "topic": "Почему песок иногда поёт под ногами и на склонах дюн",
+      "research_query": "singing sand dunes physics granular avalanche research"
+    },
+    {
+      "channel": "science",
+      "topic": "Как растения распознают направление силы тяжести",
+      "research_query": "plant gravitropism statoliths auxin NASA research"
+    },
+    {
+      "channel": "science",
+      "topic": "Откуда берутся красные спрайты над грозами",
+      "research_query": "NOAA NASA red sprites transient luminous events thunderstorms"
+    },
+    {
+      "channel": "cinema",
+      "topic": "«Помни» (2000): как ненадёжная память превращает расследование в ловушку",
+      "research_query": "Memento 2000 official synopsis Christopher Nolan film plot"
+    },
+    {
+      "channel": "cinema",
+      "topic": "«Контакт» (1997): что происходит после сигнала из космоса",
+      "research_query": "Contact 1997 Warner Bros official synopsis plot"
+    },
+    {
+      "channel": "cinema",
+      "topic": "«Грань будущего» (2014): цена повторения одного дня",
+      "research_query": "Edge of Tomorrow 2014 Warner Bros official synopsis plot"
+    }
+  ]
+}
