@@ -1,0 +1,29 @@
+name: Zen OpenRouter all free models live matrix
+on:
+  pull_request:
+    paths:
+      - 'research/openrouter_free_matrix_20261122.py'
+      - '.github/workflows/openrouter-free-matrix-20261122.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Zero paid requests; compare eleven verified free routes
+        run: python research/openrouter_free_matrix_20261122.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openrouter-free-matrix-summary
+          path: ${{ runner.temp }}/zen-openrouter-free-matrix.json
+          if-no-files-found: warn
+          retention-days: 7
