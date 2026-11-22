@@ -175,7 +175,12 @@ def gh(*args):
 
 
 def namespace():
-    return "validation-" if os.environ.get("EDITORIAL_ISOLATED_VALIDATION") == "true" else ""
+    if os.environ.get("EDITORIAL_ISOLATED_VALIDATION") != "true":
+        return ""
+    label = os.environ.get("EDITORIAL_VALIDATION_LABEL", "")
+    if label and not re.fullmatch(r"[a-z0-9]{1,18}", label):
+        raise Blocked("invalid_validation_label")
+    return f"validation-{label}-" if label else "validation-"
 
 
 def trusted_run(run_id, validation=False):

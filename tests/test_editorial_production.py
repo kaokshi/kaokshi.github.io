@@ -11,7 +11,8 @@ from unittest.mock import patch
 from docx import Document
 from PIL import Image
 
-from src import editorial_brain as brain, editorial_cinema, editorial_delivery
+from src import (editorial_brain as brain, editorial_cinema, editorial_delivery,
+                 editorial_images, editorial_providers, editorial_review)
 from src.editorial_learning import CATEGORIES, evaluate_cases
 from src.editorial_memory import Memory, digest, read_json, write
 from src.editorial_providers import Blocked, ProviderError
@@ -214,6 +215,48 @@ class ProductionTests(unittest.TestCase):
             self.assertEqual(article.assistant, "assistant_handoff_pending")
             self.assertEqual(article.current["text_sha256"], before)
             self.assertTrue(all(row["status"] == "rejected" and row["after"] != before for row in article.attempts))
+
+    def test_actual_check_runner_reports_incomplete_on_unavailable_tools(self):
+        value = draft("legends")
+        checker = {"status": "error", "reason": "child process not found"}
+        with patch.object(editorial_review, "measure_text", return_value={"modernbert": checker}), \
+                patch.object(editorial_review, "grammar",
+                             return_value={"status": "unavailable", "reason": "LanguageTool"}):
+            report = editorial_review.qa(value, "legends", [], [], lambda *a: {"issues": []},
+                                         lambda: 3600)
+        self.assertEqual(report["detectors"]["modernbert"]["status"], "unavailable")
+        self.assertEqual(report["model_a"]["status"], "incomplete")
+        self.assertEqual(report["grammar"]["status"], "unavailable")
+        self.assertEqual(report["text_sha256"], digest(brain.canonical(parse_article(value))))
+
+    def test_free_router_rejects_metered_catalog_and_empty_response(self):
+        router = editorial_providers
+        router.require_free_router.cache_clear()
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "fixture-token"}), \
+                patch.object(router, "request", return_value=json.dumps({"data": [{
+                    "id": router.NEMOTRON, "pricing": {"prompt": "0", "completion": "0.001"}}]}).encode()):
+            with self.assertRaisesRegex(ProviderError, "zero_price_not_confirmed"):
+                router.require_free_router()
+        router.require_free_router.cache_clear()
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "fixture-token"}), \
+                patch.object(router, "require_free_router"), \
+                patch.object(router, "request", return_value=b'{"choices":[]}'):
+            with self.assertRaisesRegex(ProviderError, "empty_visible_content"):
+                router.text_call("openrouter", "Контроль")
+
+    def test_cover_selection_uses_scores_and_retains_illustrated_sections(self):
+        pictures = [{"file": "first.jpg", "section": 1, "cover_score": .1, "sha256": "a"},
+                    {"file": "only-for-this-section.jpg", "section": 2, "cover_score": .9, "sha256": "b"},
+                    {"file": "cover.jpg", "section": 3, "cover_score": .8, "sha256": "c"},
+                    {"file": "other.jpg", "section": 3, "cover_score": .3, "sha256": "d"}]
+        self.assertEqual(editorial_images.select_cover(pictures), "cover.jpg")
+
+    def test_corrupt_image_cannot_be_accepted(self):
+        with TemporaryDirectory() as directory:
+            memory = Memory(Path(directory), "2026-11-22", datetime.now(timezone.utc), brain.settings())
+            index = editorial_images.ImageIndex(memory, [])
+            with self.assertRaises(OSError):
+                index.save(b"not an image", {}, {"subject": "Figure"}, "Theme", Path(directory) / "a.jpg")
 
     def test_cta_and_structure(self):
         self.assertTrue(all(CTA.search(x) for x in ("Подписывайтесь!", "Подпишитесь на канал.",

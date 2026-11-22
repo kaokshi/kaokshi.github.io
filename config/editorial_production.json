@@ -10,12 +10,12 @@
   },
   "per_article_calls": {
     "groq": 17,
-    "openrouter": 3,
+    "openrouter": 5,
     "klein": 12
   },
   "daily_calls": {
     "groq": 34,
-    "openrouter": 6,
+    "openrouter": 10,
     "klein": 20
   },
   "minimum_images": 7,

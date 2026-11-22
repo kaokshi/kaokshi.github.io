@@ -19,7 +19,7 @@ from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
 from .editorial_package import package, zip_packet
-from .editorial_providers import Blocked, MODELS, text_call
+from .editorial_providers import Blocked, MODELS, ProviderError, text_call
 from .editorial_review import RULES, canonical, improves, parse_article, qa, source_context, sources, structural_checks
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,7 +98,12 @@ class Article:
             seen = self.memory.response(task)
             if seen is not None:
                 return seen
-            return self.memory.call(task, self.id, provider, lambda: text_call(provider, prompt, tokens))
+            try:
+                return self.memory.call(task, self.id, provider, lambda: text_call(provider, prompt, tokens))
+            except ProviderError as exc:
+                if exc.retry_after is None or self.memory.time_left() < exc.retry_after + 125:
+                    raise
+                return self.memory.call(task, self.id, provider, lambda: text_call(provider, prompt, tokens))
 
         result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
                                            "prompt_sha256": digest(prompt), **(metadata or {})},
@@ -106,11 +111,37 @@ class Article:
                            validator=(lambda response: validate(json_reply(response))) if validate else None)
         return json_reply(result) if validate else result["text"]
 
+    def source_seed(self, history):
+        registry = read_json(CONFIG / "editorial_science_sources.json", [])
+        if not registry:
+            return None
+        rotation = (date.fromisoformat(self.memory.day).toordinal() + int(self.id[-2:]) - 2) % len(registry)
+        for row in registry[rotation:] + registry[:rotation]:
+            if topic_duplicate_reason(self.channel, row["title"], history):
+                continue
+            with self.memory.lock:
+                titles = [entry.get("title", "") for key, entry in self.memory.data["articles"].items()
+                          if key != self.id and key.startswith("science-")]
+            if topic_duplicate_reason(self.channel, row["title"], titles):
+                continue
+            urls = row["sources"]
+            records = self.task("sources", "primary-sources", {"urls": urls}, lambda _: sources(
+                urls, self.config["science_source_domains"]), minimum_seconds=85)
+            if len([r for r in records if r["status"] == "accessible"]) >= 2:
+                result = {**row, "records": records}
+                self.memory.article(self.id, title=row["title"], topic_plan=result, channel=self.channel)
+                return result
+        return None
+
     def plan(self):
         history = self.prior[0][self.channel]
         existing = self.memory.data["articles"].get(self.id, {})
         if existing.get("title"):
             return existing["topic_plan"]
+        if self.channel == "science":
+            seed = self.source_seed(history)
+            if seed:
+                return seed
         subject = ("оригинальной городской мистики, с уникальным сюжетом и развязкой" if self.channel == "legends"
                    else "научпопа о наблюдаемом природном явлении, приборе или научном объекте")
         if self.channel == "cinema":
@@ -220,9 +251,12 @@ class Article:
             for provider in ("groq", "openrouter"):
                 try:
                     return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
-                                      metadata={"text_sha256": sha}, tokens=4300 if provider == "groq" else 6300)
+                                      metadata={"text_sha256": sha}, tokens=4300 if provider == "groq" else 8300)
                 except Blocked as exc:
                     last_error = exc
+                    if provider == "openrouter" and str(exc) == "empty_visible_content":
+                        return self.model("editorial-audit-retry", provider, prompt, validate=lambda x: None,
+                                          metadata={"text_sha256": sha}, tokens=9000)
             raise last_error
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"]},
@@ -355,12 +389,13 @@ class Article:
                   + self.current["raw"])
         plan = None
         last = None
-        for attempt in (1, 2):
+        for attempt, provider in enumerate(("groq", "openrouter"), 1):
             try:
-                plan = self.model(f"image-plan-{attempt}", "groq",
+                plan = self.model(f"image-plan-{attempt}", provider,
                                   prompt + (f"\nИсправь: {last}." if last else ""),
                                   validate=lambda x: validate_plan(x, count, self.channel, self.config),
-                                  metadata={"text_sha256": self.current["text_sha256"]}, tokens=2800)
+                                  metadata={"text_sha256": self.current["text_sha256"]},
+                                  tokens=2800 if provider == "groq" else 5500)
                 break
             except Blocked as exc:
                 last = exc

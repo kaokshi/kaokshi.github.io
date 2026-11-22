@@ -27,6 +27,10 @@ on:
         description: Run a manual end-to-end validation with a separate artifact namespace or private repository.
         default: false
         type: boolean
+      validation_label:
+        description: Optional isolated test label for a new diagnostic cycle (lowercase letters and digits).
+        default: ''
+        type: string
       validation_public_key:
         description: Optional raw X25519 public key (64 hex characters) for the isolated test.
         default: ''
@@ -70,6 +74,7 @@ jobs:
       EDITORIAL_DAILY_REPOSITORY: ${{ vars.EDITORIAL_PRIVATE_REPOSITORY }}
       EDITORIAL_VALIDATION_REPOSITORY: ${{ vars.EDITORIAL_VALIDATION_REPOSITORY }}
       EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      EDITORIAL_VALIDATION_LABEL: ${{ inputs.isolated_validation && inputs.validation_label || '' }}
       EDITORIAL_REVIEW_PUBLIC_KEY: ${{ inputs.isolated_validation && inputs.validation_public_key || vars.EDITORIAL_REVIEW_PUBLIC_KEY }}
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
       EDITORIAL_CF_FREE_ONLY: ${{ inputs.isolated_validation && inputs.validation_free_accounts_confirmed && 'true' || vars.EDITORIAL_CF_FREE_ONLY }}
@@ -115,6 +120,13 @@ jobs:
           if [ "$EDITORIAL_ISOLATED_VALIDATION" = true ]; then
             repository="$EDITORIAL_VALIDATION_REPOSITORY"
             suffix="validation-"
+            if [ -n "$EDITORIAL_VALIDATION_LABEL" ]; then
+              if ! [[ "$EDITORIAL_VALIDATION_LABEL" =~ ^[a-z0-9]{1,18}$ ]]; then
+                echo "::error::Invalid isolated validation label"
+                exit 2
+              fi
+              suffix="$suffix$EDITORIAL_VALIDATION_LABEL-"
+            fi
             if [ -n "$repository" ] && [ "$repository" = "$EDITORIAL_DAILY_REPOSITORY" ]; then
               echo "::error::Validation requires a separate private repository"
               exit 2
