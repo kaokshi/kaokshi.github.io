@@ -1,10 +1,12 @@
 """Owner package retrieval must never leave a misleading partial final folder."""
 from pathlib import Path
+from io import BytesIO
+from zipfile import ZipFile
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from src.editorial_delivery import publish_verified_directory
+from src.editorial_delivery import publish_verified_directory, unpack
 from src.editorial_providers import Blocked
 
 
@@ -43,6 +45,36 @@ class AtomicOwnerDeliveryTests(unittest.TestCase):
             self.assertFalse(any(final.parent.glob(".zen-owner-stage-*")))
             publish_verified_directory(source, final)
             self.assertEqual((final / "Статья.html").read_text(encoding="utf-8"), "исходник")
+
+    def test_restore_does_not_follow_symlinked_directory(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            destination = root / "state"
+            outside = root / "outside"
+            destination.mkdir()
+            outside.mkdir()
+            (destination / "2026-11-23").symlink_to(outside, target_is_directory=True)
+            buffer = BytesIO()
+            with ZipFile(buffer, "w") as archive:
+                archive.writestr("2026-11-23/state.json", '{"day":"2026-11-23"}')
+            with self.assertRaisesRegex(Blocked, "unsafe_restore_symlink"):
+                unpack(buffer.getvalue(), destination)
+            self.assertFalse((outside / "state.json").exists())
+
+    def test_restore_does_not_follow_symlinked_file(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            destination = root / "state"
+            destination.mkdir()
+            outside = root / "secret"
+            outside.write_text("keep", encoding="utf-8")
+            (destination / "state.json").symlink_to(outside)
+            buffer = BytesIO()
+            with ZipFile(buffer, "w") as archive:
+                archive.writestr("state.json", "overwrite")
+            with self.assertRaisesRegex(Blocked, "unsafe_restore_symlink"):
+                unpack(buffer.getvalue(), destination)
+            self.assertEqual(outside.read_text(encoding="utf-8"), "keep")
 
     def test_existing_output_is_never_overwritten(self):
         with TemporaryDirectory() as temp:
