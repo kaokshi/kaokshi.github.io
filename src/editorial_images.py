@@ -290,29 +290,102 @@ def photo(scene, subject, path, index):
 
 
 def generated(scene, subject, path, index, task, article, channel):
+    """Strict experimental best-of-N image generation, preserving legacy mode.
+
+    Crucial: unverified essential objects/counts stay review-only. SigLIP
+    relative scores and Florence captions are NOT independent verification.
+    Klein performs fresh text-to-image, not an image-pixel edit.
+    """
+    import os
     warm_visual_matcher()
     style = ("Cinematic realistic urban mystery, restrained color grading and atmospheric lighting."
              if channel == "legends" else
              "Modern moderately stylized science editorial illustration with a coherent muted palette. "
              "Explanatory concept art with accurate geometry where applicable. Do not mimic documentary "
              "evidence, scientific measurements or labeled diagrams.")
-    for attempt in range(2):
+    experimental = os.getenv("EDITORIAL_IMAGE_FEEDBACK_EXPERIMENT") == "true"
+    max_attempts = 3 if experimental else 2
+    candidates = []
+    feedback = None
+    if experimental:
+        from .editorial_image_feedback import inspect_visual, repair_prompt
+        from .editorial_visual_constraints import evaluate, best_candidate, count_prompt
+        count_instruction = count_prompt(scene)
+    for attempt in range(max_attempts):
         if index.memory.time_left() < 150:
             raise Blocked("production_deadline")
         prompt = f"{scene['brief']} Depict {scene['subject']}. {style} Landscape. No text or watermark."
-        if attempt:
+        if experimental:
+            if count_instruction:
+                prompt += " " + count_instruction + "."
+            if attempt and feedback is not None:
+                prompt = repair_prompt(scene, feedback, style=style)
+                if count_instruction:
+                    prompt += " " + count_instruction + "."
+        elif attempt:
             prompt += " Isolate the main subject in a clear composition with distinct foreground and background."
         raw, params = index.memory.call(task, article, "klein", lambda: klein(prompt))
+        if experimental:
+            feedback = inspect_visual(raw, scene)
+            review = evaluate(scene, feedback)
+            candidates.append({"raw": raw, "params": params, "prompt": prompt,
+                               "assessment": feedback, "review": review, "attempt": attempt + 1})
+            # A passing candidate may be saved immediately: a strictly ranked
+            # later candidate cannot improve verified constraints, and stopping
+            # conserves Klein quota. If none passes, do not persist unapproved assets.
+            if not review["passed"]:
+                continue
         try:
-            return index.save(raw, {"kind": "illustration", "source": "Cloudflare Workers AI",
-                                    "model": KLEIN, "prompt": prompt, "parameters": params,
-                                    "rights_status": "rights_review_pending",
-                                    "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
-                                    "label": "ИИ-иллюстрация" if channel != "legends" else None},
-                              scene, subject, path)
+            metadata = {"kind": "illustration", "source": "Cloudflare Workers AI",
+                        "model": KLEIN, "prompt": prompt, "parameters": params,
+                        "rights_status": "rights_review_pending",
+                        "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
+                        "label": "ИИ-иллюстрация" if channel != "legends" else None}
+            if experimental:
+                winning = best_candidate(candidates)
+                metadata["visual_feedback"] = {
+                    "siglip_model": winning["assessment"]["siglip_model"],
+                    "florence_model": winning["assessment"]["florence_model"],
+                    "siglip_relative_margin": winning["assessment"]["siglip_relative_margin"],
+                    "florence_caption": winning["assessment"]["florence_caption"],
+                    "candidate_status": winning["review"]["status"],
+                    "issues": winning["review"]["issues"],
+                    "generation_attempt": winning["attempt"],
+                    "generated_attempts": len(candidates),
+                    "not_fact_or_rights_proof": True,
+                }
+                raw = winning["raw"]
+                prompt = winning["prompt"]
+            return index.save(raw, metadata, scene, subject, path)
         except (OSError, ValueError):
-            if attempt:
+            if attempt + 1 == max_attempts:
                 raise Blocked("generated_image_quality_or_match_failed") from None
+    if experimental and candidates:
+        # The draft receives the best AVAILABLE image with an explicit hold,
+        # never an approval. Preserve the candidate for the owner's review.
+        # Existing article QA must block any publication of this candidate.
+        winner = best_candidate(candidates)
+        review = winner["review"]
+        metadata = {"kind": "illustration", "source": "Cloudflare Workers AI",
+                    "model": KLEIN, "prompt": winner["prompt"], "parameters": winner["params"],
+                    "rights_status": "rights_review_pending",
+                    "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
+                    "label": "ИИ-иллюстрация" if channel != "legends" else None,
+                    "visual_feedback": {
+                        "candidate_status": "owner_review_required",
+                        "issues": review["issues"],
+                        "generation_attempt": winner["attempt"],
+                        "generated_attempts": len(candidates),
+                        "siglip_relative_margin": winner["assessment"]["siglip_relative_margin"],
+                        "florence_caption": winner["assessment"]["florence_caption"],
+                        "object_detector": winner["assessment"].get("object_detector"),
+                        "not_fact_or_rights_proof": True}}
+        try:
+            return index.save(winner["raw"], metadata, scene, subject, path)
+        except (OSError, ValueError):
+            raise Blocked("generated_image_no_valid_owner_review_candidate") from None
+    if experimental:
+        raise Blocked("generated_image_no_candidates")
     raise AssertionError("unreachable image attempt")
 
 
