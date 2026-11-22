@@ -261,6 +261,19 @@ def restore_checkpoint(root, day, command):
     return {"status": "checkpoint_restored"}
 
 
+def publish_verified_directory(source, output):
+    """Expose verified files only after a successful complete copy."""
+    if output.exists() or output.is_symlink():
+        raise Blocked("retrieval_output_already_exists")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".zen-owner-stage-", dir=output.parent) as staging:
+        completed = Path(staging) / "verified"
+        shutil.copytree(source, completed)
+        if output.exists() or output.is_symlink():
+            raise Blocked("retrieval_output_already_exists")
+        completed.rename(output)
+
+
 def retrieve(output, key_path, *, day, artifact=None, run_id=None, allow_incomplete=False,
              private_repository=None):
     from cryptography.exceptions import InvalidTag
@@ -313,16 +326,7 @@ def retrieve(output, key_path, *, day, artifact=None, run_id=None, allow_incompl
                 raise Blocked("review_artifact_date_mismatch")
             target = work / "verified"
             unpack(data, target)
-            # Never leave a partially copied owner package at the final path.
-            # Keep the verified files on the same filesystem as the destination
-            # until an atomic directory rename can expose the complete package.
-            output.parent.mkdir(parents=True, exist_ok=True)
-            with TemporaryDirectory(prefix=".zen-owner-stage-", dir=output.parent) as staging:
-                completed = Path(staging) / "verified"
-                shutil.copytree(target, completed)
-                if output.exists() or output.is_symlink():
-                    raise Blocked("retrieval_output_already_exists")
-                completed.rename(output)
+            publish_verified_directory(target, output)
             return {**verified, "status": "verified_files_available", "directory": str(output)}
     raise Blocked("delivery_integration_pending: matching_complete_review_not_found")
 
