@@ -1,10 +1,5 @@
 name: Zen Cloudflare/Groq/Gemini linked pilot
 on:
-  pull_request:
-    paths:
-      - 'research/cloudflare_model_linked_pilot.py'
-      - 'tests/test_cloudflare_model_linked_pilot.py'
-      - '.github/workflows/editorial-cloudflare-linked-pilot.yml'
   workflow_dispatch:
 concurrency:
   group: zen-cloudflare-linked-pilot
