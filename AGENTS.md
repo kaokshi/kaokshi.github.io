@@ -6,9 +6,11 @@ This repository is the **existing** editorial pipeline, not a new website. Read 
 
 - The owner has three channels; only `legends` and `science` are currently active for drafts. `cinema` stays paused.
 - Do not change `publication_enabled=false`, publish content, activate RSS delivery, or remove release holds without an explicit owner launch instruction. A successful check is not publication authorization.
-- Articles: natural original Russian prose, at least 3000 characters without whitespace, meaningful source checks, original channel CTA, usually 7–8 verified rights-cleared illustrations.
+- Articles: natural original Russian prose, between 3000 and 6000 characters inclusive, excluding all whitespace (Unicode `\s`), meaningful source checks, original channel CTA, usually 7–8 verified rights-cleared illustrations.
 - The current diagnostic Model A is `modernbert + lightgbm + transformer`; the reported index is the arithmetic mean of three 0–100 classifier scores. `ai_accent_detector` remains a separate style score. The **owner-selected review flag** is strictly >80 on this **uncalibrated index**, NOT 80% of AI authorship. Never claim detector scores prove origin or optimize prose to evade classifiers.
 - Up to two genuine editorial-agent revisions, followed by at most one ChatGPT revision. Every attempt needs an actual text change, immutable SHA-256, a documented substantive issue, and complete fresh checks. If unresolved, escalate to the owner. Do not falsely claim ChatGPT handoff or user delivery: these transports are not yet fully integrated.
+
+- Mandatory for ALL THREE genres including paused `cinema` test drafts: article body length must be 3,000–6,000 characters inclusive after removing HTML tags and whitespace; check after each real revision and before any release. Under/over length is a blocking content defect. Do not count HTML markup, captions, metadata or image URLs toward length.
 
 ## Self-learning feature (requested 20 November 2026)
 
