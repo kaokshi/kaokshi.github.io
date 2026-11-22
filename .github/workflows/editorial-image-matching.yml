@@ -61,5 +61,6 @@ jobs:
           path: |
             ${{ runner.temp }}/image-bench/*.json
             ${{ runner.temp }}/image-bench/contact-sheet.jpg
+            ${{ runner.temp }}/image-bench/film-placement-sheet.png
           if-no-files-found: ignore
           retention-days: 14

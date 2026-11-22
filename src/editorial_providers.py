@@ -88,7 +88,7 @@ def groq_throttle(error, at=None):
 
 
 def request(url, domains, *, data=None, headers=None, timeout=25, limit=12_000_000,
-            with_headers=False):
+            with_headers=False, method=None):
     check_url(url, domains)
 
     class RestrictedRedirect(HTTPRedirectHandler):
@@ -98,7 +98,7 @@ def request(url, domains, *, data=None, headers=None, timeout=25, limit=12_000_0
                 raise ProviderError("authenticated_redirect_refused", stop=True)
             return super().redirect_request(req, fp, code, msg, response_headers, newurl)
 
-    req = Request(url, data=data, headers={"User-Agent": USER_AGENT, **(headers or {})})
+    req = Request(url, data=data, method=method, headers={"User-Agent": USER_AGENT, **(headers or {})})
     try:
         with build_opener(RestrictedRedirect()).open(req, timeout=timeout) as response:
             body = response.read(limit + 1)

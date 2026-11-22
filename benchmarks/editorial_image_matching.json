@@ -952,5 +952,371 @@
         "crowd"
       ]
     }
-  ]
+  ],
+  "article_replay": {
+    "article": "content/articles/cinema-01-truman-show-real-photos.json",
+    "description": "Section placement on a fixed existing article. Reference film stills are for private evaluation only.",
+    "cases": [
+      {
+        "id": "article-cover",
+        "channel": "cinema",
+        "heading": "Обложка",
+        "subject": "A man holding a bag in the middle of an orderly small town street edged with pastel houses",
+        "previous": "01_seahaven_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "03_viewers_site",
+          "06_christof_site",
+          "01_seahaven_site",
+          "07_sea_site",
+          "08_exit_site",
+          "02_mirror_site",
+          "river-c1",
+          "stair2-c0",
+          "05_cocoa_site",
+          "04_meryl_truman_site"
+        ],
+        "labels": {
+          "03_viewers_site": "irrelevant",
+          "06_christof_site": "irrelevant",
+          "01_seahaven_site": "match",
+          "07_sea_site": "irrelevant",
+          "08_exit_site": "irrelevant",
+          "02_mirror_site": "irrelevant",
+          "river-c1": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "05_cocoa_site": "irrelevant",
+          "04_meryl_truman_site": "irrelevant"
+        },
+        "required_features": {
+          "person": [
+            "man",
+            "person"
+          ],
+          "place": [
+            "street",
+            "road",
+            "town"
+          ],
+          "buildings": [
+            "houses",
+            "buildings"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "staircase"
+        ]
+      },
+      {
+        "id": "article-city",
+        "channel": "cinema",
+        "heading": "Город, в котором слишком хорошо",
+        "subject": "A man holding a bag in the middle of an orderly small town street edged with pastel houses",
+        "previous": "02_mirror_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "02_mirror_site",
+          "08_exit_site",
+          "06_christof_site",
+          "04_meryl_truman_site",
+          "stair2-c0",
+          "07_sea_site",
+          "03_viewers_site",
+          "01_seahaven_site",
+          "river-c1",
+          "05_cocoa_site"
+        ],
+        "labels": {
+          "02_mirror_site": "near",
+          "08_exit_site": "irrelevant",
+          "06_christof_site": "irrelevant",
+          "04_meryl_truman_site": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "07_sea_site": "irrelevant",
+          "03_viewers_site": "irrelevant",
+          "01_seahaven_site": "match",
+          "river-c1": "irrelevant",
+          "05_cocoa_site": "irrelevant"
+        },
+        "required_features": {
+          "person": [
+            "man",
+            "person"
+          ],
+          "place": [
+            "street",
+            "road",
+            "town"
+          ],
+          "buildings": [
+            "houses",
+            "buildings"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "staircase"
+        ]
+      },
+      {
+        "id": "article-audience",
+        "channel": "cinema",
+        "heading": "Секрет, который знают все, кроме главного героя",
+        "subject": "A group of viewers crowding around a television in a bar",
+        "previous": "03_viewers_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "07_sea_site",
+          "03_viewers_site",
+          "05_cocoa_site",
+          "06_christof_site",
+          "01_seahaven_site",
+          "02_mirror_site",
+          "stair2-c0",
+          "river-c1",
+          "04_meryl_truman_site",
+          "08_exit_site"
+        ],
+        "labels": {
+          "07_sea_site": "irrelevant",
+          "03_viewers_site": "match",
+          "05_cocoa_site": "irrelevant",
+          "06_christof_site": "near",
+          "01_seahaven_site": "irrelevant",
+          "02_mirror_site": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "river-c1": "irrelevant",
+          "04_meryl_truman_site": "irrelevant",
+          "08_exit_site": "irrelevant"
+        },
+        "required_features": {
+          "group": [
+            "crowd",
+            "group",
+            "people"
+          ],
+          "place": [
+            "bar",
+            "restaurant",
+            "tables"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "mirror"
+        ]
+      },
+      {
+        "id": "article-acting",
+        "channel": "cinema",
+        "heading": "Джим Керри, которого многие не ожидали увидеть",
+        "subject": "A man in a red checkered shirt standing beside a woman in white in a kitchen",
+        "previous": "04_meryl_truman_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "06_christof_site",
+          "02_mirror_site",
+          "05_cocoa_site",
+          "04_meryl_truman_site",
+          "03_viewers_site",
+          "07_sea_site",
+          "08_exit_site",
+          "01_seahaven_site",
+          "river-c1",
+          "stair2-c0"
+        ],
+        "labels": {
+          "06_christof_site": "irrelevant",
+          "02_mirror_site": "near",
+          "05_cocoa_site": "near",
+          "04_meryl_truman_site": "match",
+          "03_viewers_site": "irrelevant",
+          "07_sea_site": "irrelevant",
+          "08_exit_site": "irrelevant",
+          "01_seahaven_site": "irrelevant",
+          "river-c1": "irrelevant",
+          "stair2-c0": "irrelevant"
+        },
+        "required_features": {
+          "man": [
+            "man"
+          ],
+          "woman": [
+            "woman",
+            "lady"
+          ],
+          "place": [
+            "kitchen",
+            "cabinet",
+            "cupboard"
+          ],
+          "shirt": [
+            "plaid",
+            "checkered",
+            "striped",
+            "red shirt"
+          ]
+        },
+        "forbidden": [
+          "crowd",
+          "boat"
+        ]
+      },
+      {
+        "id": "article-director",
+        "channel": "cinema",
+        "heading": "Кристоф: человек, который решил стать Богом",
+        "subject": "A close-up of an older bald man in a dark jacket, with clouds behind him",
+        "previous": "06_christof_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "01_seahaven_site",
+          "02_mirror_site",
+          "06_christof_site",
+          "river-c1",
+          "08_exit_site",
+          "05_cocoa_site",
+          "03_viewers_site",
+          "07_sea_site",
+          "stair2-c0",
+          "04_meryl_truman_site"
+        ],
+        "labels": {
+          "01_seahaven_site": "irrelevant",
+          "02_mirror_site": "near",
+          "06_christof_site": "match",
+          "river-c1": "irrelevant",
+          "08_exit_site": "irrelevant",
+          "05_cocoa_site": "irrelevant",
+          "03_viewers_site": "near",
+          "07_sea_site": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "04_meryl_truman_site": "irrelevant"
+        },
+        "required_features": {
+          "person": [
+            "man"
+          ],
+          "setting": [
+            "clouds",
+            "cloud",
+            "storm"
+          ],
+          "detail": [
+            "bald",
+            "older",
+            "elderly",
+            "dark jacket",
+            "black jacket"
+          ]
+        },
+        "forbidden": [
+          "jar of cocoa",
+          "boat"
+        ]
+      },
+      {
+        "id": "article-analogy",
+        "channel": "cinema",
+        "heading": "Почему «Шоу Трумана» сегодня выглядит ещё актуальнее",
+        "subject": "People gathered at tables watching a television broadcast",
+        "previous": null,
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "01_seahaven_site",
+          "river-c1",
+          "02_mirror_site",
+          "stair2-c0",
+          "04_meryl_truman_site",
+          "05_cocoa_site",
+          "07_sea_site",
+          "06_christof_site",
+          "03_viewers_site",
+          "08_exit_site"
+        ],
+        "labels": {
+          "01_seahaven_site": "irrelevant",
+          "river-c1": "irrelevant",
+          "02_mirror_site": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "04_meryl_truman_site": "irrelevant",
+          "05_cocoa_site": "irrelevant",
+          "07_sea_site": "irrelevant",
+          "06_christof_site": "near",
+          "03_viewers_site": "match",
+          "08_exit_site": "irrelevant"
+        },
+        "required_features": {
+          "people": [
+            "group",
+            "crowd",
+            "people"
+          ],
+          "context": [
+            "television",
+            "tv",
+            "screen",
+            "bar"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "staircase"
+        ]
+      },
+      {
+        "id": "article-revisit",
+        "channel": "cinema",
+        "heading": "Моё мнение: стоит ли пересматривать «Шоу Трумана»?",
+        "subject": "A recognizable view of an orderly small fictional seaside town",
+        "previous": null,
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "stair2-c0",
+          "03_viewers_site",
+          "04_meryl_truman_site",
+          "01_seahaven_site",
+          "02_mirror_site",
+          "08_exit_site",
+          "river-c1",
+          "06_christof_site",
+          "07_sea_site",
+          "05_cocoa_site"
+        ],
+        "labels": {
+          "stair2-c0": "irrelevant",
+          "03_viewers_site": "irrelevant",
+          "04_meryl_truman_site": "irrelevant",
+          "01_seahaven_site": "match",
+          "02_mirror_site": "irrelevant",
+          "08_exit_site": "irrelevant",
+          "river-c1": "irrelevant",
+          "06_christof_site": "near",
+          "07_sea_site": "irrelevant",
+          "05_cocoa_site": "irrelevant"
+        },
+        "required_features": {
+          "place": [
+            "street",
+            "town"
+          ],
+          "buildings": [
+            "houses",
+            "buildings"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "lunar eclipse"
+        ]
+      }
+    ],
+    "reuse_cases": {
+      "truman-cocoa": "05_cocoa_site",
+      "truman-sea": "07_sea_site",
+      "truman-exit": "08_exit_site"
+    },
+    "source_sha256": "3e5ff1b8efd2ddfb10f32e2594acb7ff55ecaee4cf352962be216d9bd8f528f0"
+  }
 }

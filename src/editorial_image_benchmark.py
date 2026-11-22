@@ -29,14 +29,22 @@ def read_manifest(path):
         raise ValueError("benchmark_requires_10_unique_images_per_channel")
     if len({row["sha256"] for row in ids.values()}) != len(ids):
         raise ValueError("benchmark_image_bytes_must_be_unique")
-    for case in data["cases"]:
+    if replay := data.get("article_replay"):
+        original = (ROOT / replay["article"]).resolve()
+        if not original.is_relative_to(ROOT / "content" / "articles") or digest(original.read_bytes()) != replay["source_sha256"]:
+            raise ValueError("article_replay_source_changed")
+    for case in cases_for_inference(data):
         Scene.read(case)
         candidates, labels = set(case["candidates"]), case["labels"]
         if (len(candidates) != len(case["candidates"]) or candidates != labels.keys()
                 or any(ids[key]["channel"] != case["channel"] for key in candidates)
-                or set(labels.values()) != {"match", "near", "irrelevant"}):
+                or ("match" not in set(labels.values()) or "irrelevant" not in set(labels.values()))):
             raise ValueError("benchmark_requires_frozen_candidate_order_and_three_label_types")
     return data
+
+
+def cases_for_inference(data):
+    return data["cases"] + data.get("article_replay", {}).get("cases", [])
 
 
 def collect_dataset(data, workspace):
@@ -78,16 +86,17 @@ def run_model(kind, data, workspace):
     load_model(kind)
     initialization = perf_counter() - start
     start = perf_counter()
-    durations, output = [], {}
+    durations, output, times = [], {}, {}
     if kind == "florence":
         siglip = read_json(workspace / "siglip.json")["cases"]
         selected = sorted({row["id"] for case in siglip.values() for row in shortlist(case)})
         for key in selected:
             before = perf_counter()
             output[key] = describe_pixels(pixels(workspace, key))
-            durations.append(perf_counter() - before)
+            times[key] = perf_counter() - before
+            durations.append(times[key])
     else:
-        for case in data["cases"]:
+        for case in cases_for_inference(data):
             scene = Scene.read(case)
             prompts = [scene.subject, case["topic"], TOPIC]
             if kind == "siglip":
@@ -103,7 +112,7 @@ def run_model(kind, data, workspace):
     return {"model": kind, "initialization_seconds": initialization, "inference_seconds": perf_counter() - start,
             "seconds_per_candidate": statistics.mean(durations), "candidate_evaluations": len(durations),
             "peak_rss_mib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
-            ("captions" if kind == "florence" else "cases"): output}
+            ("captions" if kind == "florence" else "cases"): output, "caption_seconds": times}
 
 
 def metrics(cases, order, evaluated=None):
@@ -128,7 +137,7 @@ def metrics(cases, order, evaluated=None):
 def aggregate(data, workspace):
     clip, siglip, florence = [read_json(workspace / (kind + ".json")) for kind in ("clip", "siglip", "florence")]
     legacy, clip_rank, sig_rank, verify, details = {}, {}, {}, {}, {}
-    for case in data["cases"]:
+    for case in cases_for_inference(data):
         key = case["id"]
         a_rows, b_rows = clip["cases"][key], siglip["cases"][key]
         a = baseline_order(a_rows)
@@ -156,7 +165,45 @@ def aggregate(data, workspace):
                 for name, order in variants.items()},
             "runtime": {d["model"]: {k: v for k, v in d.items() if k not in ("cases", "captions")}
                         for d in (clip, siglip, florence)},
-            "cases": details}
+            "cases": {row["id"]: details[row["id"]] for row in data["cases"]},
+            "article_replay": article_replay(data, verify, details, florence.get("caption_seconds", {}))}
+
+
+def article_replay(data, verified, details, caption_times):
+    if not (config := data.get("article_replay")):
+        return None
+    registry = {row["id"]: row for row in data["images"]}
+    cases = {row["id"]: row for row in cases_for_inference(data)}
+    selected = set()
+    ordering = ["article-cover", "article-city", "article-audience", "article-acting", "truman-cocoa",
+                "article-director", "article-analogy", "truman-sea", "truman-exit", "article-revisit"]
+    rows = []
+    for key in ordering:
+        case = cases[key]
+        options = [name for name in verified[key] if registry[name].get("path") and name not in selected]
+        choice = options[0] if options else None
+        if choice:
+            selected.add(choice)
+        previous = case.get("previous") or config["reuse_cases"].get(key)
+        row = {"id": key, "heading": case["heading"], "requirements": case["subject"],
+               "previous": previous, "previous_label": case["labels"].get(previous),
+               "selected": choice, "selected_label": case["labels"].get(choice),
+               "assessment": details[key]["shortlist"],
+               "reason": "no_supported_unique_same_film_candidate" if not choice else "caption_supported_exact_film"}
+        for tag, asset in (("previous", previous), ("selected", choice)):
+            if asset:
+                row[tag + "_source"] = registry[asset]["source"]
+                row[tag + "_license"] = registry[asset]["license"]
+        rows.append(row)
+    evaluated = {item["id"] for key in ordering for item in details[key]["shortlist"]}
+    latency = {"legacy_all_candidates_seconds": sum(row["seconds"] for key in ordering
+                   for row in details[key]["clip_candidate_decisions"]),
+               "siglip_all_candidates_seconds": sum(row["seconds"] for key in ordering
+                   for row in details[key]["siglip_candidates"]),
+               "florence_unique_candidates_seconds": sum(caption_times.get(key, 0) for key in evaluated)}
+    return {"article": config["article"], "article_sha256": config["source_sha256"],
+            "sections": rows, "runtime": latency, "permission_status": "rights_review_pending",
+            "publication_authorized": False}
 
 
 def contact_sheet(data, report, workspace):
@@ -184,6 +231,17 @@ def contact_sheet(data, report, workspace):
                 draw.text((x + 4, y + 50), "See source record", fill="black")
             draw.text((x + 4, y + 160), f"{candidate}: {case['labels'][candidate]}", fill="black")
     output.save(workspace / "contact-sheet.jpg", quality=88)
+    if (replay := report.get("article_replay")):
+        # Existing film stills may be used as input. Keep them out of the public artifact.
+        movie = Image.new("RGB", (900, len(replay["sections"]) * 43 + 35), "white")
+        layout = ImageDraw.Draw(movie)
+        layout.text((8, 8), "The Truman Show / existing vs experimental selection (source refs in JSON)", fill="black")
+        for i, section in enumerate(replay["sections"]):
+            y = 35 + i * 43
+            layout.text((8, y), section["id"], fill="black")
+            layout.text((285, y), str(section["previous"] or "None"), fill="black")
+            layout.text((570, y), str(section["selected"] or "No confirmed match"), fill="black")
+        movie.save(workspace / "film-placement-sheet.png")
     write_json(workspace / "contact-sheet-credits.json", credits)
 
 
