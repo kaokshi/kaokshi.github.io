@@ -70,6 +70,8 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
         raise Blocked("film_metadata_incomplete")
     if plan.get("qid") and plan["qid"] != identity["qid"]:
         raise Blocked("movie_catalog_id_conflict")
+    if plan.get("original_title") and normalize(plan["original_title"]) != normalize(identity["original_title"]):
+        raise Blocked("movie_original_title_conflict")
     approved = rights_registry.get(identity["qid"], {})
     submitted = plan.get("sources", [])
     public_urls = [url for url in submitted if isinstance(url, str)] if isinstance(submitted, list) else []

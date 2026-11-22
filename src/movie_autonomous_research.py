@@ -193,6 +193,7 @@ def movie_sources(task, payload, *, get_json=fetch_json):
     return {
         "status": "source_documents_retrieved_not_plot_verified",
         "film": {"qid": qid, "title": movie_name,
+                 "title_ru": movie.get("labels", {}).get("ru", {}).get("value"),
                  "original_title": (movie.get("claims", {}).get("P1476") or [{}])[0]
                      .get("mainsnak", {}).get("datavalue", {}).get("value", {}).get("text")
                      or movie.get("labels", {}).get("en", {}).get("value") or movie_name,
