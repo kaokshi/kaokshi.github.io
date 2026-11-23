@@ -1,5 +1,5 @@
 {
-  "science": null,
-  "legends": null,
-  "cinema": null
+  "science": "https://dzen.ru/sciencebox",
+  "legends": "https://dzen.ru/darklegends",
+  "cinema": "https://dzen.ru/kadrzkadr"
 }
