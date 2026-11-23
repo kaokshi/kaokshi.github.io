@@ -17,8 +17,9 @@ GROQ = "openai/gpt-oss-120b"
 NEMOTRON = "nvidia/nemotron-3-ultra-550b-a55b:free"
 KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
 KILO = "nvidia/nemotron-3.5-lightning:free"
+KILO_REVIEW = "inclusionai/ling-3.2-flash:free"
 MODELS = {"groq": GROQ, "openrouter": NEMOTRON, "klein": KLEIN,
-          "kilo": KILO, "ovh": "qwen3.6-35b-a3b", "ovh-gptoss": "gpt-oss-120b"}
+          "kilo": KILO, "kilo-review": KILO_REVIEW, "ovh": "qwen3.6-35b-a3b", "ovh-gptoss": "gpt-oss-120b"}
 USER_AGENT = "ZenEditorial/1.0 (+https://github.com/kaokshi/kaokshi.github.io)"
 
 
@@ -188,7 +189,7 @@ def text_call(provider, prompt, max_tokens=7500):
         raise ProviderError("openrouter_disabled_for_isolated_test", stop=True)
     if os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true" and provider == "groq":
         raise ProviderError("groq_forbidden_in_alternative_test", stop=True)
-    if provider in {"kilo", "ovh", "ovh-gptoss"}:
+    if provider in {"kilo", "kilo-review", "ovh", "ovh-gptoss"}:
         from .editorial_alt_models import generate
         return generate(provider, prompt, max_tokens)
     if provider == "groq":

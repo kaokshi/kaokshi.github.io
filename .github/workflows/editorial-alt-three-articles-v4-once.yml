@@ -144,6 +144,7 @@ jobs:
               "kilo", "ovh", "ovh-gptoss", "openrouter")
           if without_openrouter():
               providers = tuple(provider for provider in providers if provider != "openrouter")
+              providers += ("kilo-review",)
           for provider in providers:
               started = monotonic()
               status = {"provider": provider}

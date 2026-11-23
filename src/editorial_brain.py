@@ -132,7 +132,7 @@ class Article:
                          and stage.startswith(("full-edit", "repair-")))
         if tokens is None:
             tokens = 3700 if provider == "groq" else 7800
-        if without_openrouter() and provider in {"ovh", "ovh-gptoss"}:
+        if without_openrouter() and provider in {"ovh", "ovh-gptoss", "kilo-review"}:
             tokens = min(tokens, 7800)
 
         def send(task, ceiling):
@@ -160,13 +160,21 @@ class Article:
 
         inputs = {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
                   "prompt_sha256": digest(prompt), **(metadata or {})}
-        if provider == "kilo" and isinstance(self.memory, Memory) and self.memory.retry:
-            previous = {**inputs, "model": "kilo-auto/free"}
+        if isinstance(self.memory, Memory) and self.memory.retry:
             with self.memory.lock:
-                if any(row["article"] == self.id and row["operation"] == stage
-                       and row["executor"] == provider and row["status"] == "completed"
-                       and row["inputs"] == previous for row in self.memory.data["tasks"].values()):
-                    inputs = previous
+                for row in self.memory.data["tasks"].values():
+                    if (row["article"] != self.id or row["operation"] != stage
+                            or row["executor"] != provider or row["status"] != "completed"):
+                        continue
+                    previous = row["inputs"]
+                    expected = {**inputs}
+                    if provider == "kilo" and previous.get("model") == "kilo-auto/free":
+                        expected["model"] = "kilo-auto/free"
+                    if stage.endswith("-writer-fallback") and "fallback_reason" in previous:
+                        expected["fallback_reason"] = previous["fallback_reason"]
+                    if previous == expected:
+                        inputs = previous
+                        break
         try:
             result = self.task(stage, provider, inputs, execute, minimum_seconds=130,
                                validator=(lambda response: validate(json_reply(response))) if validate else None)
@@ -379,7 +387,7 @@ class Article:
                 prompt += "\nПРЕДЫДУЩАЯ ВЕРСИЯ ДЛЯ СРАВНЕНИЯ:\n" + canonical(reference["article"])
             last_error = None
             from .editorial_alt_models import enabled as alternative_test
-            providers = ("ovh-gptoss",) if without_openrouter() else (
+            providers = ("ovh-gptoss", "kilo-review") if without_openrouter() else (
                 ("openrouter",) if alternative_test() else ("groq", "openrouter"))
             for provider in providers:
                 try:
@@ -564,6 +572,7 @@ class Article:
         allowed_kinds = ("photo" if self.channel == "cinema" else
                          "illustration" if self.channel == "legends" and not sourced_illustrations else
                          "photo или illustration")
+        sample_kind = "illustration" if self.channel == "legends" else "photo"
         prompt = (f"{guide} Поле kind: {allowed_kinds}. Укажи одно точное значение. "
                   f"Строго {count+1} разных изображений на {count} разделов: "
                   "два разных изображения привяжи к разделу 1 (лучшее по смыслу и качеству "
@@ -571,13 +580,16 @@ class Article:
                   "первого заголовка), ровно по одному — к каждому разделу 2 и далее. "
                   "После каждого жирного заголовка должен идти кадр без пустых абзацев. "
                   "Оцени каждую сцену по смыслу и не вставляй отвлечённые заглушки. Верни JSON "
-                  '{"subject":"English overall theme","images":[{"section":1,"kind":"one allowed value",'
+                  '{"subject":"English overall theme","images":[{"section":1,"kind":"'
+                  + sample_kind + '",'
                   '"subject":"English concrete scene or subject","brief":"English detailed visual brief",'
                   '"query":"English search phrase"}]}.\n'
                   + self.current["raw"])
         plan = None
         last = None
-        for attempt, provider in enumerate(("groq",) if alternative_test() else ("groq", "openrouter"), 1):
+        providers = ("groq", "kilo") if without_openrouter() else (
+            ("groq",) if alternative_test() else ("groq", "openrouter"))
+        for attempt, provider in enumerate(providers, 1):
             try:
                 plan = self.model(f"image-plan-{attempt}", provider,
                                   prompt + (f"\nИсправь: {last}." if last else ""),
@@ -892,8 +904,8 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
                "daily_calls": {**cfg["daily_calls"], "kilo": 30, "ovh": 12, "ovh-gptoss": 12}}
         if without_openrouter():
             # Historical failed requests remain in the encrypted ledger.
-            cfg["per_article_calls"].update(ovh=9, openrouter=0, **{"ovh-gptoss": 9})
-            cfg["daily_calls"].update(ovh=20, openrouter=0, **{"ovh-gptoss": 20})
+            cfg["per_article_calls"].update(ovh=9, openrouter=0, **{"ovh-gptoss": 9, "kilo-review": 6})
+            cfg["daily_calls"].update(ovh=20, openrouter=0, **{"ovh-gptoss": 20, "kilo-review": 12})
     return cfg
 
 
