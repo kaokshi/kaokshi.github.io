@@ -12,7 +12,7 @@ from .editorial_providers import Blocked, ProviderError, parse_json, request
 
 KILO_ID = "kilo-auto/free"
 KILO_URL = "https://ai-gateway.kilo.ai/api/v1"
-OVH_ID = "Meta-Llama-3_3-70B-Instruct"
+OVH_ID = "qwen3-6-35b-a3b"
 OVH_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
 OVH_CATALOG_URL = "https://catalog.endpoints.ai.ovh.net/rest/v1/models_v2"
 _ovh_lock = Lock()
