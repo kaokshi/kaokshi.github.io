@@ -336,19 +336,7 @@ def generated_scene(scene, subject, path, index, task, article, channel, style):
             row = exc.args[0]
             if row["status"] in {"needs_review", "provider_unavailable"}:
                 raise Blocked("image_review_required_" + row["status"]) from None
-            details = []
-            if row["absent"]:
-                details.append("Clearly show these missing items: " + ", ".join(row["absent"]))
-            if card["location"] in row["absent"]:
-                details.append("Use a wide establishing view that includes the full setting and the required objects "
-                               "in the same frame. Avoid a close-up that hides the surrounding location.")
-            if row["contradictions"]:
-                details.append("Exclude these conflicting items: " + ", ".join(row["contradictions"]))
-            if row["duplicate"]:
-                details.append("Use a distinct viewpoint and composition from other images.")
-            if not row["clip"]["passed"]:
-                details.append("Frame the setting and main subject prominently.")
-            prompt = base + " Corrections: " + ". ".join(details)
+            prompt = base + " Corrections: " + ". ".join(qa.corrections(card, row))
         except (ValueError, OSError) as exc:
             qa.report_candidate(path, {"image_sha256": digest(raw), "status": "rejected",
                                        "schema": qa.SCHEMA, "scene_card": card, "generations": attempt,

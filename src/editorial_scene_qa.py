@@ -332,3 +332,20 @@ def require_ready_rows(rows):
             or sum(row["is_cover"] and row["section"] == 1 for row in rows) != 1
             or sum(row["is_cover"] for row in rows) != 1):
         raise Blocked("review_visual_layout_incomplete")
+
+
+
+def corrections(card, row):
+    details = []
+    if row["absent"]:
+        details.append("Clearly show these missing items: " + ", ".join(row["absent"]))
+    if card["location"] in row["absent"]:
+        details.append("Use a wide establishing view that includes the full setting and the required objects "
+                       "in the same frame. Avoid a close-up that hides the surrounding location.")
+    if row["contradictions"]:
+        details.append("Exclude these conflicting items: " + ", ".join(row["contradictions"]))
+    if row["duplicate"]:
+        details.append("Use a distinct viewpoint and composition from other images.")
+    if not row["clip"]["passed"]:
+        details.append("Frame the setting and main subject prominently.")
+    return details

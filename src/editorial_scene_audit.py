@@ -14,7 +14,7 @@ from .editorial_brain import json_reply
 from .editorial_chat_plaintext import approval, checked_day, connect, run
 from .editorial_images import decode_candidate, image_hashes, similarity
 from .editorial_memory import digest, read_json, write_json
-from .editorial_offline_review_pack import CHANNELS, FILE_NAME, IMAGE_LINK
+from .editorial_offline_review_pack import AUDIT_DIR, CHANNELS, FILE_NAME, IMAGE_LINK
 from .editorial_providers import Blocked, text_call
 from .editorial_review import HEADING
 
@@ -91,12 +91,23 @@ def audit_image(channel, key, slot, card, error, meta, folder, all_hashes):
     qa.apply_channel_policy(decision, channel.split("-")[0], meta,
                             film={"original_title": "Prisoners", "year": 2013, "imdb": "tt1392214"}
                             if channel == "cinema-01" else None)
+    kind = meta.get("kind") or ("illustration" if channel == "legends-01" else "photo")
+    if decision["status"] == "rejected":
+        if kind == "illustration":
+            decision["next_action"] = {"action": "revise_klein_prompt_from_scene_card",
+                                       "corrections": qa.corrections(card, decision)}
+        else:
+            decision["next_action"] = {"action": "find_verified_replacement",
+                                       "subject": card["location"], "required": card["must_have"],
+                                       "requires_film_identity": channel == "cinema-01"}
+    elif decision["status"] != "accepted":
+        decision["next_action"] = {"action": "manual_or_independent_visual_review"}
     return {**row, **decision}
 
 
 def audit(root, day):
     base = root / "editorial-chat-review" / checked_day(day)
-    report_dir = base / "image-qa-audit-v2"
+    report_dir = base / AUDIT_DIR
     output = report_dir / "image_qa.json"
     all_hashes = []
     for channel in CHANNELS:
@@ -107,7 +118,7 @@ def audit(root, day):
     if len({x[0] for x in all_hashes}) != 23:
         raise Blocked("audit_reused_slot")
     article_reports = {}
-    reference = read_json(base / "image-qa-reference.json") or {}
+    reference = read_json(base / "image-qa-reference-v3.json") or {}
     elapsed = monotonic()
     # Audit the owner's priority channel first.
     for channel in ("legends-01", "science-01", "cinema-01"):

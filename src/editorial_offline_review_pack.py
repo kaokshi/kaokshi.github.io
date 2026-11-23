@@ -21,6 +21,7 @@ from .editorial_chat_plaintext import approval, checked_day, connect, run
 from .editorial_providers import Blocked
 from .editorial_scene_qa import SCHEMA
 
+AUDIT_DIR = "image-qa-audit-v3"
 CHANNELS = ("legends-01", "cinema-01", "science-01")
 TITLES = {
     "legends-01": "Тени над подземным парком",
@@ -85,16 +86,24 @@ def write_docx(raw, folder, output):
 def require_audited_bundle(base):
     from .editorial_memory import digest, json_bytes, read_json
     from .editorial_scene_audit import input_sections
+    from .editorial_review import HEADING
 
-    evidence = read_json(base / "image-qa-audit-v2" / "image_qa.json")
+    evidence = read_json(base / AUDIT_DIR / "image_qa.json")
     if not evidence or evidence.get("schema") != SCHEMA:
         raise Blocked("offline_bundle_requires_current_image_audit")
     for channel in CHANNELS:
         folder = base / channel
         markdown = (folder / FILE_NAME).read_text(encoding="utf-8")
         sections, slots = input_sections(markdown)
-        if "**Оглавление**" not in markdown.splitlines() and "## Оглавление" not in markdown.splitlines():
+        blocks = [line.strip() for line in markdown.splitlines() if line.strip()]
+        if len(blocks) < 3 or blocks[1] not in {"**Оглавление**", "## Оглавление"}:
             raise Blocked("offline_bundle_missing_contents_" + channel)
+        opening = [line for line in blocks[2:] if not re.match(r"^\d+\.\s+", line)]
+        if not opening or not IMAGE_LINK.fullmatch(opening[0]):
+            raise Blocked("offline_bundle_misplaced_cover_" + channel)
+        if any(not IMAGE_LINK.fullmatch(following) for line, following in zip(blocks[2:], blocks[3:])
+               if HEADING.fullmatch(line)):
+            raise Blocked("offline_bundle_misplaced_section_image_" + channel)
         article = evidence.get("articles", {}).get(channel, {})
         source = digest("\n\n".join(sections.values()))
         rows = article.get("images", [])
@@ -175,7 +184,7 @@ def package(day, token):
                 summary.append({"channel":channel,"images":len(images),
                                 "document":True,"html":True,
                                 "offline_relative_images":True})
-            archive.write(base / "image-qa-audit-v2" / "image_qa.json", arcname="image_qa.json")
+            archive.write(base / AUDIT_DIR / "image_qa.json", arcname="image_qa.json")
             archive.writestr("НАЧНИТЕ_ЗДЕСЬ.txt",
                 "Редакция Дзен — тестовые статьи для личного согласования.\n\n"
                 "Откройте файл «Открыть статью.html» в каждой папке или "
