@@ -1,9 +1,5 @@
 name: Cloudflare Workers AI quota (read-only)
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/cloudflare-quota.yml'
   workflow_dispatch:
   schedule:
     # 09:30 Moscow time; scheduling may be delayed by GitHub.
@@ -32,7 +28,7 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_cloudflare_quota.py' -v
 
   cloudflare-quota:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
