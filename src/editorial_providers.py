@@ -16,7 +16,8 @@ from .editorial_groq_budget import instant, rate_headers, seconds, usage_fields
 GROQ = "openai/gpt-oss-120b"
 NEMOTRON = "nvidia/nemotron-3-ultra-550b-a55b:free"
 KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
-MODELS = {"groq": GROQ, "openrouter": NEMOTRON, "klein": KLEIN}
+MODELS = {"groq": GROQ, "openrouter": NEMOTRON, "klein": KLEIN,
+          "kilo": "z-ai/glm-5:free", "modelscope": "Qwen/Qwen3.5-35B-A3B"}
 USER_AGENT = "ZenEditorial/1.0 (+https://github.com/kaokshi/kaokshi.github.io)"
 
 
@@ -158,6 +159,11 @@ def require_free_router():
 
 
 def text_call(provider, prompt, max_tokens=7500):
+    if os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true" and provider == "groq":
+        raise ProviderError("groq_forbidden_in_alternative_test", stop=True)
+    if provider in {"kilo", "modelscope"}:
+        from .editorial_alt_models import generate
+        return generate(provider, prompt, max_tokens)
     if provider == "groq":
         if os.environ.get("EDITORIAL_GROQ_FREE_ONLY") != "true":
             raise ProviderError("groq_free_account_unconfirmed", stop=True)
