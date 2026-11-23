@@ -484,14 +484,16 @@ class Article:
             if self.memory.time_left() < 22 * 60:
                 self.blockers.append("revision_deferred_deadline")
                 break
-            prompt = (brief + "\nИсправь только перечисленные проблемы. Сохрани факты, сюжет и "
-                      "структуру, не повторяй отклонённые изменения. Верни полный исправленный текст. "
+            prompt = (brief + "\nИсправь только перечисленные проблемы. Сохрани факты и сюжет. "
+                      "Если зафиксирована ошибка section_structure, сделай ровно шесть или семь разделов "
+                      "с жирными заголовками и краткое вступление перед первым заголовком. "
+                      "Не повторяй отклонённые изменения. Верни полный исправленный текст. "
                       f"\nПРОБЛЕМЫ:\n{json.dumps(report['issues'], ensure_ascii=False)}"
                       f"\nУЖЕ ПРОВЕРЕННЫЕ РЕЗУЛЬТАТЫ:\n{json.dumps(self.attempts, ensure_ascii=False)}"
                       f"\nТЕКУЩАЯ ВЕРСИЯ:\n{self.current['raw']}")
             errors = []
             response = None
-            for provider in (("openrouter",) if alternative_test() else ("groq", "openrouter")):
+            for provider in (("openrouter", "kilo") if alternative_test() else ("groq", "openrouter")):
                 try:
                     response = self.model(f"repair-{attempt}", provider, prompt)
                     break
@@ -522,14 +524,17 @@ class Article:
         sourced_illustrations = alternative_test() and self.channel != "cinema"
         article = self.current["article"]
         count = len(article["sections"])
-        if not 1 <= count <= self.config["maximum_images"]:
-            raise Blocked("image_plan_article_sections_unavailable")
+        if not 6 <= count <= 7:
+            raise Blocked("image_plan_layout_requires_six_or_seven_sections")
         guide = ("Только illustration. Сделай 7–8 кинематографичных, разных сцен." if self.channel == "legends"
                  else "Скомбинируй оба типа. Предпочти реальные фотографии, когда они точно показывают явление. "
                  "Photo для реальных объектов "
                  "и наблюдений, illustration для объяснения механизмов, аналогий и реконструкций. "
                  "Для photo дай краткий английский поисковый запрос; визуализация не изображает доказательство.")
         if sourced_illustrations:
+            if self.channel == "legends":
+                guide = ("Подбери разные атмосферные фотографии или иллюстрации, "
+                         "подходящие конкретным разделам вымышленной истории.")
             guide += (" Для каждой фотографии и иллюстрации составь краткий английский запрос "
                       "для поиска в Wikimedia Commons. Планируй сюжетно точные кадры, опираясь "
                       "на объекты, места и сцены, для которых реально найти самостоятельные "
@@ -538,15 +543,19 @@ class Article:
             guide = ("Только photo: подлинные кадры именно этого фильма из открытых источников. "
                      "Для каждого кадра дай английский запрос по сцене и персонажам; не придумывай эпизоды. "
                      "Постеры, фан-арт и кадры из других экранизаций не подходят.")
-        prompt = (f"{guide} Строго {count+1} разных изображений на {count} разделов: "
+        allowed_kinds = ("photo" if self.channel == "cinema" else
+                         "illustration" if self.channel == "legends" and not sourced_illustrations else
+                         "photo или illustration")
+        prompt = (f"{guide} Поле kind: {allowed_kinds}. Укажи одно точное значение. "
+                  f"Строго {count+1} разных изображений на {count} разделов: "
                   "два разных изображения привяжи к разделу 1 (лучшее по смыслу и качеству "
                   "будет отдельной обложкой сразу после оглавления, второе — сразу после "
                   "первого заголовка), ровно по одному — к каждому разделу 2 и далее. "
                   "После каждого жирного заголовка должен идти кадр без пустых абзацев. "
                   "Оцени каждую сцену по смыслу и не вставляй отвлечённые заглушки. Верни JSON "
-                  '{"subject":"English overall theme","images":[{"section":1,"kind":"photo|illustration",'
+                  '{"subject":"English overall theme","images":[{"section":1,"kind":"one allowed value",'
                   '"subject":"English concrete scene or subject","brief":"English detailed visual brief",'
-                  '"query":"English search phrase for photo"}]}.\n'
+                  '"query":"English search phrase"}]}.\n'
                   + self.current["raw"])
         plan = None
         last = None

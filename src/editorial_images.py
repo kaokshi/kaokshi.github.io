@@ -46,7 +46,12 @@ def validate_plan(plan, section_count, channel, settings, *, sourced_illustratio
         section, kind = row.get("section"), row.get("kind")
         if type(section) != int or section not in range(1, section_count + 1):
             raise Blocked("image_plan_section_invalid")
-        if kind not in {"photo", "illustration"} or (channel == "legends" and kind != "illustration") or (channel == "cinema" and kind != "photo"):
+        allowed = {"photo", "illustration"}
+        if channel == "legends" and not sourced_illustrations:
+            allowed = {"illustration"}
+        elif channel == "cinema":
+            allowed = {"photo"}
+        if kind not in allowed:
             raise Blocked("image_plan_kind_invalid")
         if any(not isinstance(row.get(k), str) or not 5 <= len(row[k].strip()) <= limit
                for k, limit in (("subject", 180), ("brief", 950))):
