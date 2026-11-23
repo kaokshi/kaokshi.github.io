@@ -17,7 +17,7 @@ GROQ = "openai/gpt-oss-120b"
 NEMOTRON = "nvidia/nemotron-3-ultra-550b-a55b:free"
 KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
 MODELS = {"groq": GROQ, "openrouter": NEMOTRON, "klein": KLEIN,
-          "kilo": "z-ai/glm-5:free", "modelscope": "Qwen/Qwen3.5-35B-A3B"}
+          "kilo": "kilo-auto/free", "modelscope": "Qwen/Qwen3.5-35B-A3B"}
 USER_AGENT = "ZenEditorial/1.0 (+https://github.com/kaokshi/kaokshi.github.io)"
 
 
