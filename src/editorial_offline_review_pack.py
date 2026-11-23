@@ -17,7 +17,7 @@ from PIL import Image
 from docx import Document
 from docx.shared import Inches, Pt
 
-from .editorial_chat_plaintext import approval, checked_day, connect, run
+from .editorial_chat_plaintext import approval, checked_day, connect, push_private_main, run
 from .editorial_providers import Blocked
 from .editorial_scene_qa import SCHEMA
 
@@ -202,7 +202,7 @@ def package(day, token):
         run([*args,"-c","user.name=Zen Editorial Bot",
              "-c","user.email=41898282+github-actions[bot]@users.noreply.github.com",
              "commit","-m","Private offline three-channel review package with all 23 images"],env)
-        run([*args,"push","origin","HEAD:refs/heads/main"],env,timeout=120)
+        push_private_main(args, env)
         out={"status":"private_offline_review_ready",
              "archive":rel,"size_bytes":zipfile.stat().st_size,
              "sha256":sha256(zipfile.read_bytes()).hexdigest(),

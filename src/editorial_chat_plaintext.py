@@ -60,6 +60,27 @@ def run(argv, env, *, timeout=60):
     return value.stdout.strip()
 
 
+
+def push_private_main(args, env, *, execute=run):
+    """Preserve private writes when another writer advanced main."""
+    try:
+        execute([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=120)
+        return
+    except Blocked:
+        execute([*args, "fetch", "origin", "main"], env, timeout=90)
+    try:
+        execute([*args, "-c", "user.name=Zen Editorial Bot",
+                 "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+                 "rebase", "FETCH_HEAD"], env, timeout=90)
+    except Blocked:
+        try:
+            execute([*args, "rebase", "--abort"], env)
+        except Blocked:
+            pass
+        raise
+    execute([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=120)
+
+
 def connect(token, root, *, execute=run):
     if not token:
         raise Blocked("private_review_token_missing")

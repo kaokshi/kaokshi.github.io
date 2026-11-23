@@ -6,10 +6,11 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 from . import editorial_scene_qa as qa
 from .editorial_brain import json_reply, settings
-from .editorial_chat_plaintext import approval, connect, run
+from .editorial_chat_plaintext import approval, connect, push_private_main, run
 from .editorial_images import ImageIndex, generated
 from .editorial_memory import Memory, digest, read_json, write_json
 from .editorial_offline_review_pack import FILE_NAME
@@ -51,10 +52,12 @@ def main(*, continue_once=False):
         def commit(message):
             rel = output.relative_to(root).as_posix()
             run([*args, "add", "--", rel], env)
+            if not run([*args, "status", "--porcelain", "--", rel], env):
+                return
             run([*args, "-c", "user.name=Zen Editorial Bot",
                  "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                  "commit", "-m", message], env)
-            run([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=120)
+            push_private_main(args, env)
 
         initial_receipt = output / "result.json"
         receipt = output / ("result-retry.json" if continue_once else "result.json")
@@ -99,8 +102,9 @@ def main(*, continue_once=False):
         commit("Reserve one audited illustration correction")
         config["daily_calls"]["klein"] = ceiling
         config["per_article_calls"]["klein"] = ceiling
+        state_storage = SimpleNamespace(checkpoint=lambda: commit("Persist audited Klein checkpoint"))
         memory = Memory(output / "checkpoint", DAY, datetime.now(timezone.utc) + timedelta(minutes=12), config,
-                        retry=continue_once)
+                        private_git=state_storage, retry=continue_once)
         prior_calls = sum(row["provider"] == "klein" for row in memory.data["calls"])
         if prior_calls != ceiling - 1:
             raise Blocked("repair_checkpoint_quota_mismatch")

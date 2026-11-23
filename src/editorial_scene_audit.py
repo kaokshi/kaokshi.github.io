@@ -11,7 +11,7 @@ from time import monotonic
 
 from . import editorial_scene_qa as qa
 from .editorial_brain import json_reply
-from .editorial_chat_plaintext import approval, checked_day, connect, run
+from .editorial_chat_plaintext import approval, checked_day, connect, push_private_main, run
 from .editorial_images import decode_candidate, image_hashes, similarity
 from .editorial_memory import digest, read_json, write_json
 from .editorial_offline_review_pack import AUDIT_DIR, CHANNELS, FILE_NAME, IMAGE_LINK
@@ -198,7 +198,7 @@ def main(day, *, legacy=False):
         run([*args, "-c", "user.name=Zen Editorial Bot",
              "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
              "commit", "-m", "Audit 23 existing images with local pixel checks"], env)
-        run([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=120)
+        push_private_main(args, env)
         if not legacy:
             results = read_json(output)
             assert sum(len(article["images"]) for article in results["articles"].values()) == 23
