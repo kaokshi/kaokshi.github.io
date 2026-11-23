@@ -16,11 +16,11 @@ jobs:
     env:
       EDITORIAL_ISOLATED_VALIDATION: 'true'
       EDITORIAL_TEST_FREE_ONLY: 'true'
-      EDITORIAL_GROQ_FALLBACK_ONLY: 'true'
       EDITORIAL_GROQ_FREE_ONLY: 'true'
       EDITORIAL_CF_FREE_ONLY: 'true'
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
       EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -50,7 +50,7 @@ jobs:
           assert chat["owner_approved"] is True and chat["repository"] == "kaokshi/zen-editorial-review"
           assert "Content authorship boundary" in Path("AGENTS.md").read_text(encoding="utf-8")
           if not all(os.environ.get(key) for key in (
-                  "OPENROUTER_API_KEY", "CLOUDFLARE_ACCOUNT_ID",
+                  "GROQ_API_KEY", "OPENROUTER_API_KEY", "CLOUDFLARE_ACCOUNT_ID",
                   "CLOUDFLARE_API_TOKEN", "EDITORIAL_PRIVATE_TOKEN", "EDITORIAL_STATE_KEY_HEX")):
               raise SystemExit("test_blocked_required_private_secrets_missing")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
@@ -61,8 +61,18 @@ jobs:
           PY
       - name: Install encryption dependency
         run: python -m pip install 'cryptography>=44,<48'
-      - name: Verify real zero-price model and free daily headroom before any requests
-        run: python -m src.editorial_free_fallback --github-env "$GITHUB_ENV" --minimum-free-remaining 36
+      - name: Verify zero-price OpenRouter backup without replacing primary Groq
+        run: |
+          # Reserve NO mandatory 36 calls: Groq is the main writer.
+          # OpenRouter is checked only as a safe fallback, and is never
+          # made the default writer in this isolated run.
+          python - <<'PY'
+          from src.editorial_free_fallback import verify_fallback
+          if verify_fallback() != "free_route_confirmed":
+              print("Free OpenRouter backup unavailable; primary Groq remains preferred.")
+          else:
+              print("Primary Groq, independently verified free OpenRouter backup.")
+          PY
       - name: Install project editorial, QA, documents and image dependencies
         run: |
           python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
