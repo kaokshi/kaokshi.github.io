@@ -13,6 +13,7 @@ class PilotRouteTests(unittest.TestCase):
         return {
             "EDITORIAL_ALT_MODELS_TEST": "true",
             "EDITORIAL_ISOLATED_VALIDATION": "true",
+            "EDITORIAL_RELEASE_TRIO": "false",
             "EDITORIAL_GROQ_GEMINI_KLEIN_PILOT": "true",
             "EDITORIAL_GROQ_FREE_ONLY": "true",
             "EDITORIAL_GROQ_FALLBACK_ONLY": "false",
@@ -42,6 +43,13 @@ class PilotRouteTests(unittest.TestCase):
         self.assertEqual(cfg["per_article_calls"]["groq"], 3)
         self.assertEqual(cfg["per_article_calls"]["gemini"], 2)
         self.assertEqual(cfg["daily_calls"]["klein"], 16)
+
+    def test_release_trio_keeps_daily_budget_bounded(self):
+        with patch.dict(os.environ, {**self.env(), "EDITORIAL_RELEASE_TRIO": "true"}):
+            cfg = cycle_settings("daily", 120, True, validate_cinema=True)
+        self.assertEqual(cfg["articles_per_channel"], {"legends": 1, "science": 1, "cinema": 1})
+        self.assertEqual(cfg["daily_calls"]["klein"], 18)
+        self.assertEqual(cfg["daily_calls"]["gemini"], 6)
 
     def test_ovh_route_is_blocked_before_any_network_access(self):
         with patch.dict(os.environ, self.env()), \

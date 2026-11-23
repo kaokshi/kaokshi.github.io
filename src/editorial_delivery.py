@@ -300,6 +300,8 @@ def restore_checkpoint(root, day, command):
 def alternate_checkpoint_prefix(one_article):
     from .editorial_alt_models import groq_gemini_klein_pilot, groq_ovh_klein_pilot
     if groq_gemini_klein_pilot():
+        if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+            return "editorial-v1-three-channel-encrypted"
         if os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true":
             return "cinema-prisoners-groq-gemini35-encrypted"
         return "groq-gemini35-klein-two-channel-encrypted"
@@ -341,6 +343,8 @@ def restore_alt_checkpoint(root, day, run_id):
     from .editorial_alt_models import groq_gemini_klein_pilot
     is_new_pilot = groq_gemini_klein_pilot()
     expected_workflow = (
+        ".github/workflows/editorial-v1-three-channel.yml"
+        if is_new_pilot and os.environ.get("EDITORIAL_RELEASE_TRIO") == "true" else
         ".github/workflows/editorial-cinema-groq-gemini-confirmed-film-once.yml"
         if is_new_pilot and os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true" else
         ".github/workflows/editorial-groq-gemini-klein-two-channel-once.yml"

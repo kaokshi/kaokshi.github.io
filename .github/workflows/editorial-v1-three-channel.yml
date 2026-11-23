@@ -76,7 +76,7 @@ jobs:
               stream.write("EDITORIAL_SEALED_DIR=" + os.environ["RUNNER_TEMP"] + "/groq-gemini-klein-sealed\n")
           print("Owner-only experimental Groq Gemini Klein path. OVH disabled. Publication OFF.")
           PY
-      - name: Offline provider-budget and mixed-image regressions
+      - name: Verify two-channel and three-channel quota regressions
         run: |
           python -m pip install 'cryptography>=44,<48'
           python -m unittest -q tests.test_editorial_groq_gemini_klein tests.test_editorial_science_mixed_images
