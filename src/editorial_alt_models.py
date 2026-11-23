@@ -40,6 +40,10 @@ def groq_ovh_klein_pilot():
     return ovh_trial() and os.environ.get("EDITORIAL_GROQ_OVH_KLEIN_PILOT") == "true"
 
 
+def gemini_pilot():
+    return groq_ovh_klein_pilot() and os.environ.get("EDITORIAL_GEMINI_EDITOR") == "true"
+
+
 def ovh_finalize():
     return ovh_trial() and os.environ.get("EDITORIAL_OVH_FINALIZE") == "true"
 
@@ -105,6 +109,9 @@ def _ovh_available(catalog, model=OVH_ID):
 def preflight():
     """Read two public catalogs. Does not generate tokens or write articles."""
     require_isolated()
+    if gemini_pilot():
+        from .editorial_providers import gemini_preflight
+        return gemini_preflight()
     if not ovh_trial():
         kilo = parse_json(request(KILO_URL + "/models", ("ai-gateway.kilo.ai",),
                                   headers=candidate_headers("kilo")))

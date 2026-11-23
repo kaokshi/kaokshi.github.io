@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import fcntl
 
 from . import editorial_cinema as cinema
-from .editorial_alt_models import groq_ovh_klein_pilot, ovh_finalize, ovh_recover, ovh_trial, without_openrouter
+from .editorial_alt_models import gemini_pilot, groq_ovh_klein_pilot, ovh_finalize, ovh_recover, ovh_trial, without_openrouter
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_layout import layout_issues
@@ -24,7 +24,7 @@ from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, rea
 from .editorial_no_repeat import topic_duplicate_reason, words
 from .editorial_package import package, zip_packet
 from .editorial_subscription import CHANNELS as SUBSCRIPTION_CHANNELS
-from .editorial_providers import Blocked, MODELS, ProviderError, klein, text_call
+from .editorial_providers import Blocked, MODELS, ProviderError, gemini_limit, gemini_text, klein, text_call
 from .editorial_review import RULES, canonical, improves, parse_article, qa, source_context, sources, structural_checks
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,7 +107,9 @@ class Article:
                 if ovh_recover():
                     route = {"repair-saved-facts": "ovh", "image-plan-1": "ovh"}
                 if groq_ovh_klein_pilot():
-                    route = {"draft": "groq", "full-edit": "ovh", "editorial-audit": "ovh", "image-plan-1": "ovh"}
+                    editor = "gemini" if gemini_pilot() else "ovh"
+                    route = {"draft": "groq", "full-edit": editor, "editorial-audit": editor,
+                             "image-plan-1": editor}
                 if route.get(stage) != provider:
                     raise Blocked("ovh_trial_stage_or_provider_outside_budget")
             if provider == "groq" and not groq_ovh_klein_pilot():
@@ -147,7 +149,10 @@ class Article:
             tokens = min(tokens, 7800)
 
         def send(task, ceiling):
-            callback = lambda: text_call(provider, prompt, ceiling)
+            if provider == "gemini":
+                callback = lambda: gemini_text(prompt, min(ceiling, 8192), response_json=validate is not None)
+            else:
+                callback = lambda: text_call(provider, prompt, ceiling)
             if provider == "groq":
                 return self.memory.call_groq(task, self.id, stage, prompt, ceiling, callback,
                                              repair=repair or stage.startswith("repair-"))
@@ -432,7 +437,8 @@ class Article:
                                "для Klein, остальные — photo с английским запросом для Commons. "
                                "Не включай варианты и пояснения. Цитаты из источников дословные, "
                                "на языке источника, не короче 18 знаков.")
-                result = self.model("editorial-audit", "ovh", prompt, validate=lambda x: None,
+                provider = "gemini" if gemini_pilot() else "ovh"
+                result = self.model("editorial-audit", provider, prompt, validate=lambda x: None,
                                     metadata={"text_sha256": sha}, tokens=11000 if groq_ovh_klein_pilot() else 7800)
                 self.memory.article(self.id, trial_image_plan=result.get("image_plan"))
                 return result
@@ -454,7 +460,8 @@ class Article:
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
                             "length_exception_reason": candidate["article"].get("length_exception_reason"),
-                            **({"reviewer": "ovh-qwen-pilot-resume"} if pilot_resume else
+                            **({"reviewer": "gemini-flash"} if gemini_pilot() else
+                               {"reviewer": "ovh-qwen-pilot-resume"} if pilot_resume else
                                {"reviewer": "ovh-qwen-correction", "audit_sha256": digest(
                                     json.dumps(submitted_audit, ensure_ascii=False, sort_keys=True))} if ovh_recover() else
                                {"reviewer": "ovh-qwen-facts-only"} if ovh_finalize() else
@@ -482,6 +489,22 @@ class Article:
             if digest(canonical(parse_article(raw))) != previous_sha:
                 raise Blocked("qa_sha_mismatch")
             self.current = self.remember_version(raw)
+            if gemini_pilot():
+                original = self.current
+                prompt = (f"{RULES}\nОтредактируй черновик, сохрани тему и ровно шесть "
+                          "разделов с жирными заголовками. Сохрани 3000–6000 знаков без пробелов, "
+                          "вступление и точное название канала в последнем призыве. "
+                          "Удали плохо подтверждённые цифры и факты. Все факты должны следовать "
+                          "из приведённых источников. Верни только полный текст статьи. "
+                          f"\nКАНАЛ: {SUBSCRIPTION_CHANNELS[self.channel]}"
+                          f"\nИСТОЧНИКИ:\n{source_context(self.records, chars_per_source=5000)}"
+                          f"\nЧЕРНОВИК:\n{raw}")
+                edited = self.model("full-edit", "gemini", prompt,
+                                    metadata={"source_sha256": previous_sha}, tokens=6200)
+                self.current = self.remember_version(edited)
+                self.memory.article(self.id, independent_editor_provider="gemini", trial_image_plan=None)
+                self.current = self.inspect(self.current, original)
+                return self.current
             if ovh_recover():
                 previous = read_json(self.folder / "versions" / (previous_sha + ".json"), {})
                 previous_issues = previous.get("issues", [])
@@ -751,7 +774,8 @@ class Article:
                     raise Blocked("image_plan_missing_from_ovh_review")
                 validate_plan(plan, count, self.channel, self.config, sourced_illustrations=True)
             except Blocked:
-                if (not ovh_finalize() and not pilot) or (pilot and self.memory.retry):
+                if ((not ovh_finalize() and not pilot)
+                        or (pilot and self.memory.retry and not gemini_pilot())):
                     raise
                 if ovh_recover() or pilot:
                     layout = ", ".join(map(str, [1, 1, *range(2, count + 1)]))
@@ -760,7 +784,8 @@ class Article:
                                f"записей: [{layout}]. Не включай другие варианты и пояснения.")
                 if pilot:
                     prompt += " Укажи две иллюстрации для Klein. Для всех остальных записей используй photo."
-                plan = self.model("image-plan-1", "ovh", prompt,
+                provider = "gemini" if gemini_pilot() else "ovh"
+                plan = self.model("image-plan-1", provider, prompt,
                                   validate=lambda x: validate_plan(x, count, self.channel, self.config,
                                                                    sourced_illustrations=True),
                                   metadata={"text_sha256": self.current["text_sha256"]}, tokens=9500)
@@ -983,6 +1008,14 @@ def status(memory):
                 "tokens_for_one_draft": sum(counts),
                 "nine_draft_projection": 9 * sum(counts),
             }
+    if gemini_pilot():
+        calls = [row for row in memory.data["calls"] if row["provider"] == "gemini"]
+        result["gemini_budget"] = {"project_rpm_configured": gemini_limit("EDITORIAL_GEMINI_RPM", 3, 30),
+                                   "local_daily_ceiling": memory.config["daily_calls"]["gemini"],
+                                   "per_article_ceiling": memory.config["per_article_calls"]["gemini"],
+                                   "planned_articles": 9, "base_calls": 18,
+                                   "calls": len(calls),
+                                   "tokens": sum(row.get("usage", {}).get("total_tokens", 0) for row in calls)}
     return result
 
 
@@ -1113,6 +1146,11 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
             for ledger in ("daily_calls", "per_article_calls"):
                 cfg[ledger].update(groq=2 if command == "daily" else 0, ovh=5 if command == "daily" else 7,
                                    klein=4, **{"ovh-gptoss": 0})
+        if gemini_pilot():
+            if command != "retry":
+                raise Blocked("gemini_pilot_requires_groq_checkpoint")
+            cfg["daily_calls"].update(ovh=0, gemini=gemini_limit("EDITORIAL_GEMINI_DAILY_CALLS", 27, 27))
+            cfg["per_article_calls"].update(ovh=0, gemini=3)
     return cfg
 
 
