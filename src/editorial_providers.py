@@ -233,28 +233,38 @@ def gemini_text(prompt, max_tokens, *, response_json=False):
         if wait > 0:
             sleep(wait)
         _gemini_last_request = monotonic()
-    url = f"https://{GEMINI_HOST}/v1beta/models/{GEMINI}:generateContent"
-    response = parse_json(request(
-        url, (GEMINI_HOST,), data=json.dumps(body).encode(),
-        headers={**gemini_headers(), "Content-Type": "application/json"}, timeout=115))
-    try:
-        candidate = response["candidates"][0]
-        if candidate.get("finishReason") == "MAX_TOKENS":
-            raise ProviderError("truncated_response")
-        if candidate.get("finishReason") != "STOP":
+    url = f"https://{GEMINI_HOST}/v1beta/models/{GEMINI}:streamGenerateContent?alt=sse"
+    raw = request(url, (GEMINI_HOST,), data=json.dumps(body).encode(),
+                  headers={**gemini_headers(), "Content-Type": "application/json"},
+                  timeout=210, limit=4_000_000)
+    text_parts = []
+    finish = None
+    usage = {}
+    model = GEMINI
+    for line in raw.splitlines():
+        if not line.startswith(b"data:"):
+            continue
+        chunk = parse_json(line.removeprefix(b"data:").strip())
+        if not isinstance(chunk, dict):
             raise ProviderError("gemini_generation_incomplete")
-        content = "".join(part["text"] for part in candidate["content"]["parts"]
-                          if not part.get("thought") and isinstance(part.get("text"), str)).strip()
-    except (KeyError, IndexError, AttributeError, TypeError):
-        raise ProviderError("empty_visible_content") from None
+        model = chunk.get("modelVersion") or model
+        usage = chunk.get("usageMetadata") or usage
+        for candidate in chunk.get("candidates", ())[:1]:
+            finish = candidate.get("finishReason") or finish
+            text_parts.extend(part["text"] for part in candidate.get("content", {}).get("parts", ())
+                              if not part.get("thought") and isinstance(part.get("text"), str))
+    if finish == "MAX_TOKENS":
+        raise ProviderError("truncated_response")
+    if finish != "STOP":
+        raise ProviderError("gemini_generation_incomplete")
+    content = "".join(text_parts).strip()
     if not content:
         raise ProviderError("empty_visible_content")
-    usage = response.get("usageMetadata", {})
     metered = {label: usage[field] for label, field in (
         ("prompt_tokens", "promptTokenCount"), ("completion_tokens", "candidatesTokenCount"),
         ("thinking_tokens", "thoughtsTokenCount"), ("total_tokens", "totalTokenCount"))
         if type(usage.get(field)) is int}
-    return {"text": content, "model": response.get("modelVersion", GEMINI),
+    return {"text": content, "model": model,
             "usage": metered, "telemetry": {}}
 
 

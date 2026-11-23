@@ -500,7 +500,7 @@ class Article:
                           f"\nИСТОЧНИКИ:\n{source_context(self.records, chars_per_source=5000)}"
                           f"\nЧЕРНОВИК:\n{raw}")
                 edited = self.model("full-edit", "gemini", prompt,
-                                    metadata={"source_sha256": previous_sha}, tokens=6200)
+                                    metadata={"source_sha256": previous_sha}, tokens=4800)
                 self.current = self.remember_version(edited)
                 self.memory.article(self.id, independent_editor_provider="gemini", trial_image_plan=None)
                 self.current = self.inspect(self.current, original)

@@ -38,7 +38,7 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
             {"thought": True, "text": "internal"}, {"text": '{"issues":[],"claims":[]}'}]}}],
             "usageMetadata": {"totalTokenCount": 48}}
         with patch.dict(os.environ, cfg), patch("src.editorial_providers.request",
-                                               return_value=json.dumps(response).encode()) as request:
+                                               return_value=b"data: " + json.dumps(response).encode() + b"\n\n") as request:
             settings = cycle_settings("retry", 120, True)
             self.assertEqual([settings["daily_calls"][p] for p in ("gemini", "groq", "ovh")], [20, 0, 0])
             self.assertEqual(settings["per_article_calls"]["gemini"], 3)
@@ -46,6 +46,7 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
         self.assertEqual(json.loads(result["text"]), {"issues": [], "claims": []})
         self.assertEqual(result["usage"]["total_tokens"], 48)
         self.assertNotIn("fixture-key", request.call_args.args[0])
+        self.assertIn("streamGenerateContent", request.call_args.args[0])
         self.assertEqual(request.call_args.kwargs["headers"]["x-goog-api-key"], "fixture-key")
         self.assertEqual(json.loads(request.call_args.kwargs["data"])["generationConfig"]["responseMimeType"],
                          "application/json")
