@@ -18,7 +18,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from docx import Document
 from docx.shared import Inches
 
-from .editorial_delivery import owner_key, verify_review
+from .editorial_delivery import owner_key, state_key, verify_review
 from .editorial_encrypted_review import encrypt
 from .editorial_memory import digest
 from .editorial_providers import Blocked
@@ -150,6 +150,8 @@ def main():
     if not token or repository != EXPECTED_REPOSITORY:
         raise Blocked("private_real_article_store_not_configured")
     public_key = owner_key()
+    if state_key() is None:
+        raise Blocked("state_encryption_key_missing")
     # Check the exact private destination before reading the real article.
     metadata = api(token, f"repos/{repository}")
     if metadata.get("visibility") != "private" or metadata.get("full_name") != repository:
