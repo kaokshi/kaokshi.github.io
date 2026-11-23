@@ -51,7 +51,9 @@ def plan(config, *, command, cron="", branch="", isolated=False, test_key="", te
             "repository": repository or "",
             "public_key": public_key or "",
             "groq_free": test_free if isolated else schedule["groq_free_only"] is True,
-            "klein_free": test_free if isolated else schedule["klein_free_only"] is True}
+            "klein_free": test_free if isolated else schedule["klein_free_only"] is True,
+            # Isolated validation never implicitly authorizes Gemini paid or free inference.
+            "gemini_free": schedule.get("gemini_free_only") is True and not isolated}
 
 
 def verify_rollout_run(run_id):
@@ -89,7 +91,8 @@ def main():
                     "EDITORIAL_DAILY_REPOSITORY": result.get("repository", ""),
                     "EDITORIAL_REVIEW_PUBLIC_KEY": result.get("public_key", ""),
                     "EDITORIAL_GROQ_FREE_ONLY": str(result.get("groq_free", False)).lower(),
-                    "EDITORIAL_CF_FREE_ONLY": str(result.get("klein_free", False)).lower()}
+                    "EDITORIAL_CF_FREE_ONLY": str(result.get("klein_free", False)).lower(),
+                    "EDITORIAL_GEMINI_FREE_ONLY": str(result.get("gemini_free", False)).lower()}
         if any("\n" in value or "\r" in value for value in bindings.values()):
             raise Blocked("invalid_workflow_configuration")
         with args.github_env.open("a", encoding="utf-8") as output:
