@@ -1300,6 +1300,16 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
                 cfg["daily_calls"]["groq"] = 2
                 cfg["daily_calls"]["gemini"] = 2
                 cfg["daily_calls"]["klein"] = 8
+            if os.environ.get("EDITORIAL_LEGENDS_RECOVERY_ONLY") == "true":
+                if command != "retry":
+                    raise Blocked("legends_recovery_must_restore_existing_checkpoint")
+                cfg["articles_per_channel"] = {"legends": 1}
+                # Previous two failed Gemini calls are retained in encrypted state.
+                # Allow just ONE additional metered attempt, not a fresh budget.
+                cfg["per_article_calls"]["gemini"] = 3
+                cfg["daily_calls"]["gemini"] = 5
+                cfg["daily_calls"]["groq"] = 6
+                cfg["daily_calls"]["klein"] = 8
         else:
             if without_openrouter():
                 raise Blocked("openrouter_required_after_ovh_removal")
