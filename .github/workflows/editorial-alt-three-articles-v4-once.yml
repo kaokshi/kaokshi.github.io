@@ -126,11 +126,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RESUME_RUN: ${{ inputs.resume_run }}
           EDITION_DAY: ${{ inputs.edition_day }}
-          INCLUDE_CINEMA: ${{ inputs.include_cinema }}
+          INCLUDE_CINEMA: ${{ inputs.include_cinema || (github.event_name == 'push' && contains(github.event.head_commit.message, '[cinema]')) }}
         run: |
           umask 077
           day="${EDITION_DAY:-$(TZ=Europe/Moscow date +%F)}"
           command=daily
+          if [ -z "$RESUME_RUN" ] && [ "$GITHUB_EVENT_NAME" = push ]; then
+            RESUME_RUN="$(python - <<'PY_RESTORE'
+          import os
+          from src.editorial_delivery import latest_alt_checkpoint
+          print(latest_alt_checkpoint(os.environ["GITHUB_RUN_ID"]) or "")
+          PY_RESTORE
+          )"
+          fi
           if [ -n "$RESUME_RUN" ]; then
             python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" \
               --date "$day" --run-id "$RESUME_RUN"

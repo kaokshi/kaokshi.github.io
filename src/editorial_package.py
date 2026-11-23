@@ -157,22 +157,29 @@ def package(folder, title, version, report, images, image_folder, summary):
             out.append(f'<li><a href="{escape(url)}">{escape(url)}</a></li>')
             document.add_paragraph(url, "Caption")
         out.append("</ul></aside>")
-    photos = [picture for picture in ordered if picture["kind"] == "photo"]
-    if photos:
-        out.append("<aside><h2>Источники фотографий</h2><ul>")
-        document.add_heading("Источники фотографий", 1)
-        for picture in photos:
+    credits = [picture for picture in ordered if picture.get("source_page")]
+    if credits:
+        heading = ("Источники фотографий" if all(p["kind"] == "photo" for p in credits)
+                   else "Источники иллюстраций")
+        out.append(f"<aside><h2>{heading}</h2><ul>")
+        document.add_heading(heading, 1)
+        lines.append("## " + heading)
+        for picture in credits:
             name = picture["file"]
             credit = " · ".join(str(picture.get(k) or "уточняется")
                                 for k in ("source", "creator", "license"))
+            if summary.get("image_use") == "private_editorial_review_only" and picture.get(
+                    "rights_status") == "rights_review_pending":
+                credit += " · Права не подтверждены, кадр для закрытого согласования"
             terms = picture.get("license_url") or ""
             attribution = picture.get("attribution") or ""
             license_link = (f' · <a href="{escape(terms)}">условия использования</a>'
                             if terms.startswith("https://") else "")
             out.append(f'<li>{escape(name)} · {escape(credit)} · {escape(attribution)} · '
                        f'<a href="{escape(picture["source_page"])}">страница снимка</a>{license_link}</li>')
-            document.add_paragraph(f'{name} · {credit} · {attribution} · {picture["source_page"]} · {terms}',
-                                   "Caption")
+            note = f'{name} · {credit} · {attribution} · {picture["source_page"]}'
+            document.add_paragraph(f"{note} · {terms}" if terms else note, "Caption")
+            lines.append(f"- {note} · {terms}" if terms else f"- {note}")
         out.append("</ul></aside>")
     out.append("</html>")
     html = "\n".join(out)
@@ -226,11 +233,13 @@ def package(folder, title, version, report, images, image_folder, summary):
     return {"text_sha256": report["text_sha256"], "cover": cover, "files": len(hashes)}
 
 
-def zip_packet(root, destination):
+def zip_packet(root, destination, *, articles=None):
     with ZipFile(destination, mode="w", compression=ZIP_DEFLATED) as archive:
         for path in sorted(root.rglob("*")):
-            if path.is_file():
-                archive.write(path, path.relative_to(root))
+            relative = path.relative_to(root)
+            if path.is_file() and (articles is None or len(relative.parts) == 1
+                                   or relative.parts[0] in articles):
+                archive.write(path, relative)
     with ZipFile(destination) as archive:
         if archive.testzip() is not None:
             raise ValueError("review_zip_integrity_failure")

@@ -288,6 +288,28 @@ def restore_checkpoint(root, day, command):
     return {"status": "checkpoint_restored"}
 
 
+def latest_alt_checkpoint(current_run_id):
+    """Locate a completed run from the current workflow within the same Moscow edition."""
+    path = f"repos/{PUBLIC_REPOSITORY}/actions"
+    current = json.loads(gh("api", f"{path}/runs/{current_run_id}"))
+    runs = json.loads(gh("api", f"{path}/workflows/{current['workflow_id']}/runs",
+                        "-f", f"branch={current['head_branch']}", "-f", "status=completed",
+                        "-F", "per_page=20", "--method", "GET"))["workflow_runs"]
+    tz = ZoneInfo("Europe/Moscow")
+    edition = datetime.fromisoformat(current["created_at"]).astimezone(tz).date()
+    for run in runs:
+        if (run["created_at"] >= current["created_at"]
+                or datetime.fromisoformat(run["created_at"]).astimezone(tz).date() != edition):
+            continue
+        name = f"agent-alt-kilo-ovh-encrypted-{run['id']}-{run['run_attempt']}"
+        if str(run["id"]) == "45150195798":
+            name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
+        rows = json.loads(gh("api", f"{path}/runs/{run['id']}/artifacts?per_page=100"))["artifacts"]
+        if any(row["name"] == name and not row["expired"] for row in rows):
+            return str(run["id"])
+    return None
+
+
 def restore_alt_checkpoint(root, day, run_id):
     """Restore only an authenticated checkpoint from the isolated branch and workflow."""
     if not run_id or not re.fullmatch(r"[1-9][0-9]{0,19}", run_id):

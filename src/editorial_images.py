@@ -27,7 +27,7 @@ LICENSES = {
 }
 
 
-def validate_plan(plan, section_count, channel, settings):
+def validate_plan(plan, section_count, channel, settings, *, sourced_illustrations=False):
     blocks = plan.get("images")
     # Each story has one independent cover immediately after the contents, then
     # exactly one distinct illustration immediately below every section heading.
@@ -51,7 +51,7 @@ def validate_plan(plan, section_count, channel, settings):
         if any(not isinstance(row.get(k), str) or not 5 <= len(row[k].strip()) <= limit
                for k, limit in (("subject", 180), ("brief", 950))):
             raise Blocked("image_plan_brief_invalid")
-        if kind == "photo" and (not isinstance(row.get("query"), str)
+        if (kind == "photo" or sourced_illustrations) and (not isinstance(row.get("query"), str)
                                 or not 2 <= len(row["query"].strip()) <= 150):
             raise Blocked("image_plan_query_invalid")
         brief = row["brief"].casefold().strip()
@@ -67,7 +67,7 @@ def validate_plan(plan, section_count, channel, settings):
         raise Blocked("image_plan_missing_section_or_medium")
 
 
-def commons_photos(query):
+def commons_photos(query, *, kind="photo", verified_only=False):
     for row in commons.search(query + " filetype:bitmap" if len(query) < 133 else query, limit=12,
                               opener=lambda req, timeout: io.BytesIO(
                                   request(req.full_url, COMMONS, timeout=timeout, limit=3_000_000)))["candidates"]:
@@ -76,9 +76,11 @@ def commons_photos(query):
         verified = (row["license_claimed"] in LICENSES
                     and terms.rstrip("/") + "/" == LICENSES[row["license_claimed"]]
                     and row["artist"] and not row["restrictions"])
-        if NONPHOTO.search(meta) or RESTRICTED.search(row["credit"]):
+        is_illustration = bool(NONPHOTO.search(meta))
+        if (is_illustration != (kind == "illustration") or RESTRICTED.search(row["credit"])
+                or (verified_only and not verified)):
             continue
-        yield {"kind": "photo", "source": "Wikimedia Commons", "source_page": row["source_page"],
+        yield {"kind": kind, "source": "Wikimedia Commons", "source_page": row["source_page"],
                "asset_url": row["asset_url"], "creator": row["artist"], "credit": row["credit"],
                "rights_status": "license_metadata_verified" if verified else "rights_review_pending",
                "license": row["license_claimed"], "license_url": terms,
@@ -219,7 +221,7 @@ class ImageIndex:
         return row
 
 
-def photo(scene, subject, path, index, *, experimental=False):
+def photo(scene, subject, path, index, *, experimental=False, verified_only=False):
     if experimental:
         from .editorial_image_experiment import ranked_photo
 
@@ -227,7 +229,11 @@ def photo(scene, subject, path, index, *, experimental=False):
     warm_visual_matcher()
     had_candidate = False
     errors = []
-    for find in (commons_photos, nasa_photos):
+    def find_commons(query):
+        return commons_photos(query, kind=scene.get("kind", "photo"), verified_only=verified_only)
+
+    sources = (find_commons,) if verified_only else (find_commons, nasa_photos)
+    for find in sources:
         if index.memory.time_left() < 70:
             raise Blocked("production_deadline")
         try:

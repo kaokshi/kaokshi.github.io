@@ -511,6 +511,8 @@ class Article:
                 else "agent_revisions_pending")
 
     def images(self):
+        from .editorial_alt_models import enabled as alternative_test
+        sourced_illustrations = alternative_test() and self.channel != "cinema"
         article = self.current["article"]
         count = len(article["sections"])
         if not 1 <= count <= self.config["maximum_images"]:
@@ -520,9 +522,15 @@ class Article:
                  "Photo для реальных объектов "
                  "и наблюдений, illustration для объяснения механизмов, аналогий и реконструкций. "
                  "Для photo дай краткий английский поисковый запрос; визуализация не изображает доказательство.")
+        if sourced_illustrations:
+            guide += (" Для каждой фотографии и иллюстрации составь краткий английский запрос "
+                      "для поиска в Wikimedia Commons. Планируй сюжетно точные кадры, опираясь "
+                      "на объекты, места и сцены, для которых реально найти самостоятельные "
+                      "свободно лицензированные работы. Не выдавай иллюстрацию за документальный кадр.")
         if self.channel == "cinema":
-            guide = ("Только photo: официальные кадры или пресс-материалы именно этого фильма. "
-                     "Описывай подлинную сцену, актёров и визуальный контекст; не придумывай эпизоды.")
+            guide = ("Только photo: подлинные кадры именно этого фильма из открытых источников. "
+                     "Для каждого кадра дай английский запрос по сцене и персонажам; не придумывай эпизоды. "
+                     "Постеры, фан-арт и кадры из других экранизаций не подходят.")
         prompt = (f"{guide} Строго {count+1} разных изображений на {count} разделов: "
                   "два разных изображения привяжи к разделу 1 (лучшее по смыслу и качеству "
                   "будет отдельной обложкой сразу после оглавления, второе — сразу после "
@@ -535,12 +543,12 @@ class Article:
                   + self.current["raw"])
         plan = None
         last = None
-        from .editorial_alt_models import enabled as alternative_test
         for attempt, provider in enumerate(("groq",) if alternative_test() else ("groq", "openrouter"), 1):
             try:
                 plan = self.model(f"image-plan-{attempt}", provider,
                                   prompt + (f"\nИсправь: {last}." if last else ""),
-                                  validate=lambda x: validate_plan(x, count, self.channel, self.config),
+                                  validate=lambda x: validate_plan(x, count, self.channel, self.config,
+                                                                   sourced_illustrations=sourced_illustrations),
                                   metadata={"text_sha256": self.current["text_sha256"]},
                                   tokens=6000 if alternative_test() else (2800 if provider == "groq" else 5500))
                 break
@@ -551,23 +559,27 @@ class Article:
         for index, scene in enumerate(plan["images"], 1):
             path = self.folder / "images" / f"{self.current['text_sha256'][:12]}-{index:02d}.jpg"
             existing = read_json(path.with_suffix(".json"))
-            if existing and path.is_file() and digest(path.read_bytes()) == existing["sha256"]:
+            if (existing and path.is_file() and digest(path.read_bytes()) == existing["sha256"]
+                    and (not sourced_illustrations or existing["rights_status"] != "rights_review_pending")
+                    and existing["section"] == scene["section"] and existing["scene"] == scene["subject"]):
                 self.pictures.append(existing)
                 continue
             try:
                 if self.film:
-                    executor = "licensed-official-film-stills"
+                    executor = "public-film-stills"
                     fn = lambda _, s=scene, p=path: cinema.stills(
                         s, plan["subject"], p, self.image_index, self.film["film"], self.cinema_registry)
-                elif scene["kind"] == "photo":
-                    executor = "commons-nasa"
-                    fn = lambda _, s=scene, p=path: photo(s, plan["subject"], p, self.image_index)
+                elif sourced_illustrations or scene["kind"] == "photo":
+                    executor = "commons-verified-license" if sourced_illustrations else "commons-nasa"
+                    options = {"verified_only": True} if sourced_illustrations else {}
+                    fn = lambda _, s=scene, p=path: photo(s, plan["subject"], p, self.image_index, **options)
                 else:
                     executor = "klein"
                     fn = lambda task, s=scene, p=path: generated(s, plan["subject"], p, self.image_index,
                                                                  task, self.id, self.channel)
                 result = self.task(f"image-{index:02d}", executor,
-                                   {"scene": scene, "text_sha256": self.current["text_sha256"]},
+                                   {"scene": scene, "text_sha256": self.current["text_sha256"],
+                                    **({"source": executor} if sourced_illustrations or self.film else {})},
                                    fn, minimum_seconds=155)
                 if not path.is_file() or digest(path.read_bytes()) != result["sha256"]:
                     raise Blocked("stored_image_unavailable_or_sha_mismatch")
@@ -647,9 +659,11 @@ class Article:
             summary["layout_issues"] = visual_issues
             pending_rights = any(row["rights_status"] == "rights_review_pending" for row in self.pictures)
             status = ("partial_review_pending" if self.blockers else
-                      "rights_review_pending" if pending_rights else "review_pending")
+                      "rights_review_pending" if pending_rights and not self.film else "review_pending")
             summary.update(status=status, rights_status="rights_review_pending" if pending_rights else
                            "metadata_verified" if self.pictures else "unavailable")
+            if self.film and pending_rights:
+                summary["image_use"] = "private_editorial_review_only"
             folder = self.memory.folder / "review" / self.id
             try:
                 self.task("review-package", "docx-html-export",
@@ -742,7 +756,7 @@ def review(memory):
                              for article, entry in memory.data["articles"].items()}
     write_json(review_dir / "Статус комплекта.json", report)
     packet = memory.folder / "Комплект согласования.zip"
-    sha = zip_packet(review_dir, packet)
+    sha = zip_packet(review_dir, packet, articles=report["articles"])
     write(packet.with_suffix(".sha256"), (sha + "\n").encode("utf-8"))
     memory.save()
     if not memory.private_git:

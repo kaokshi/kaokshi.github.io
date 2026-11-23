@@ -179,9 +179,23 @@ class ProductionTests(unittest.TestCase):
         class Index:
             class memory:
                 time_left = staticmethod(lambda: 1000)
-        with self.assertRaisesRegex(Blocked, "rights_review_pending"):
-            editorial_cinema.stills({"subject": "Truman in Seahaven"}, "Truman Show", None,
-                                    Index(), details["film"], {})
+        scene = {"subject": "Truman in Seahaven"}
+        with patch.object(editorial_cinema, "commons_stills", return_value=[]):
+            with self.assertRaisesRegex(Blocked, "film_scene_still_not_found"):
+                editorial_cinema.stills(scene, "Truman Show", None, Index(), details["film"], {})
+
+        # A traceable still may be included in private review with unresolved rights.
+        index = Index()
+        index.save = lambda raw, metadata, *args: metadata
+        film = details["film"]
+        url = "https://film-archive.example/still.jpg"
+        registry = {film["qid"]: {"stills": [{"year": film["year"], "original_title": film["original_title"],
+                                               "asset_url": url, "source_page": "https://film-archive.example/movie"}]}}
+        with patch.object(editorial_cinema, "commons_stills", return_value=[]):
+            still = editorial_cinema.stills(scene, "Truman Show", None, index, film, registry,
+                                            downloader=lambda *args, **kwargs: b"synthetic film still")
+        self.assertEqual(still["source"], "film-archive.example")
+        self.assertEqual(still["rights_status"], "rights_review_pending")
         self.assertEqual(brain.settings()["articles_per_channel"]["cinema"], 0)
 
     def test_unsupported_claim_cannot_be_covered_by_an_unrelated_fragment(self):
