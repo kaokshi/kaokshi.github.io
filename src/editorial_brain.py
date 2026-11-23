@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import fcntl
 
 from . import editorial_cinema as cinema
+from .editorial_alt_models import without_openrouter
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_layout import layout_issues
@@ -102,11 +103,14 @@ class Article:
                 # Old stage labels route through the requested experiment;
                 # no request reaches Groq and no Groq quota is consumed.
                 if stage.startswith(("editorial-audit", "repair-", "full-edit")):
-                    return self.model(stage, "openrouter", prompt, validate=validate,
+                    editor = "ovh-gptoss" if without_openrouter() else "openrouter"
+                    return self.model(stage, editor, prompt, validate=validate,
                                       tokens=tokens, metadata=metadata, repair=repair)
                 # Kilo writes drafts. Independent OVH models each perform
                 # source/topic and visual planning on a separate channel.
-                if stage.startswith("topics-") or stage.startswith("topics-json-retry-"):
+                if without_openrouter():
+                    primary = "kilo"
+                elif stage.startswith("topics-") or stage.startswith("topics-json-retry-"):
                     primary = "ovh-gptoss" if self.channel == "science" else (
                         "ovh" if self.channel == "cinema" else "kilo")
                 elif stage.startswith("image-plan"):
@@ -128,6 +132,8 @@ class Article:
                          and stage.startswith(("full-edit", "repair-")))
         if tokens is None:
             tokens = 3700 if provider == "groq" else 7800
+        if without_openrouter() and provider in {"ovh", "ovh-gptoss"}:
+            tokens = min(tokens, 7800)
 
         def send(task, ceiling):
             callback = lambda: text_call(provider, prompt, ceiling)
@@ -183,6 +189,11 @@ class Article:
                 attempted = (*tried, provider)
                 order = ("kilo", "ovh-gptoss", "ovh") if self.channel == "science" else (
                     "kilo", "ovh", "ovh-gptoss")
+                if without_openrouter():
+                    if stage.startswith(("editorial-audit", "full-edit")):
+                        order = ("ovh-gptoss", "ovh")
+                    elif stage == "draft":
+                        order = ("kilo",)
                 other = next((candidate for candidate in order if candidate not in attempted), None)
                 if other and not reason.startswith(("production_deadline", "previous_provider_request",
                                                     "invalid_alt_", "kilo_model_not_verified_free")):
@@ -368,7 +379,9 @@ class Article:
                 prompt += "\nПРЕДЫДУЩАЯ ВЕРСИЯ ДЛЯ СРАВНЕНИЯ:\n" + canonical(reference["article"])
             last_error = None
             from .editorial_alt_models import enabled as alternative_test
-            for provider in (("openrouter",) if alternative_test() else ("groq", "openrouter")):
+            providers = ("ovh-gptoss",) if without_openrouter() else (
+                ("openrouter",) if alternative_test() else ("groq", "openrouter"))
+            for provider in providers:
                 try:
                     return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
                                       metadata={"text_sha256": sha}, tokens=2900 if provider == "groq" else 8300,
@@ -381,7 +394,8 @@ class Article:
             raise last_error
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
-                            "length_exception_reason": candidate["article"].get("length_exception_reason")},
+                            "length_exception_reason": candidate["article"].get("length_exception_reason"),
+                            **({"reviewer": "ovhcloud"} if without_openrouter() else {})},
                            lambda _: qa(raw, self.channel, self.prior[1], self.records,
                                         audit, self.memory.time_left), minimum_seconds=20 * 60,
                            reusable=lambda row: all(row[key]["status"] == "completed"
@@ -410,6 +424,8 @@ class Article:
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
         from .editorial_alt_models import enabled as alternative_test
         author, editor = ("kilo", "openrouter") if alternative_test() else ("groq", "openrouter")
+        if without_openrouter():
+            editor = "ovh-gptoss"
         try:
             raw = self.model("draft", author, brief, metadata={"topic": self.title})
         except Blocked as exc:
@@ -493,7 +509,9 @@ class Article:
                       f"\nТЕКУЩАЯ ВЕРСИЯ:\n{self.current['raw']}")
             errors = []
             response = None
-            for provider in (("openrouter", "kilo") if alternative_test() else ("groq", "openrouter")):
+            providers = ("kilo",) if without_openrouter() else (
+                ("openrouter", "kilo") if alternative_test() else ("groq", "openrouter"))
+            for provider in providers:
                 try:
                     response = self.model(f"repair-{attempt}", provider, prompt)
                     break
@@ -862,6 +880,8 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
             cfg = {**cfg, "per_article_calls": {
                 **cfg["per_article_calls"], "openrouter": 12},
                 "daily_calls": {**cfg["daily_calls"], "openrouter": 36}}
+    if without_openrouter() and os.environ.get("EDITORIAL_ALT_MODELS_TEST") != "true":
+        raise Blocked("openrouter_disable_requires_alternate_validation")
     if os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true":
         from .editorial_alt_models import require_isolated
         require_isolated()
@@ -870,6 +890,10 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
         cfg = {**cfg,
                "per_article_calls": {**cfg["per_article_calls"], "kilo": 11, "ovh": 6, "ovh-gptoss": 6},
                "daily_calls": {**cfg["daily_calls"], "kilo": 30, "ovh": 12, "ovh-gptoss": 12}}
+        if without_openrouter():
+            # Historical failed requests remain in the encrypted ledger.
+            cfg["per_article_calls"].update(ovh=9, openrouter=0, **{"ovh-gptoss": 9})
+            cfg["daily_calls"].update(ovh=20, openrouter=0, **{"ovh-gptoss": 20})
     return cfg
 
 

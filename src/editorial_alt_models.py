@@ -27,6 +27,10 @@ def enabled():
     return os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true"
 
 
+def without_openrouter():
+    return os.environ.get("EDITORIAL_TEST_WITHOUT_OPENROUTER") == "true"
+
+
 def require_isolated():
     if (not enabled() or os.environ.get("EDITORIAL_ISOLATED_VALIDATION") != "true"
             or os.environ.get("GITHUB_ACTIONS") != "true"):

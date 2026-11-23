@@ -25,6 +25,13 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ProviderError, "groq_forbidden"):
                 text_call("groq", "SYNTHETIC TEST FIXTURE")
 
+    def test_openrouter_disabled_before_any_network_call(self):
+        with patch.dict(os.environ, self.config(EDITORIAL_TEST_WITHOUT_OPENROUTER="true")), \
+                patch("src.editorial_providers.request") as request:
+            with self.assertRaisesRegex(ProviderError, "openrouter_disabled_for_isolated_test"):
+                text_call("openrouter", "fixture")
+            request.assert_not_called()
+
     def test_standalone_not_permitted(self):
         with patch.dict(os.environ, self.config(GITHUB_ACTIONS="false"), clear=False):
             with self.assertRaisesRegex(Blocked, "isolated_validation"):
@@ -134,6 +141,16 @@ class EditorialAlternativeRoutingTests(unittest.TestCase):
             self.assertEqual(article.model("draft", "groq", "synthetic test"),
                              "SYNTHETIC-FIXTURE-ONLY")
         self.assertEqual(observed, ["kilo", "ovh"])
+
+    def test_no_openrouter_audit_falls_back_only_to_the_other_ovh_model(self):
+        cfg = {"EDITORIAL_ALT_MODELS_TEST": "true", "EDITORIAL_ISOLATED_VALIDATION": "true",
+               "GITHUB_ACTIONS": "true", "EDITORIAL_TEST_WITHOUT_OPENROUTER": "true",
+               "GROQ_API_KEY": "", "EDITORIAL_GROQ_FALLBACK_ONLY": "false"}
+        with patch.dict(os.environ, cfg), patch("src.editorial_brain.text_call",
+                                              side_effect=ProviderError("empty_visible_content")) as send:
+            with self.assertRaisesRegex(Blocked, "empty_visible_content"):
+                self.synthetic_article("science").model("editorial-audit", "groq", "fixture")
+        self.assertEqual([call.args[0] for call in send.call_args_list], ["ovh-gptoss", "ovh"])
 
     def test_ovh_catalog_rejects_unavailable_model(self):
         from src.editorial_alt_models import _ovh_available, OVH_ID

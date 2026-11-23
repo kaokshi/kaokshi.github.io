@@ -2,6 +2,10 @@ name: Kilo OVH OpenRouter isolated editorial validation
 on:
   workflow_dispatch:
     inputs:
+      without_openrouter:
+        description: Use only Kilo and anonymous OVHcloud for text tasks
+        type: boolean
+        default: false
       quota_only:
         description: Read the OpenRouter free quota without generating articles
         type: boolean
@@ -58,11 +62,12 @@ jobs:
       EDITORIAL_ISOLATED_VALIDATION: 'true'
       EDITORIAL_TEST_FREE_ONLY: 'true'
       EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_TEST_WITHOUT_OPENROUTER: ${{ inputs.without_openrouter || contains(github.event.head_commit.message, '[no-openrouter]') }}
       EDITORIAL_CF_FREE_ONLY: 'true'
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
       EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
       KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_API_KEY: ${{ !(inputs.without_openrouter || contains(github.event.head_commit.message, '[no-openrouter]')) && secrets.OPENROUTER_API_KEY || '' }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       OMP_NUM_THREADS: '2'
@@ -91,34 +96,39 @@ jobs:
           assert not os.environ.get("GROQ_API_KEY")
           assert chat["owner_approved"] is True and chat["repository"] == "kaokshi/zen-editorial-review"
           assert "Content authorship boundary" in Path("AGENTS.md").read_text(encoding="utf-8")
-          if not all(os.environ.get(key) for key in (
-                  "KILO_API_KEY", "OPENROUTER_API_KEY", "CLOUDFLARE_ACCOUNT_ID",
-                  "CLOUDFLARE_API_TOKEN", "EDITORIAL_PRIVATE_TOKEN", "EDITORIAL_STATE_KEY_HEX")):
-              raise SystemExit("test_blocked_required_private_secrets_missing:" + ",".join(key for key in ("KILO_API_KEY","OPENROUTER_API_KEY","CLOUDFLARE_ACCOUNT_ID","CLOUDFLARE_API_TOKEN","EDITORIAL_PRIVATE_TOKEN","EDITORIAL_STATE_KEY_HEX") if not os.environ.get(key)))
+          required = ["KILO_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN",
+                      "EDITORIAL_PRIVATE_TOKEN", "EDITORIAL_STATE_KEY_HEX"]
+          if os.environ["EDITORIAL_TEST_WITHOUT_OPENROUTER"] == "true":
+              assert not os.environ.get("OPENROUTER_API_KEY")
+          else:
+              required.append("OPENROUTER_API_KEY")
+          missing = [key for key in required if not os.environ.get(key)]
+          if missing:
+              raise SystemExit("test_blocked_required_private_secrets_missing:" + ",".join(missing))
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
               env.write("EDITORIAL_REVIEW_PUBLIC_KEY=" + cfg["schedule"]["owner_public_key"] + "\n")
               env.write("EDITORIAL_STATE_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-3-channels\n")
               env.write("EDITORIAL_SEALED_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-3-sealed\n")
-          print("Isolated Kilo + 2 OVH models + OpenRouter agent test allowed; publication remains OFF.")
+          print("Isolated editorial test enabled; publication remains OFF.")
           PY
       - name: Install encryption dependency
         run: python -m pip install 'cryptography>=44,<48'
-      - name: Confirm BOTH OVH models, Kilo free model and OpenRouter free editor
+      - name: Confirm configured free model routes
         run: |
           python - <<'PY'
           import json
-          from src.editorial_alt_models import preflight
+          from src.editorial_alt_models import preflight, without_openrouter
           from src.editorial_free_fallback import verify_fallback, free_remaining
           status=preflight()
           assert status["status"]=="preflight_passed"
-          assert verify_fallback()=="free_route_confirmed", "openrouter_free_editor_unavailable"
-          # Do not reserve 36 calls. Live 50/day ceiling still applies.
-          try:
-              remaining=free_remaining()
-          except Exception:
-              remaining="unavailable"
-          print(json.dumps({"providers":status,"openrouter_free_remaining":remaining},
-                           sort_keys=True),flush=True)
+          report = {"providers": status, "openrouter_enabled": not without_openrouter()}
+          if not without_openrouter():
+              assert verify_fallback() == "free_route_confirmed", "openrouter_free_editor_unavailable"
+              try:
+                  report["openrouter_free_remaining"] = free_remaining()
+              except Exception:
+                  report["openrouter_free_remaining"] = "unavailable"
+          print(json.dumps(report, sort_keys=True), flush=True)
           PY
       - name: Probe free text routes needed for this run
         env:
@@ -127,10 +137,13 @@ jobs:
           python - <<'PY'
           import json, os
           from time import monotonic, sleep
+          from src.editorial_alt_models import without_openrouter
           from src.editorial_brain import json_reply
           from src.editorial_providers import Blocked, text_call
           providers = ("kilo",) if os.environ["KILO_PROBE_ONLY"] == "true" else (
               "kilo", "ovh", "ovh-gptoss", "openrouter")
+          if without_openrouter():
+              providers = tuple(provider for provider in providers if provider != "openrouter")
           for provider in providers:
               started = monotonic()
               status = {"provider": provider}

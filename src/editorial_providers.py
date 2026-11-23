@@ -184,6 +184,8 @@ def visible_text(choice, telemetry):
 
 
 def text_call(provider, prompt, max_tokens=7500):
+    if provider == "openrouter" and os.environ.get("EDITORIAL_TEST_WITHOUT_OPENROUTER") == "true":
+        raise ProviderError("openrouter_disabled_for_isolated_test", stop=True)
     if os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true" and provider == "groq":
         raise ProviderError("groq_forbidden_in_alternative_test", stop=True)
     if provider in {"kilo", "ovh", "ovh-gptoss"}:
