@@ -25,6 +25,31 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ProviderError, "groq_forbidden"):
                 text_call("groq", "SYNTHETIC TEST FIXTURE")
 
+    def test_gemini_uses_separate_quota_and_can_return_structured_audit(self):
+        import json
+        from src.editorial_brain import cycle_settings
+        from src.editorial_providers import gemini_text
+
+        cfg = self.config(EDITORIAL_OVH_ONE_ARTICLE="true", EDITORIAL_TEST_WITHOUT_OPENROUTER="true",
+                          EDITORIAL_GROQ_FREE_ONLY="true", EDITORIAL_GROQ_OVH_KLEIN_PILOT="true",
+                          EDITORIAL_GEMINI_EDITOR="true", EDITORIAL_GEMINI_DAILY_CALLS="20",
+                          GEMINI_API_KEY="fixture-key")
+        response = {"candidates": [{"finishReason": "STOP", "content": {"parts": [
+            {"thought": True, "text": "internal"}, {"text": '{"issues":[],"claims":[]}'}]}}],
+            "usageMetadata": {"totalTokenCount": 48}}
+        with patch.dict(os.environ, cfg), patch("src.editorial_providers.request",
+                                               return_value=json.dumps(response).encode()) as request:
+            settings = cycle_settings("retry", 120, True)
+            self.assertEqual([settings["daily_calls"][p] for p in ("gemini", "groq", "ovh")], [20, 0, 0])
+            self.assertEqual(settings["per_article_calls"]["gemini"], 3)
+            result = gemini_text("fixture", 1024, response_json=True)
+        self.assertEqual(json.loads(result["text"]), {"issues": [], "claims": []})
+        self.assertEqual(result["usage"]["total_tokens"], 48)
+        self.assertNotIn("fixture-key", request.call_args.args[0])
+        self.assertEqual(request.call_args.kwargs["headers"]["x-goog-api-key"], "fixture-key")
+        self.assertEqual(json.loads(request.call_args.kwargs["data"])["generationConfig"]["responseMimeType"],
+                         "application/json")
+
     def test_standalone_ovh_trial_has_one_article_and_three_model_requests(self):
         from src.editorial_brain import cycle_settings
 
