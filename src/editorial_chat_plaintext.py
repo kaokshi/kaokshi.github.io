@@ -188,11 +188,18 @@ def publish(root, day, *, token, execute=run, now=None, ready_only=False):
         published = []
         for channel, source, files in batch:
             output = private_root / day / channel
-            if output.exists():
-                shutil.rmtree(output)
+            # Preserve the owner-approved, independently generated
+            # illustrations folder when a text-only review is delivered later.
+            # Never count retained images as vetted for a new text SHA.
+            if output.is_symlink():
+                raise Blocked("unsafe_private_review_path")
+            if output.exists() and not output.is_dir():
+                raise Blocked("private_review_output_not_directory")
             for file in files:
                 relative = file.relative_to(source)
                 dst = output / relative
+                if dst.is_symlink() or dst.parent.is_symlink():
+                    raise Blocked("unsafe_private_review_file")
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(file, dst)
             published.append(channel)
