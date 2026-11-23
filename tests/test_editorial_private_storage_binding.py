@@ -1,5 +1,7 @@
 """The configured private store must never silently authorize production."""
 from copy import deepcopy
+from unittest.mock import patch
+from src.editorial_delivery import owner_key
 import unittest
 
 from src.editorial_brain import settings
@@ -19,6 +21,13 @@ class PrivateStorageBindingTests(unittest.TestCase):
         result = plan(config, command="daily", branch="refs/heads/main")
         self.assertEqual(result["command"], "skip")
         self.assertEqual(result["schedule"], "activation_pending")
+
+    def test_public_x25519_key_is_parseable_and_matches_owner_validation(self):
+        config = settings()
+        public_key = config["schedule"]["owner_public_key"]
+        self.assertRegex(public_key, r"^[0-9a-f]{64}$")
+        with patch.dict("os.environ", {"EDITORIAL_REVIEW_PUBLIC_KEY": public_key}):
+            self.assertEqual(owner_key(), public_key)
 
     def test_no_owner_approval_means_no_automatic_launch(self):
         config = deepcopy(settings())
