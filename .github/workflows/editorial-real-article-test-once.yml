@@ -1,0 +1,44 @@
+name: One-time real article encrypted storage test
+on:
+  push:
+    branches:
+      - assistant/groq-quota-fallback-20261123
+    paths:
+      - .github/workflows/editorial-real-article-test-once.yml
+permissions:
+  contents: read
+jobs:
+  real-article-private-roundtrip:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.ref == 'refs/heads/assistant/groq-quota-fallback-20261123'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install private review packaging requirements
+        run: python -m pip install 'cryptography>=44,<48' 'python-docx==1.2.0'
+      - name: Verify public site and editorial production remain disabled
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          editorial = json.loads(Path("config/editorial_production.json").read_text(encoding="utf-8"))
+          site = json.loads(Path("config/site.json").read_text(encoding="utf-8"))
+          schedule = editorial["schedule"]
+          assert schedule["enabled"] is False and schedule["owner_approved"] is False
+          assert editorial["articles_per_channel"]["cinema"] == 0
+          assert site["publication_enabled"] is False
+          assert schedule["private_repository"] == "kaokshi/zen-editorial-review"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write("EDITORIAL_REVIEW_PUBLIC_KEY=" + schedule["owner_public_key"] + "\n")
+          PY
+      - name: Encrypt and verify one existing real article with all eight images in private repo
+        env:
+          EDITORIAL_PRIVATE_REPOSITORY: kaokshi/zen-editorial-review
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+        run: python -m src.editorial_real_article_storage_test
