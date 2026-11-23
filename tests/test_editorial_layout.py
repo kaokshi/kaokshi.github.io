@@ -137,17 +137,17 @@ class LayoutTests(unittest.TestCase):
             })
             article = article_six()
             article["sections"][-1]["paragraphs"].append(
-                "Подписывайтесь на «Легенды тёмных улиц», чтобы читать новые истории.")
+                "Подписывайтесь на «За гранью очевидного», чтобы читать новые статьи.")
             report = {"article": article, "text_sha256": digest(canonical(article)),
                       "facts": {"evidence": []}}
-            folder = root / "legends-01"
+            folder = root / "science-01"
             package(folder, "Тест фото", [], report, images, source, {})
             checks = json.loads((folder / "Статус и проверки.json").read_text(encoding="utf-8"))
             self.assertEqual(checks["subscription_link_status"], "linked")
-            self.assertEqual(checks["subscription_url"], "https://dzen.ru/darklegends")
+            self.assertEqual(checks["subscription_url"], "https://dzen.ru/sciencebox")
             html = (folder / "Статья.html").read_text(encoding="utf-8")
             self.assertIn("https://creativecommons.org/licenses/by/4.0/", html)
-            self.assertIn('href="https://dzen.ru/darklegends"', html)
+            self.assertIn('href="https://dzen.ru/sciencebox"', html)
 
     def test_intro_is_valid_before_first_heading(self):
         raw = ("Вступительный абзац.\n\n" +
