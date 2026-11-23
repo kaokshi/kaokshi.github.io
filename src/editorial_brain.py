@@ -747,6 +747,14 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
                 or os.environ.get("EDITORIAL_ISOLATED_VALIDATION") != "true"):
             raise Blocked("cinema_validation_requires_isolated_encrypted_cycle")
         cfg = {**cfg, "articles_per_channel": {**cfg["articles_per_channel"], "cinema": 1}}
+        if os.environ.get("EDITORIAL_TEST_FREE_ONLY") == "true":
+            # The configured 10 OpenRouter calls cover the two production
+            # channels only. A three-channel isolated QA requires a separate
+            # bounded test envelope, still enforced by verified $0 model pricing
+            # and the provider's actual account quota.
+            cfg = {**cfg, "per_article_calls": {
+                **cfg["per_article_calls"], "openrouter": 12},
+                "daily_calls": {**cfg["daily_calls"], "openrouter": 36}}
     return cfg
 
 
