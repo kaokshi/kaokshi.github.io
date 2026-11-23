@@ -218,6 +218,11 @@ jobs:
             echo "::notice::Groq unavailable; independently verifying the existing free OpenRouter model."
             python -m src.editorial_free_fallback --github-env "$GITHUB_ENV"
           fi
+      - name: Require actual free OpenRouter headroom for three independent test articles
+        if: >-
+          inputs.isolated_validation && inputs.validate_cinema &&
+          (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry')
+        run: python -m src.editorial_free_fallback --github-env "$GITHUB_ENV" --quota-only --minimum-free-remaining 36
       - name: Restore sanitized Groq accounting
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
         run: |
