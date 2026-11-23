@@ -270,7 +270,7 @@ class Memory:
                    result_ref=f"state.json#tasks/{task_id}", elapsed_seconds=round(monotonic() - started, 2))
         return result
 
-    def call(self, task_id, article, provider, callback, *, metrics=None):
+    def call(self, task_id, article, provider, callback, *, metrics=None, editorial_edit=False):
         with self.lock:
             # A runner can stop after the external provider accepted a request but
             # before a response is saved. Never send an untraceable duplicate on retry.
@@ -287,6 +287,12 @@ class Memory:
             if (count[provider] >= self.config["daily_calls"][provider]
                     or for_article[provider] >= self.config["per_article_calls"][provider]):
                 raise ProviderError("call_budget_exhausted", stop=True)
+            if editorial_edit:
+                edits = sum(row["article"] == article and row["provider"] == "openrouter"
+                            and self.data["tasks"].get(row["task"], {}).get("operation", "").startswith(
+                                ("full-edit", "repair-")) for row in self.data["calls"])
+                if edits >= 2:
+                    raise ProviderError("openrouter_two_edit_requests_per_article_exhausted")
             reservation = {"task": task_id, "article": article, "provider": provider,
                            "at": now(), "status": "reserved", **(metrics or {})}
             self.data["calls"].append(reservation)

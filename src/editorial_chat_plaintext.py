@@ -83,7 +83,7 @@ def connect(token, root, *, execute=run):
     return git, env
 
 
-def inputs(root, day):
+def inputs(root, day, *, ready_only=False):
     """Enumerate only the existing agent-built review files."""
     base = Path(root) / checked_day(day) / "review"
     result = []
@@ -100,6 +100,8 @@ def inputs(root, day):
             continue
         try:
             report = json.loads(checks.read_text(encoding="utf-8"))
+            if ready_only and report.get("status") != "review_pending":
+                continue
             rows = report.get("images", [])
             if not isinstance(rows, list):
                 raise ValueError()
@@ -170,11 +172,11 @@ def prune_directory(base, today, days):
     return removed
 
 
-def publish(root, day, *, token, execute=run, now=None):
+def publish(root, day, *, token, execute=run, now=None, ready_only=False):
     cfg = approval()
     checked_day(day)
     today = now or date.today()
-    batch = inputs(root, day)
+    batch = inputs(root, day, ready_only=ready_only)
     if not batch:
         return {"status": "no_agent_review_files", "channels": [],
                 "content_generated_by_assistant": False}
@@ -233,12 +235,13 @@ def main():
     parser.add_argument("action", choices=("publish", "cleanup"))
     parser.add_argument("--root", type=Path)
     parser.add_argument("--date")
+    parser.add_argument("--ready-only", action="store_true")
     args = parser.parse_args()
     token = os.environ.get("EDITORIAL_PRIVATE_TOKEN", "")
     if args.action == "publish":
         if not args.root or not args.date:
             raise Blocked("private_review_root_and_date_required")
-        result = publish(args.root, args.date, token=token)
+        result = publish(args.root, args.date, token=token, ready_only=args.ready_only)
     else:
         result = cleanup(token=token)
     print(json.dumps(result, ensure_ascii=False))

@@ -58,7 +58,7 @@ def public_report(data, day):
     calls = {}
     for row in data.get("calls", []):
         provider = row.get("provider")
-        if provider in {"groq", "openrouter", "klein"}:
+        if provider in {"groq", "openrouter", "klein", "kilo", "ovh", "ovh-gptoss"}:
             calls[provider] = calls.get(provider, 0) + 1
     return {"schema": "zen-editorial-chat-status-v1", "day": day,
             "articles": entries, "provider_calls": calls,

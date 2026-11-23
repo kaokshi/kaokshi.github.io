@@ -55,6 +55,36 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
                 preflight()
 
 
+    def test_visible_content_parts_exclude_reasoning(self):
+        from src.editorial_providers import visible_text
+
+        choice = {"finish_reason": "stop", "message": {"content": [
+            {"type": "reasoning", "text": "synthetic hidden text"},
+            {"type": "text", "text": "SYNTHETIC FIXTURE"},
+        ]}}
+        self.assertEqual(visible_text(choice, {}), "SYNTHETIC FIXTURE")
+        choice["finish_reason"] = "length"
+        with self.assertRaisesRegex(ProviderError, "truncated_response"):
+            visible_text(choice, {})
+
+    def test_retry_after_is_bounded_for_isolated_text_requests(self):
+        from urllib.error import HTTPError
+        from src.editorial_providers import request
+
+        url = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions"
+        with patch("src.editorial_providers.build_opener") as opener:
+            for status, header, delay, stop in ((429, "42", 42, False),
+                                                (429, "120", None, True),
+                                                (503, None, 4, False)):
+                with self.subTest(status=status, header=header):
+                    opener.return_value.open.side_effect = HTTPError(
+                        url, status, "", {"Retry-After": header}, None)
+                    with self.assertRaises(ProviderError) as caught:
+                        request(url, ("oai.endpoints.kepler.ai.cloud.ovh.net",), retry_transient=True)
+                    self.assertEqual(caught.exception.retry_after, delay)
+                    self.assertEqual(caught.exception.stop, stop)
+
+
 
 class EditorialAlternativeRoutingTests(unittest.TestCase):
     def synthetic_article(self, channel):
@@ -93,32 +123,33 @@ class EditorialAlternativeRoutingTests(unittest.TestCase):
         self.assertTrue(_ovh_available([{"id":OVH_ID, "available":True}]))
 
     def test_openrouter_third_text_edit_is_blocked_but_audit_allowed(self):
-        from threading import RLock
-        from types import SimpleNamespace
+        from datetime import datetime, timedelta, timezone
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
         from src.editorial_brain import Article
+        from src.editorial_memory import Memory
         cfg = {"EDITORIAL_ALT_MODELS_TEST":"true",
                "EDITORIAL_ISOLATED_VALIDATION":"true", "GITHUB_ACTIONS":"true",
                "GROQ_API_KEY":"", "EDITORIAL_GROQ_FALLBACK_ONLY":"false"}
-        article = self.synthetic_article("legends")
-        article.memory.lock = RLock()
-        article.memory.data = {
-            "tasks": {
-                "full-id":{"operation":"full-edit"},
-                "repair-id":{"operation":"repair-1"}},
-            "calls": [
-                {"article":"legends-01","provider":"openrouter",
-                 "task":"full-id","status":"responded"},
-                {"article":"legends-01","provider":"openrouter",
-                 "task":"repair-id","status":"failed"}]}
-        with patch.dict(os.environ, cfg):
-            with self.assertRaisesRegex(Blocked, "openrouter_two_edit_requests_per_article_exhausted"):
-                article.model("repair-2", "openrouter", "SYNTHETIC-FIXTURE")
-            with self.assertRaisesRegex(Blocked, "openrouter_two_edit_requests_per_article_exhausted"):
-                article.model("full-edit-retry", "openrouter", "SYNTHETIC-FIXTURE")
-            with patch("src.editorial_brain.text_call", return_value={
-                "text":"SYNTHETIC-FIXTURE","model":"test","usage":{},"telemetry":{}}):
-                result=article.model("editorial-audit", "openrouter", "SYNTHETIC-FIXTURE")
-                self.assertEqual(result,"SYNTHETIC-FIXTURE")
+        with TemporaryDirectory() as directory, patch.dict(os.environ, cfg):
+            article = Article.__new__(Article)
+            article.id = "legends-01"
+            article.memory = Memory(Path(directory), "2026-11-23",
+                                    datetime.now(timezone.utc) + timedelta(minutes=10),
+                                    {"daily_calls": {"openrouter": 10},
+                                     "per_article_calls": {"openrouter": 6}})
+            answer = {"text": "SYNTHETIC-FIXTURE", "model": "test", "usage": {}, "telemetry": {}}
+            with patch("src.editorial_brain.text_call",
+                       side_effect=[answer, ProviderError("empty_visible_content"), answer]) as call:
+                self.assertEqual(article.model("full-edit", "openrouter", "fixture"), answer["text"])
+                with self.assertRaisesRegex(Blocked, "empty_visible_content"):
+                    article.model("repair-1", "openrouter", "fixture")
+                with self.assertRaisesRegex(Blocked, "openrouter_two_edit_requests_per_article_exhausted"):
+                    article.model("repair-2", "openrouter", "fixture")
+                self.assertEqual(article.model("full-edit", "openrouter", "fixture"), answer["text"])
+                self.assertEqual(article.model("editorial-audit", "openrouter", "fixture"), answer["text"])
+                self.assertEqual(call.call_count, 3)
 
     def test_writers_and_editor_are_separated_without_groq(self):
         from src.editorial_brain import Article

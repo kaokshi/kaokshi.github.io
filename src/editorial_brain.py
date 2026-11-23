@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 from tempfile import TemporaryDirectory
+from time import sleep
 from zoneinfo import ZoneInfo
 import fcntl
 
@@ -93,7 +94,7 @@ class Article:
     def task(self, stage, executor, inputs, fn, **kwargs):
         return self.memory.task(self.id, stage, executor, inputs, fn, **kwargs)
 
-    def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
+    def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False, tried=()):
         from .editorial_alt_models import enabled as alternate_enabled, require_isolated
         if alternate_enabled():
             require_isolated()
@@ -123,19 +124,8 @@ class Article:
                               metadata={**(metadata or {}), "fallback_from": "groq",
                                         "fallback_reason": "groq_preflight_capacity_unavailable"},
                               repair=repair)
-        if (alternate_enabled() and provider == "openrouter"
-                and (stage.startswith("full-edit") or stage.startswith("repair-"))):
-            # Count submitted requests, including failed/reserved ones. A failed
-            # response still consumes free quota and therefore an editing slot.
-            with self.memory.lock:
-                operations = self.memory.data["tasks"]
-                used = sum(
-                    1 for row in self.memory.data["calls"]
-                    if row.get("article") == self.id and row.get("provider") == "openrouter"
-                    and (lambda op: op.startswith(("full-edit", "repair-")))(
-                        operations.get(row.get("task"), {}).get("operation", "")))
-            if used >= 2:
-                raise Blocked("openrouter_two_edit_requests_per_article_exhausted")
+        isolated_edit = (alternate_enabled() and provider == "openrouter"
+                         and stage.startswith(("full-edit", "repair-")))
         if tokens is None:
             tokens = 3700 if provider == "groq" else 7800
 
@@ -144,6 +134,8 @@ class Article:
             if provider == "groq":
                 return self.memory.call_groq(task, self.id, stage, prompt, ceiling, callback,
                                              repair=repair or stage.startswith("repair-"))
+            if isolated_edit:
+                return self.memory.call(task, self.id, provider, callback, editorial_edit=True)
             return self.memory.call(task, self.id, provider, callback)
 
         def execute(task):
@@ -154,8 +146,10 @@ class Article:
                 return send(task, tokens)
             except ProviderError as exc:
                 # Never shrink a required article merely to fit a provider window.
-                if exc.retry_after is None or self.memory.time_left() < exc.retry_after + 125:
+                if isolated_edit or exc.retry_after is None or self.memory.time_left() < exc.retry_after + 125:
                     raise
+                if alternate_enabled():
+                    sleep(exc.retry_after)
                 return send(task, tokens)
 
         try:
@@ -178,18 +172,18 @@ class Article:
                 "http_429_groq_daily_quota",
                 "provider_stopped_http_429_groq_daily_quota",
             }
-            if (alternate_enabled() and provider in {"kilo", "ovh", "ovh-gptoss"}
-                    and not stage.endswith("-writer-fallback")):
-                # Try the other MAIN writer once, never the editor as writer.
-                # Paid models and Groq are not eligible for this experiment.
-                other = ("ovh-gptoss" if self.channel == "science" else "ovh") if provider == "kilo" else "kilo"
-                if reason.startswith(("http_401_", "http_402_", "http_403_",
-                                      "invalid_alt_", "kilo_model_not_verified_free")):
-                    raise
-                return self.model(stage + "-writer-fallback", other, prompt,
-                                  validate=validate, tokens=tokens,
-                                  metadata={**(metadata or {}), "fallback_from": provider,
-                                            "fallback_reason": reason}, repair=repair)
+            if alternate_enabled() and provider in {"kilo", "ovh", "ovh-gptoss"}:
+                attempted = (*tried, provider)
+                order = ("kilo", "ovh-gptoss", "ovh") if self.channel == "science" else (
+                    "kilo", "ovh", "ovh-gptoss")
+                other = next((candidate for candidate in order if candidate not in attempted), None)
+                if other and not reason.startswith(("production_deadline", "previous_provider_request",
+                                                    "invalid_alt_", "kilo_model_not_verified_free")):
+                    fallback_stage = stage.split("-writer-fallback", 1)[0] + "-writer-fallback"
+                    return self.model(fallback_stage, other, prompt, validate=validate, tokens=tokens,
+                                      metadata={**(metadata or {}), "fallback_from": provider,
+                                                "fallback_reason": reason},
+                                      repair=repair, tried=attempted)
             if (provider != "groq" or stage.startswith("editorial-audit")
                     or reason not in quota_blockers):
                 raise
@@ -249,8 +243,10 @@ class Article:
                        "независимый каталог проверит фильм сам. "
                        f"Публичные сигналы интереса: {json.dumps(signals, ensure_ascii=False)}. "
                        f"Недавние релизы: {json.dumps(releases, ensure_ascii=False)}.")
+        from .editorial_alt_models import enabled as alternative_test
+        topic_tokens = 6000 if alternative_test() else 3200
         for shift in range(2):
-            if shift and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") != "true":
+            if shift and not alternative_test() and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") != "true":
                 with self.memory.lock:
                     projection = groq_plan(self.memory)
                 if (projection["groq_usage"]["accounted_tokens"] >= self.config["groq_budget"]["target_daily_tokens"][1]
@@ -266,7 +262,7 @@ class Article:
             topic_prompt = prompt + (f" В этот раз выбери иные предметы для набора {shift}." if shift else "")
             try:
                 result = self.model(f"topics-{shift + 1}", "groq", topic_prompt,
-                                    validate=is_valid, tokens=3200)
+                                    validate=is_valid, tokens=topic_tokens)
             except Blocked as exc:
                 # Retry malformed JSON as a new, metered model task. Never
                 # insert any assistant-authored topic or other creative data.
@@ -278,7 +274,7 @@ class Article:
                                  "текста до/после JSON. Не придумывай идентификаторы "
                                  "каталога фильмов, если не уверен.")
                 result = self.model(f"topics-json-retry-{shift + 1}", "groq",
-                                    strict_prompt, validate=is_valid, tokens=3200)
+                                    strict_prompt, validate=is_valid, tokens=topic_tokens)
             for row in result["topics"][:8]:
                 if not isinstance(row, dict):
                     continue
@@ -416,6 +412,14 @@ class Article:
                 raise
             author, editor = "openrouter", "groq"
             raw = self.model("draft-fallback", author, brief, metadata={"topic": self.title})
+        if alternative_test():
+            with self.memory.lock:
+                draft = next((call for call in reversed(self.memory.data["calls"])
+                              if call["article"] == self.id and call["status"] == "responded"
+                              and self.memory.data["tasks"][call["task"]]["operation"].startswith("draft")), None)
+            if draft:
+                author = draft["provider"]
+                self.memory.article(self.id, draft_model=draft["answer"].get("model"))
         self.memory.article(self.id, draft_provider=author, independent_editor_provider=editor)
         self.current = self.remember_version(raw)
         original = self.current
@@ -430,8 +434,8 @@ class Article:
                                 metadata={"source_sha256": original["text_sha256"]})
             self.remember_version(edited)
         except Blocked as exc:
-            can_retry = str(exc) in {"empty_visible_content", "connection_failed", "truncated_response"}
-            if can_retry and not alternative_test():
+            can_retry = str(exc) in {"empty_visible_content", "connection_failed", "connection_timeout", "truncated_response"}
+            if can_retry:
                 try:
                     edited = self.model("full-edit-retry", editor, edit_prompt,
                                         metadata={"source_sha256": original["text_sha256"]})
@@ -538,7 +542,7 @@ class Article:
                                   prompt + (f"\nИсправь: {last}." if last else ""),
                                   validate=lambda x: validate_plan(x, count, self.channel, self.config),
                                   metadata={"text_sha256": self.current["text_sha256"]},
-                                  tokens=2800 if provider == "groq" else 5500)
+                                  tokens=6000 if alternative_test() else (2800 if provider == "groq" else 5500))
                 break
             except Blocked as exc:
                 last = exc
@@ -579,6 +583,9 @@ class Article:
 
     def run(self):
         existing = self.memory.data["articles"].get(self.id, {})
+        from .editorial_alt_models import enabled as alternative_test
+        if existing.get("status") == "review_pending" and alternative_test():
+            return existing["status"]
         if existing.get("status") in ("review_pending", "rights_review_pending") and not self.memory.retry:
             return existing["status"]
         self.memory.article(self.id, status="running", channel=self.channel, prompt_version=PROMPT_VERSION,
@@ -828,8 +835,8 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
     if os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true":
         from .editorial_alt_models import require_isolated
         require_isolated()
-        if not validate_cinema:
-            raise Blocked("alt_test_requires_three_channel_isolation")
+        if command not in {"daily", "retry"} or not validation_window or not encrypted_mode:
+            raise Blocked("alt_test_requires_encrypted_validation")
         cfg = {**cfg,
                "per_article_calls": {**cfg["per_article_calls"], "kilo": 11, "ovh": 6, "ovh-gptoss": 6},
                "daily_calls": {**cfg["daily_calls"], "kilo": 30, "ovh": 12, "ovh-gptoss": 12}}
@@ -878,7 +885,9 @@ def execute(command, state, private_git=None, day=None, validation_window=None, 
             return review(memory)
         if not private_git and not encrypted_mode:
             raise Blocked("storage_configuration_pending: encrypted_or_private_storage_required")
-        if day != today:
+        from .editorial_alt_models import enabled as alternative_test
+        if day != today and not (alternative_test() and command == "retry" and encrypted_mode
+                                 and memory.file.is_file() and day < today):
             raise Blocked("live_generation_only_for_current_moscow_date")
         if "started_at" not in memory.data:
             memory.data["started_at"] = now()
@@ -963,8 +972,11 @@ def main():
         print(json.dumps(public, ensure_ascii=False, sort_keys=True))
         if args.command == "review" and result["status"] != "owner_notification_created":
             return 2
-        if args.command in {"daily", "retry"} and any(s not in {"review_pending", "rights_review_pending"}
-                                                      for s in result["articles"].values()):
+        from .editorial_alt_models import enabled as alternative_test
+        ready = {"review_pending"}
+        if not (args.validate_cinema or alternative_test()):
+            ready.add("rights_review_pending")
+        if args.command in {"daily", "retry"} and any(s not in ready for s in result["articles"].values()):
             return 2
     except (Blocked, StorageError, ValueError, OSError) as exc:
         message = str(exc) if isinstance(exc, (Blocked, StorageError)) else type(exc).__name__

@@ -288,6 +288,28 @@ def restore_checkpoint(root, day, command):
     return {"status": "checkpoint_restored"}
 
 
+def restore_alt_checkpoint(root, day, run_id):
+    """Restore only an authenticated checkpoint from the isolated branch and workflow."""
+    if not run_id or not re.fullmatch(r"[1-9][0-9]{0,19}", run_id):
+        raise Blocked("invalid_validation_checkpoint_run")
+    run = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}"))
+    if (run["path"] != ".github/workflows/editorial-alt-three-articles-v4-once.yml"
+            or run["head_repository"]["full_name"] != PUBLIC_REPOSITORY
+            or run["head_branch"] != "assistant/kilo-modelscope-openrouter-isolated-20261123"
+            or run["status"] != "completed" or run["event"] not in {"workflow_dispatch", "push"}):
+        raise Blocked("validation_checkpoint_run_untrusted")
+    name = f"agent-alt-kilo-ovh-encrypted-{run_id}-{run['run_attempt']}"
+    if run_id == "45150195798":
+        name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
+    artifacts = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"))
+    if not any(row["name"] == name and not row["expired"] for row in artifacts["artifacts"]):
+        raise Blocked("validation_checkpoint_artifact_unavailable")
+    with TemporaryDirectory(prefix="zen-alt-restore-") as work:
+        download_artifact({"name": name, "workflow_run": {"id": run_id}}, work)
+        restore_blob((Path(work) / "checkpoint.enc").read_bytes(), root, day)
+    return {"status": "checkpoint_restored", "run_id": run_id}
+
+
 def publish_verified_directory(source, output):
     """Expose verified files only after a successful complete copy."""
     if output.exists() or output.is_symlink():
@@ -399,7 +421,15 @@ def main():
                               run_id=args.run_id, allow_incomplete=args.allow_incomplete,
                               private_repository=repository)
         elif args.command == "restore":
-            result = restore_checkpoint(private_path(args.root), args.date, args.cycle_command)
+            root = private_path(args.root)
+            if args.run_id and os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true":
+                from .editorial_alt_models import require_isolated
+                require_isolated()
+                result = restore_alt_checkpoint(root, args.date, args.run_id)
+            elif args.run_id:
+                raise Blocked("validation_checkpoint_requires_isolated_alternate_run")
+            else:
+                result = restore_checkpoint(root, args.date, args.cycle_command)
         else:
             result = save_outputs(private_path(args.root), args.date, private_path(args.output))
         print(json.dumps(result, ensure_ascii=False))
