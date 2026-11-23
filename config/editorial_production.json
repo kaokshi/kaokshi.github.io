@@ -11,12 +11,14 @@
   "per_article_calls": {
     "groq": 17,
     "klein": 12,
-    "gemini": 2
+    "gemini": 2,
+    "routerai": 2
   },
   "daily_calls": {
     "groq": 34,
     "klein": 20,
-    "gemini": 4
+    "gemini": 4,
+    "routerai": 4
   },
   "minimum_images": 7,
   "maximum_images": 8,
@@ -100,5 +102,16 @@
     "max_calls_per_article": 2,
     "reserve_daily_requests": 2,
     "note": "Owner must verify a dedicated unbilled Gemini project and current free RPM/TPM/RPD in AI Studio. Local counts cannot see other clients. Enable by reviewed config change only."
+  },
+  "routerai_editor": {
+    "model": "anthropic/claude-sonnet-5.5",
+    "enabled": false,
+    "daily_spend_cap_rub": 40,
+    "monthly_spend_cap_rub": 1200,
+    "max_calls_per_article": 2,
+    "max_calls_per_cycle": 4,
+    "require_balance_preflight": true,
+    "status": "integration_ready_spend_guard_pending",
+    "note": "Do not enable until RouterAI credits endpoint and durable daily/monthly spend reservation are validated. UI token prices are not a guaranteed charge ceiling."
   }
 }
