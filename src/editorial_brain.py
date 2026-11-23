@@ -629,7 +629,7 @@ class Article:
                 "символов без пробелов, 6 или 7 разделов с жирными заголовками, "
                 "без пометок для изображений и с финальным приглашением подписаться. "
                 "issues — массив конкретных оставшихся ошибок; если ошибок нет, []. "
-                "claims — для кино список проверяемых фактов именно из article. "
+                "claims — для научпопа и кино список проверяемых фактов именно из article. "
                 "Каждый элемент: claim (дословная фраза статьи), source (S1, S2...), "
                 "quote (точный отрывок источника), verdict (supported или unsupported). "
                 "Не придумывай цитаты, сцены, источники и персонажей; если текст "
@@ -1369,7 +1369,7 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
 
 
 def execute(command, state, private_git=None, day=None, validation_window=None, encrypted_mode=False,
-            *, validate_cinema=False):
+            *, validate_cinema=False, release_checkpoint=None):
     cfg = cycle_settings(command, validation_window, encrypted_mode, validate_cinema)
     tz = ZoneInfo(cfg["timezone"])
     today = datetime.now(tz).date().isoformat()
@@ -1381,10 +1381,12 @@ def execute(command, state, private_git=None, day=None, validation_window=None, 
         private_git.restore(state, day)
     with (state / ".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if release_checkpoint and release_checkpoint.restore(state, day):
+            command = "retry"
         cutoff = deadline(day, cfg["production_stop"], tz)
         if validation_window:
             cutoff = datetime.now(timezone.utc) + timedelta(minutes=validation_window)
-        memory = Memory(state, day, cutoff, cfg, private_git, retry=command == "retry",
+        memory = Memory(state, day, cutoff, cfg, release_checkpoint or private_git, retry=command == "retry",
                         lane="experiment" if validation_window else "production")
         if command == "health":
             return health(private_git)
@@ -1482,8 +1484,16 @@ def main():
                 raise Blocked("local_state_must_be_outside_repository")
             storage = PrivateGit(storage_repo, Path(temporary) / "storage", token) if storage_repo or token else None
             state = args.local_state or Path(temporary) / "editorial"
+            durable = None
+            if (os.environ.get("EDITORIAL_RELEASE_TRIO") == "true" and args.command in {"daily", "retry"}
+                    and args.encrypted_mode):
+                from .editorial_v1_checkpoints import ReleaseCheckpoint
+
+                durable = ReleaseCheckpoint(Path(temporary) / "v1-checkpoints",
+                                            os.environ.get("EDITORIAL_V1_CHECKPOINT_TOKEN"),
+                                            os.environ.get("GITHUB_RUN_ID"))
             result = execute(args.command, state, storage, args.date, args.validation_window, args.encrypted_mode,
-                             validate_cinema=args.validate_cinema)
+                             validate_cinema=args.validate_cinema, release_checkpoint=durable)
             if args.encrypted_mode and args.command in {"daily", "retry"}:
                 cfg = cycle_settings(args.command, args.validation_window, args.encrypted_mode, args.validate_cinema)
                 memory = Memory(state, result["day"], datetime.now(timezone.utc), cfg)

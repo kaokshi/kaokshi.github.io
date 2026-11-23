@@ -18,7 +18,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   private-three-channel-pilot:
-    if: github.repository == 'kaokshi/kaokshi.github.io' && github.ref_name == 'assistant/kilo-modelscope-openrouter-isolated-20261123'
+    if: >-
+      github.repository == 'kaokshi/kaokshi.github.io' &&
+      github.ref_name == 'assistant/kilo-modelscope-openrouter-isolated-20261123' &&
+      (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[run-v1-trio]'))
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     env:
@@ -108,6 +111,7 @@ jobs:
         env:
           EDITORIAL_PRIVATE_TOKEN: ''
           EDITORIAL_PRIVATE_REPOSITORY: ''
+          EDITORIAL_V1_CHECKPOINT_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
           RESUME_RUN: ${{ inputs.resume_run }}
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -115,7 +119,10 @@ jobs:
           day="$(TZ=Europe/Moscow date +%F)"
           echo "$day" > "$RUNNER_TEMP/editorial-day"
           command=daily
-          if [ -n "$RESUME_RUN" ]; then
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ -z "$RESUME_RUN" ]; then
+            RESUME_RUN="$(python -c 'from src.editorial_delivery import latest_alt_checkpoint; import os; print(latest_alt_checkpoint(os.environ["GITHUB_RUN_ID"]) or "")')"
+          fi
+          if [ -n "$RESUME_RUN" ] && [ "$RESUME_RUN" != "$GITHUB_RUN_ID" ]; then
             python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" --date "$day" --run-id "$RESUME_RUN"
             command=retry
           fi

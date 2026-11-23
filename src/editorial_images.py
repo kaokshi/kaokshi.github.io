@@ -194,11 +194,6 @@ class ImageIndex:
         card = scene.get("scene_card")
         if not card:
             raise Blocked("image_scene_card_required")
-        scene_caption = ", ".join([card["location"], *card["must_have"]])
-        model, scores, embedding = similarity(image, [scene_caption, subject,
-                                            "an unrelated image with no connection with this topic"])
-        clip = {"model": model, "scene": scores[0], "topic": scores[1], "unrelated": scores[2],
-                "passed": scores[0] >= .19 and scores[0] > scores[2] + .015}
         quality = (min(1, image.width / 1200) * .3
                    + min(1, contrast / 60) * .25
                    + max(0, 1 - abs(image.width / image.height - 1.5)) * .45)
@@ -210,12 +205,20 @@ class ImageIndex:
             image.save(buffer, format="JPEG", quality=89, optimize=True)
             rendered = buffer.getvalue()
         raw_sha, sha, phash = digest(raw), digest(rendered), str(imagehash.phash(image))
-        previous = path.parent / "image-qa" / path.stem / (sha + ".json")
+        previous = qa.candidate_report_path(path, sha, digest(qa.json_bytes(card)))
         decision = qa.current_report(previous, card, sha)
-        # Source and duplicate checks may change independently of image pixels.
-        if not decision or decision["status"] != "accepted":
+        if decision and decision["status"] in {"accepted", "rejected"} and not decision.get("duplicate") and decision.get("clip_embedding"):
+            clip, embedding = decision["clip"], decision["clip_embedding"]
+        else:
+            scene_caption = ", ".join([card["location"], *card["must_have"]])
+            model, scores, embedding = similarity(image, [scene_caption, subject,
+                                                "an unrelated image with no connection with this topic"])
+            clip = {"model": model, "scene": scores[0], "topic": scores[1], "unrelated": scores[2],
+                    "passed": scores[0] >= .19 and scores[0] > scores[2] + .015}
             decision = qa.judge(card, image, sha, clip, quality={
                 "passed": True, "size": list(image.size), "contrast": round(contrast, 3)})
+            decision["clip_embedding"] = embedding
+        model = clip["model"]
         qa.apply_channel_policy(decision, scene["channel"], metadata,
                                 film=scene.get("film"), spoilers=scene.get("spoilers", False))
         with self.memory.lock:
@@ -247,8 +250,8 @@ class ImageIndex:
                 raise qa.ImageQAError(decision)
             row = {**metadata, "file": path.name, "sha256": sha, "original_sha256": raw_sha,
                    "perceptual_hash": phash, "size": list(image.size), "match_model": model, "image_embedding": embedding,
-                   "scene_similarity": scores[0], "topic_similarity": scores[1],
-                   "cover_score": round(scores[1] * 2 + scores[0] * .3 + quality * .3, 4),
+                   "scene_similarity": clip["scene"], "topic_similarity": clip["topic"],
+                   "cover_score": round(clip["topic"] * 2 + clip["scene"] * .3 + quality * .3, 4),
                    "section": scene["section"], "scene": scene["subject"]}
             row["image_qa"] = decision
             row["is_cover"] = scene["is_cover"]

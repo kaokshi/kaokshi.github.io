@@ -361,6 +361,11 @@ def restore_alt_checkpoint(root, day, run_id):
         name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
     artifacts = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"))
     if not any(row["name"] == name and not row["expired"] for row in artifacts["artifacts"]):
+        if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+            from .editorial_v1_checkpoints import restore_private_checkpoint
+
+            if restore_private_checkpoint(root, day, run_id):
+                return {"status": "private_checkpoint_restored", "run_id": run_id}
         raise Blocked("validation_checkpoint_artifact_unavailable")
     with TemporaryDirectory(prefix="zen-alt-restore-") as work:
         download_artifact({"name": name, "workflow_run": {"id": run_id}}, work)

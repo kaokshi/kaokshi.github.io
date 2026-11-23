@@ -256,9 +256,13 @@ def current_report(path, card, sha):
     return None
 
 
+def candidate_report_path(path, sha, card_sha):
+    return path.parent / "image-qa" / path.stem / f"{sha}-{card_sha}.json"
+
+
 def report_candidate(path, row):
-    folder = path.parent / "image-qa" / path.stem
-    write_json(folder / (row["image_sha256"] + ".json"), row)
+    card_sha = row.get("scene_card_sha256") or digest(json_bytes(row["scene_card"]))
+    write_json(candidate_report_path(path, row["image_sha256"], card_sha), row)
 
 
 def allocation(memory, article):
