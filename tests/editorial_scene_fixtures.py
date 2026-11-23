@@ -1,6 +1,16 @@
 """Synthetic visual evidence used only to test storage and document boundaries."""
+from random import Random
+
+from PIL import Image
+
 from src import editorial_scene_qa as qa
 from src.editorial_visual_matching import CLIP
+
+
+def distinct_picture(seed):
+    rng = Random(seed)
+    image = Image.frombytes("RGB", (16, 16), rng.randbytes(16 * 16 * 3))
+    return image.resize((640, 480), Image.Resampling.NEAREST)
 
 
 def proposal(evidence):

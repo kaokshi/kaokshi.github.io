@@ -14,7 +14,6 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 from docx import Document
-from PIL import Image
 
 from src.editorial_brain import Memory, review, settings
 from src.editorial_delivery import restore_blob, retrieve, save_outputs
@@ -23,7 +22,7 @@ from src.editorial_groq_ledger import archive_document, collection
 from src.editorial_memory import digest, read_json, write_json
 from src.editorial_package import ArticleHTML, package
 from src.editorial_providers import Blocked
-from tests.editorial_scene_fixtures import certify
+from tests.editorial_scene_fixtures import certify, distinct_picture
 from src.editorial_scene_qa import section_text
 from src.editorial_review import canonical, parse_article
 
@@ -44,7 +43,7 @@ def build_fixture(root):
         for i in range(7):
             name = f"{i}.jpg"
             file = image_folder / name
-            Image.new("RGB", (80, 60), (i * 20, 70, 90)).save(file)
+            distinct_picture(i).save(file)
             row = {"file": name, "section": max(i, 1), "cover_score": i,
                    "scene": "Контрольная иллюстрация", "kind": "generated",
                    "sha256": digest(file.read_bytes())}

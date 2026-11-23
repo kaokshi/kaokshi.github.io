@@ -14,7 +14,7 @@ from src.editorial_layout import arrange, layout_issues
 from src.editorial_memory import digest
 from src.editorial_package import final_visual_gate, package
 from src.editorial_providers import Blocked
-from tests.editorial_scene_fixtures import certify
+from tests.editorial_scene_fixtures import certify, distinct_picture
 from src.editorial_scene_qa import section_text
 from src.editorial_review import canonical, parse_article, structural_checks
 
@@ -33,7 +33,7 @@ def image_fixture(root):
     folder.mkdir()
     for i in range(1, 8):
         output = folder / f"picture-{i}.jpg"
-        Image.new("RGB", (80, 60), (12 * i, 15 * i, 22 * i)).save(output)
+        distinct_picture(i).save(output)
         images.append({"file": output.name, "sha256": digest(output.read_bytes()),
                        "section": 1 if i <= 2 else i - 1,
                        "cover_score": 10 if i == 2 else 0,
@@ -174,6 +174,16 @@ class LayoutTests(unittest.TestCase):
             files = lambda name: (source / name).read_bytes()
             html, docx = ((folder / name).read_bytes() for name in ("Статья.html", "Статья.docx"))
             final_visual_gate(article, images, text_sha, folder.name, files, encoded=(html, docx))
+            duplicate = BytesIO()
+            with Image.open(source / "picture-2.jpg") as original:
+                original.save(duplicate, "JPEG", quality=65)
+            duplicated_rows = [dict(row) for row in images]
+            duplicate_row = duplicated_rows[0]
+            duplicate_row["sha256"] = digest(duplicate.getvalue())
+            certify(duplicate_row, folder.name, False, text_sha, section_text(article["sections"][0]))
+            with self.assertRaisesRegex(Blocked, "duplicate_image_pixels"):
+                final_visual_gate(article, duplicated_rows, text_sha, folder.name,
+                                  lambda name: duplicate.getvalue() if name == duplicate_row["file"] else files(name))
             html = html.replace(b'images/picture-2.jpg', b'https://old.example/expired.jpg')
             with self.assertRaisesRegex(Blocked, "image_placement_mismatch"):
                 final_visual_gate(article, images, text_sha, folder.name, files, encoded=(html, docx))

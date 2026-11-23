@@ -80,7 +80,8 @@ def add_word_hyperlink(paragraph, label, url):
 
 def final_visual_gate(article, rows, source_sha, article_id, read_asset, *, encoded=None):
     """Validate the actual text, files and final documents at every ready boundary."""
-    from PIL import Image
+    import imagehash
+    from PIL import Image, ImageOps
 
     if not article or digest(canonical(article)) != source_sha:
         raise Blocked("stale_image_needs_recheck")
@@ -90,6 +91,7 @@ def final_visual_gate(article, rows, source_sha, article_id, read_asset, *, enco
         raise Blocked("review_visual_layout_incomplete")
     hero = next(row for row in rows if row["is_cover"])
     ordered = [hero, *sorted((row for row in rows if not row["is_cover"]), key=lambda row: row["section"])]
+    fingerprints = []
     for row in ordered:
         from pathlib import PurePosixPath
         name = row["file"]
@@ -103,8 +105,12 @@ def final_visual_gate(article, rows, source_sha, article_id, read_asset, *, enco
                 if image.width * image.height > 22_000_000:
                     raise Blocked("review_image_dimensions_exceed_limit")
                 image.load()
+                fingerprint = imagehash.phash(ImageOps.exif_transpose(image))
         except (OSError, ValueError, KeyError):
             raise Blocked("review_image_file_missing_or_invalid") from None
+        if any(fingerprint - previous <= 6 for previous in fingerprints):
+            raise Blocked("review_duplicate_image_pixels")
+        fingerprints.append(fingerprint)
     if encoded:
         _verify_exported_visual_order(article, ordered, encoded)
 

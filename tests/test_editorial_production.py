@@ -9,14 +9,13 @@ import unittest
 from unittest.mock import patch
 
 from docx import Document
-from PIL import Image
 
 from src import (editorial_brain as brain, editorial_cinema, editorial_delivery,
                  editorial_images, editorial_providers, editorial_review)
 from src.editorial_learning import CATEGORIES, evaluate_cases
 from src.editorial_memory import Memory, digest, read_json, write
 from src.editorial_providers import Blocked, ProviderError
-from tests.editorial_scene_fixtures import certify, proposal
+from tests.editorial_scene_fixtures import certify, distinct_picture, proposal
 from src.editorial_review import CTA, fact_evidence, parse_article, structural_checks
 
 
@@ -90,8 +89,7 @@ class ProductionTests(unittest.TestCase):
 
         def asset(scene, subject, path, *_, **options):
             content = io.BytesIO()
-            shade = (sum(scene["subject"].encode("utf-8")) * 3) % 220
-            Image.new("RGB", (580, 490), (shade, 10, 220)).save(content, "JPEG")
+            distinct_picture(scene["subject"]).save(content, "JPEG")
             raw = content.getvalue()
             write(path, raw)
             card = scene["scene_card"]
