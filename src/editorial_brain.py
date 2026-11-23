@@ -97,9 +97,10 @@ class Article:
     def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
         if tokens is None:
             tokens = 3700
-        if provider == "routerai":
-            if stage not in ("full-edit", "full-edit-retry"):
-                raise Blocked("routerai_is_independent_editor_only")
+        if provider in ("routerai", "routerai_review"):
+            allowed_stages = ("draft",) if provider == "routerai" else ("full-edit", "full-edit-retry")
+            if stage not in allowed_stages:
+                raise Blocked("routerai_model_role_not_allowed")
             if (not self.config.get("routerai_editor", {}).get("enabled") or
                     os.environ.get("EDITORIAL_ROUTERAI_EDITOR_ALLOWED") != "true"):
                 raise Blocked("routerai_spend_guard_not_ready")
@@ -334,8 +335,9 @@ class Article:
                  "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
-        author = "groq"
-        editor = ("routerai" if self.config.get("routerai_editor", {}).get("enabled") else
+        routerai_active = self.config.get("routerai_editor", {}).get("enabled") is True
+        author = "routerai" if routerai_active else "groq"
+        editor = ("routerai_review" if routerai_active else
                   "gemini" if self.config.get("gemini_quota_guard", {}).get("automated_generation_enabled") else None)
         raw = self.model("draft", author, brief, metadata={"topic": self.title})
         self.memory.article(self.id, draft_provider=author, independent_editor_provider=editor)
@@ -353,7 +355,7 @@ class Article:
                                     metadata={"source_sha256": original["text_sha256"]})
                 self.remember_version(edited)
             except Blocked as exc:
-                # Never accept a Groq self-review as independent or bypass a Gemini quota stop.
+                # Never bypass the paid RouterAI gate or pretend an unavailable editor completed.
                 self.blockers.append("independent_edit_unavailable: " + str(exc))
         else:
             self.blockers.append("independent_edit_unavailable: gemini_limits_not_verified")
