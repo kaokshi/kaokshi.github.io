@@ -103,7 +103,16 @@ class Article:
                 if stage.startswith(("editorial-audit", "repair-", "full-edit")):
                     return self.model(stage, "openrouter", prompt, validate=validate,
                                       tokens=tokens, metadata=metadata, repair=repair)
-                primary = "kilo"
+                # Kilo writes drafts. Independent OVH models each perform
+                # source/topic and visual planning on a separate channel.
+                if stage.startswith("topics-") or stage.startswith("topics-json-retry-"):
+                    primary = "ovh-gptoss" if self.channel == "science" else (
+                        "ovh" if self.channel == "cinema" else "kilo")
+                elif stage.startswith("image-plan"):
+                    primary = "ovh" if self.channel == "science" else (
+                        "ovh-gptoss" if self.channel == "legends" else "kilo")
+                else:
+                    primary = "kilo"
                 return self.model(stage, primary, prompt, validate=validate,
                                   tokens=tokens, metadata=metadata, repair=repair)
         if provider == "groq" and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
@@ -156,11 +165,11 @@ class Article:
                 "http_429_groq_daily_quota",
                 "provider_stopped_http_429_groq_daily_quota",
             }
-            if (alternate_enabled() and provider in {"kilo", "ovh"}
+            if (alternate_enabled() and provider in {"kilo", "ovh", "ovh-gptoss"}
                     and not stage.endswith("-writer-fallback")):
                 # Try the other MAIN writer once, never the editor as writer.
                 # Paid models and Groq are not eligible for this experiment.
-                other = "ovh" if provider == "kilo" else "kilo"
+                other = ("ovh-gptoss" if self.channel == "science" else "ovh") if provider == "kilo" else "kilo"
                 if reason.startswith(("http_401_", "http_402_", "http_403_",
                                       "invalid_alt_", "kilo_model_not_verified_free")):
                     raise
@@ -809,8 +818,8 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
         if not validate_cinema:
             raise Blocked("alt_test_requires_three_channel_isolation")
         cfg = {**cfg,
-               "per_article_calls": {**cfg["per_article_calls"], "kilo": 10, "ovh": 5},
-               "daily_calls": {**cfg["daily_calls"], "kilo": 24, "ovh": 8}}
+               "per_article_calls": {**cfg["per_article_calls"], "kilo": 11, "ovh": 6, "ovh-gptoss": 6},
+               "daily_calls": {**cfg["daily_calls"], "kilo": 30, "ovh": 12, "ovh-gptoss": 12}}
     return cfg
 
 
