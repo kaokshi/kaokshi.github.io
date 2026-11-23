@@ -27,7 +27,8 @@ def free_remaining(fetch=request):
     reply = parse_json(fetch("https://openrouter.ai/api/v1/key",
                              ("openrouter.ai",),
                              headers=authorization("OPENROUTER_API_KEY")))
-    row = reply.get("data", {}).get("free_model_daily_requests")
+    data = reply.get("data") if isinstance(reply, dict) else None
+    row = data.get("free_model_daily_requests") if isinstance(data, dict) else None
     if not isinstance(row, dict):
         raise Blocked("openrouter_free_account_quota_visibility_unavailable")
     remaining = row.get("remaining")
