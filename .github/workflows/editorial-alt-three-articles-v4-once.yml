@@ -1,0 +1,287 @@
+name: Kilo OVH OpenRouter isolated editorial validation
+on:
+  workflow_dispatch:
+    inputs:
+      without_openrouter:
+        description: Use only Kilo and anonymous OVHcloud for text tasks
+        type: boolean
+        default: false
+      quota_only:
+        description: Read the OpenRouter free quota without generating articles
+        type: boolean
+        default: false
+      include_cinema:
+        description: Include cinema in this isolated validation
+        type: boolean
+        default: false
+      resume_run:
+        description: Run ID containing an encrypted validation checkpoint
+        type: string
+      edition_day:
+        description: Checkpoint edition date (YYYY-MM-DD, defaults to today in Moscow)
+        type: string
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-alt-three-articles-v4-once.yml
+concurrency:
+  group: editorial-alt-isolated-validation
+  cancel-in-progress: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  openrouter-quota:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && (inputs.quota_only || contains(github.event.head_commit.message, '[quota-only]'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read the remaining OpenRouter free requests
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python - <<'QUOTA'
+          import json
+          from datetime import datetime, timezone
+          from src.editorial_free_fallback import free_remaining
+          print(json.dumps({"openrouter_free_remaining": free_remaining(),
+                            "checked_at": datetime.now(timezone.utc).isoformat()}))
+          QUOTA
+  agent-three-channel:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && !inputs.quota_only && !contains(github.event.head_commit.message, '[quota-only]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 160
+    env:
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      EDITORIAL_TEST_FREE_ONLY: 'true'
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_OVH_ONE_ARTICLE: ${{ contains(github.event.head_commit.message, '[ovh-one]') }}
+      EDITORIAL_GEMINI_EDITOR: ${{ contains(github.event.head_commit.message, '[gemini-editor]') }}
+      EDITORIAL_GEMINI_COMBINED_FALLBACK: ${{ contains(github.event.head_commit.message, '[gemini-fallback]') }}
+      EDITORIAL_GEMINI_RPM: ${{ vars.EDITORIAL_GEMINI_RPM }}
+      EDITORIAL_GEMINI_DAILY_CALLS: ${{ vars.EDITORIAL_GEMINI_DAILY_CALLS }}
+      GEMINI_API_KEY: ${{ contains(github.event.head_commit.message, '[gemini-editor]') && (secrets.GEMINI_API_KEY || secrets.GOOGLE_GEMINI_API_KEY || secrets.GOOGLE_AI_API_KEY || secrets.GOOGLE_API_KEY || secrets.GEMINI_KEY || secrets.GOOGLE_GENERATIVE_AI_API_KEY || secrets.GOOGLE_AI_STUDIO_API_KEY) || '' }}
+      EDITORIAL_GROQ_OVH_KLEIN_PILOT: ${{ contains(github.event.head_commit.message, '[groq-ovh-klein]') }}
+      EDITORIAL_GROQ_FREE_ONLY: ${{ contains(github.event.head_commit.message, '[groq-ovh-klein]') }}
+      GROQ_API_KEY: ${{ contains(github.event.head_commit.message, '[groq-ovh-klein]') && secrets.GROQ_API_KEY || '' }}
+      EDITORIAL_OVH_FINALIZE: ${{ contains(github.event.head_commit.message, '[ovh-finalize]') }}
+      EDITORIAL_OVH_RECOVER: ${{ contains(github.event.head_commit.message, '[ovh-recover]') }}
+      EDITORIAL_TEST_WITHOUT_OPENROUTER: ${{ inputs.without_openrouter || contains(github.event.head_commit.message, '[no-openrouter]') }}
+      EDITORIAL_CF_FREE_ONLY: 'true'
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
+      OPENROUTER_API_KEY: ${{ !(inputs.without_openrouter || contains(github.event.head_commit.message, '[no-openrouter]')) && secrets.OPENROUTER_API_KEY || '' }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      OMP_NUM_THREADS: '2'
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_XET: '1'
+      GITHUB_ACTIONS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify owner-only agent production and no publication
+        run: |
+          umask 077
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          cfg = json.loads(Path("config/editorial_production.json").read_text(encoding="utf-8"))
+          site = json.loads(Path("config/site.json").read_text(encoding="utf-8"))
+          chat = json.loads(Path("config/editorial_chat_plaintext.json").read_text(encoding="utf-8"))
+          assert site["publication_enabled"] is False
+          assert cfg["schedule"]["enabled"] is False and cfg["schedule"]["owner_approved"] is False
+          assert cfg["schedule"]["klein_free_only"]
+          pilot = os.environ["EDITORIAL_GROQ_OVH_KLEIN_PILOT"] == "true"
+          if not pilot:
+              assert not os.environ.get("GROQ_API_KEY")
+          assert chat["owner_approved"] is True and chat["repository"] == "kaokshi/zen-editorial-review"
+          assert "Content authorship boundary" in Path("AGENTS.md").read_text(encoding="utf-8")
+          required = ["EDITORIAL_PRIVATE_TOKEN", "EDITORIAL_STATE_KEY_HEX"]
+          if os.environ["EDITORIAL_OVH_ONE_ARTICLE"] != "true":
+              required += ["KILO_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"]
+          if pilot:
+              required += ["GROQ_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"]
+          if os.environ["EDITORIAL_GEMINI_EDITOR"] == "true":
+              required.append("GEMINI_API_KEY")
+          if os.environ["EDITORIAL_TEST_WITHOUT_OPENROUTER"] == "true":
+              assert not os.environ.get("OPENROUTER_API_KEY")
+          else:
+              required.append("OPENROUTER_API_KEY")
+          missing = [key for key in required if not os.environ.get(key)]
+          if missing:
+              raise SystemExit("test_blocked_required_private_secrets_missing:" + ",".join(missing))
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write("EDITORIAL_REVIEW_PUBLIC_KEY=" + cfg["schedule"]["owner_public_key"] + "\n")
+              env.write("EDITORIAL_STATE_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-3-channels\n")
+              env.write("EDITORIAL_SEALED_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-3-sealed\n")
+          print("Isolated editorial test enabled; publication remains OFF.")
+          PY
+      - name: Install encryption dependency
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Confirm the selected editorial model
+        run: |
+          python - <<'PY'
+          import json
+          from src.editorial_alt_models import preflight, without_openrouter
+          from src.editorial_free_fallback import verify_fallback, free_remaining
+          status=preflight()
+          assert status["status"]=="preflight_passed"
+          report = {"providers": status, "openrouter_enabled": not without_openrouter()}
+          if not without_openrouter():
+              assert verify_fallback() == "free_route_confirmed", "openrouter_free_editor_unavailable"
+              try:
+                  report["openrouter_free_remaining"] = free_remaining()
+              except Exception:
+                  report["openrouter_free_remaining"] = "unavailable"
+          print(json.dumps(report, sort_keys=True), flush=True)
+          PY
+      - name: Probe free text routes needed for this run
+        if: env.EDITORIAL_OVH_ONE_ARTICLE != 'true'
+        env:
+          KILO_PROBE_ONLY: ${{ inputs.resume_run != '' || contains(github.event.head_commit.message, '[resume]') }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from time import monotonic, sleep
+          from src.editorial_alt_models import without_openrouter
+          from src.editorial_brain import json_reply
+          from src.editorial_providers import Blocked, text_call
+          providers = ("kilo",) if os.environ["KILO_PROBE_ONLY"] == "true" else (
+              "kilo", "ovh", "ovh-gptoss", "openrouter")
+          if without_openrouter():
+              providers = tuple(provider for provider in providers if provider != "openrouter")
+              providers += ("kilo-review",)
+          for provider in providers:
+              started = monotonic()
+              status = {"provider": provider}
+              try:
+                  reply = text_call(provider, 'Return only JSON: {"ok":true}', 900)
+                  status.update(model=reply["model"], usage=reply["usage"],
+                                passed=json_reply(reply).get("ok") is True)
+              except Blocked as exc:
+                  status.update(passed=False, reason=str(exc))
+              print(json.dumps({**status, "seconds": round(monotonic() - started, 2)}), flush=True)
+          # Generation runs in a new process. Drain the probe's rolling window
+          # before it can issue another anonymous OVH request.
+          if "ovh" in providers:
+              sleep(35)
+          PY
+      - name: Install pinned editorial and image dependencies
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
+          python -m pip install -r requirements-production.txt
+          aiw-ru models install modernbert lightgbm transformer || echo "::warning::Detector unavailable; final QA will block incomplete checks"
+      - name: Run isolated editorial validation
+        id: generate
+        timeout-minutes: 125
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ''
+          EDITORIAL_PRIVATE_REPOSITORY: ''
+          GH_TOKEN: ${{ github.token }}
+          RESUME_RUN: ${{ inputs.resume_run }}
+          RESUME_OVH_TRIAL: ${{ contains(github.event.head_commit.message, '[ovh-continue]') }}
+          EDITION_DAY: ${{ inputs.edition_day }}
+          INCLUDE_CINEMA: ${{ inputs.include_cinema || (github.event_name == 'push' && contains(github.event.head_commit.message, '[cinema]')) }}
+        run: |
+          umask 077
+          day="${EDITION_DAY:-$(TZ=Europe/Moscow date +%F)}"
+          command=daily
+          if [ "$EDITORIAL_OVH_ONE_ARTICLE" = true ]; then
+            export EDITORIAL_STATE_DIR="$RUNNER_TEMP/editorial-ovh-one"
+            if [ "$EDITORIAL_GROQ_OVH_KLEIN_PILOT" = true ]; then
+              export EDITORIAL_STATE_DIR="$RUNNER_TEMP/editorial-groq-ovh-klein"
+            fi
+            echo "EDITORIAL_STATE_DIR=$EDITORIAL_STATE_DIR" >>"$GITHUB_ENV"
+          fi
+          if [ -z "$RESUME_RUN" ] && [ "$GITHUB_EVENT_NAME" = push ] && { [ "$EDITORIAL_OVH_ONE_ARTICLE" != true ] || [ "$RESUME_OVH_TRIAL" = true ]; }; then
+            RESUME_RUN="$(python - <<'PY_RESTORE'
+          import os
+          from src.editorial_delivery import latest_alt_checkpoint
+          from src.editorial_alt_models import ovh_trial
+          print(latest_alt_checkpoint(os.environ["GITHUB_RUN_ID"], one_article=ovh_trial()) or "")
+          PY_RESTORE
+          )"
+          fi
+          if [ "$RESUME_OVH_TRIAL" = true ] && [ -z "$RESUME_RUN" ]; then
+            echo 'No encrypted OVH trial checkpoint found'
+            exit 2
+          fi
+          if [ -n "$RESUME_RUN" ]; then
+            python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" \
+              --date "$day" --run-id "$RESUME_RUN"
+            command=retry
+          fi
+          printf '%s\n' "$day" > "$RUNNER_TEMP/editorial-day"
+          args=(--encrypted-mode --validation-window 120 --local-state "$EDITORIAL_STATE_DIR")
+          if [ "$INCLUDE_CINEMA" = true ]; then args+=(--validate-cinema); fi
+          python -m src.editorial_brain "$command" --date "$day" "${args[@]}"
+      - name: Test Klein once if the article did not reach image generation
+        if: always() && env.EDITORIAL_GROQ_OVH_KLEIN_PILOT == 'true' && steps.generate.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from src.editorial_brain import validate_klein
+          from src.editorial_providers import Blocked
+          day_file = Path(os.environ["RUNNER_TEMP"]) / "editorial-day"
+          if not day_file.is_file():
+              raise SystemExit(0)
+          state = Path(os.environ["EDITORIAL_STATE_DIR"]) / day_file.read_text().strip() / "state.json"
+          if not state.is_file() or any(row["provider"] == "klein"
+                                       for row in json.loads(state.read_text())["calls"]):
+              raise SystemExit(0)
+          try:
+              print(json.dumps({"klein_component_only": validate_klein()}), flush=True)
+          except (Blocked, OSError) as exc:
+              print(json.dumps({"klein_component_only": "blocked", "reason": str(exc)}), flush=True)
+          PY
+      - name: Deliver verified articles independently to private review
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            python -m src.editorial_chat_plaintext publish --ready-only \
+              --root "$EDITORIAL_STATE_DIR" --date "$day"
+          fi
+      - name: Send sanitized per-article errors to PRIVATE GitHub status issue
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            if [ -f "$EDITORIAL_STATE_DIR/$day/state.json" ]; then
+              python -m src.editorial_chat_bridge --root "$EDITORIAL_STATE_DIR" --date "$day"
+            fi
+          fi
+      - name: Encrypt original project-agent state and review packet
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            python -m src.editorial_delivery seal \
+              --root "$EDITORIAL_STATE_DIR" --date "$day" --output "$EDITORIAL_SEALED_DIR"
+          fi
+      - name: Retain only encrypted originals as private Actions artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.EDITORIAL_GROQ_OVH_KLEIN_PILOT == 'true' && 'agent-groq-ovh-klein-encrypted' || env.EDITORIAL_OVH_ONE_ARTICLE == 'true' && 'agent-ovh-one-encrypted' || 'agent-alt-kilo-ovh-encrypted' }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.EDITORIAL_SEALED_DIR }}/checkpoint.enc
+            ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,2 +1,2 @@
 aiw-ru[ml]==2.5.2
-ai-accent-detector @ git+https://github.com/Rain-ouroboros/ai-accent-detector.git@1852e86289ae75bf0f16b84444fb190d258043fd
+ai-accent-detector @ https://codeload.github.com/Rain-ouroboros/ai-accent-detector/tar.gz/1852e86289ae75bf0f16b84444fb190d258043fd

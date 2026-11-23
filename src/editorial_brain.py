@@ -9,10 +9,13 @@ from pathlib import Path
 import re
 import shutil
 from tempfile import TemporaryDirectory
+from time import sleep
 from zoneinfo import ZoneInfo
 import fcntl
 
 from . import editorial_cinema as cinema
+from . import editorial_scene_qa as scene_qa
+from .editorial_alt_models import gemini_pilot, groq_gemini_klein_pilot, groq_ovh_klein_pilot, ovh_finalize, ovh_recover, ovh_trial, without_openrouter
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_layout import layout_issues
@@ -20,9 +23,9 @@ from .editorial_groq_budget import forecast
 from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
-from .editorial_package import package, zip_packet
+from .editorial_package import final_visual_gate, package, zip_packet
 from .editorial_subscription import CHANNELS as SUBSCRIPTION_CHANNELS
-from .editorial_providers import Blocked, MODELS, ProviderError, klein, text_call
+from .editorial_providers import Blocked, MODELS, ProviderError, gemini_limit, gemini_model, gemini_text, klein, text_call
 from .editorial_review import RULES, canonical, improves, parse_article, qa, source_context, sources, structural_checks
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -93,7 +96,25 @@ class Article:
     def task(self, stage, executor, inputs, fn, **kwargs):
         return self.memory.task(self.id, stage, executor, inputs, fn, **kwargs)
 
-    def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
+    def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False, tried=()):
+        from .editorial_alt_models import enabled as alternate_enabled, require_isolated
+        if alternate_enabled():
+            require_isolated()
+            if ovh_trial() or groq_ovh_klein_pilot():
+                raise Blocked("ovh_removed_from_project")
+            if provider in {"ovh", "ovh-gptoss"}:
+                raise Blocked("ovh_removed_from_project")
+            if groq_gemini_klein_pilot():
+                if provider not in {"groq", "gemini"}:
+                    raise Blocked("pilot_text_provider_not_allowed")
+                if provider == "groq" and stage.startswith(("editorial-audit", "full-edit", "repair-")):
+                    return self.model(stage, "gemini", prompt, validate=validate,
+                                      tokens=tokens, metadata=metadata, repair=repair)
+            elif provider == "groq":
+                # Legacy Kilo-only isolated tests remain separate from this pilot.
+                route = "openrouter" if stage.startswith(("editorial-audit", "repair-", "full-edit")) else "kilo"
+                return self.model(stage, route, prompt, validate=validate,
+                                  tokens=tokens, metadata=metadata, repair=repair)
         if provider == "groq" and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
             # Authenticated, zero-price OpenRouter catalog was checked by the workflow.
             # Do not contact Groq at all when its daily capacity is unavailable.
@@ -102,14 +123,30 @@ class Article:
                               metadata={**(metadata or {}), "fallback_from": "groq",
                                         "fallback_reason": "groq_preflight_capacity_unavailable"},
                               repair=repair)
+        isolated_edit = (alternate_enabled() and provider == "openrouter"
+                         and stage.startswith(("full-edit", "repair-")))
         if tokens is None:
             tokens = 3700 if provider == "groq" else 7800
+        if without_openrouter() and not ovh_trial() and provider in {"ovh", "ovh-gptoss", "kilo-review"}:
+            tokens = min(tokens, 7800)
+
+        structured_scene = (provider == "groq" and stage.startswith("image-plan-")
+                            and os.environ.get("EDITORIAL_RELEASE_TRIO") == "true")
 
         def send(task, ceiling):
-            callback = lambda: text_call(provider, prompt, ceiling)
+            if provider == "gemini":
+                callback = lambda: gemini_text(prompt, min(ceiling, 8192),
+                                               response_json=validate is not None,
+                                               fallback_model=stage.endswith("-retry"))
+            elif structured_scene:
+                callback = lambda: text_call(provider, prompt, ceiling, response_json=True)
+            else:
+                callback = lambda: text_call(provider, prompt, ceiling)
             if provider == "groq":
                 return self.memory.call_groq(task, self.id, stage, prompt, ceiling, callback,
                                              repair=repair or stage.startswith("repair-"))
+            if isolated_edit:
+                return self.memory.call(task, self.id, provider, callback, editorial_edit=True)
             return self.memory.call(task, self.id, provider, callback)
 
         def execute(task):
@@ -120,16 +157,49 @@ class Article:
                 return send(task, tokens)
             except ProviderError as exc:
                 # Never shrink a required article merely to fit a provider window.
-                if exc.retry_after is None or self.memory.time_left() < exc.retry_after + 125:
+                # Gemini retries must be separate persisted, quota-counted tasks.
+                # A silent resend inside one reservation understates real API use.
+                if isolated_edit or provider == "gemini" or exc.retry_after is None:
                     raise
+                if ovh_trial() and not ((ovh_recover() or groq_ovh_klein_pilot())
+                                        and exc.telemetry.get("http_status") == 429):
+                    raise
+                delay = max(70, exc.retry_after) if provider == "ovh" and (
+                    ovh_recover() or groq_ovh_klein_pilot()) else exc.retry_after
+                if self.memory.time_left() < delay + 165:
+                    raise
+                if alternate_enabled():
+                    sleep(delay)
                 return send(task, tokens)
 
+        inputs = {"model": ("gemini-3.6-flash" if provider == "gemini" and
+                            stage.endswith("-retry") and gemini_model() == "gemini-3.5-flash"
+                            else gemini_model()) if provider == "gemini" else MODELS[provider],
+                  "prompt_version": PROMPT_VERSION,
+                  "prompt_sha256": digest(prompt), **(metadata or {})}
+        if structured_scene:
+            inputs["response_format"] = "json_object"
+        if isinstance(self.memory, Memory) and self.memory.retry:
+            with self.memory.lock:
+                for row in self.memory.data["tasks"].values():
+                    if (row["article"] != self.id or row["operation"] != stage
+                            or row["executor"] != provider or row["status"] != "completed"):
+                        continue
+                    previous = row["inputs"]
+                    expected = {**inputs}
+                    if provider == "kilo" and previous.get("model") == "kilo-auto/free":
+                        expected["model"] = "kilo-auto/free"
+                    if stage.endswith("-writer-fallback") and "fallback_reason" in previous:
+                        expected["fallback_reason"] = previous["fallback_reason"]
+                    if previous == expected:
+                        inputs = previous
+                        break
         try:
-            result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
-                                               "prompt_sha256": digest(prompt), **(metadata or {})},
-                               execute, minimum_seconds=130,
+            result = self.task(stage, provider, inputs, execute, minimum_seconds=130,
                                validator=(lambda response: validate(json_reply(response))) if validate else None)
         except Blocked as exc:
+            if ovh_trial() or groq_gemini_klein_pilot():
+                raise
             # Route a quota-stopped Groq stage to a separately recorded, verified-free
             # OpenRouter task. Do not hide authentication failures, malformed answers,
             # incomplete previous requests or any editorial validation errors.
@@ -144,6 +214,11 @@ class Article:
                 "http_429_groq_daily_quota",
                 "provider_stopped_http_429_groq_daily_quota",
             }
+            if alternate_enabled() and provider == "kilo":
+                # No fallback may contact OVH after the owner removed it.
+                # Preserve blocked stage without pretending that an editor
+                # can replace unavailable independent authoring.
+                raise
             if (provider != "groq" or stage.startswith("editorial-audit")
                     or reason not in quota_blockers):
                 raise
@@ -180,10 +255,39 @@ class Article:
         existing = self.memory.data["articles"].get(self.id, {})
         if existing.get("title"):
             return existing["topic_plan"]
+        if (self.channel == "cinema" and groq_gemini_klein_pilot()
+                and os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true"):
+            # A validated factual film selection replaces wasteful trial-and-error
+            # theme calls. All actual article prose is still produced only by Groq.
+            selected = {
+                "title": "«Пленницы» (2013): обзор без спойлеров",
+                "angle": "Как тревожная семейная история раскрывает конфликт "
+                         "между отчаянием, законом и моральным выбором",
+                "film_title": "Пленницы", "year": 2013, "format": "review",
+                "spoilers": False,
+                "sources": [
+                    "https://www.rottentomatoes.com/m/prisoners_2013",
+                    "https://www.rogerebert.com/reviews/prisoners-2013",
+                    "https://www.theguardian.com/film/2013/sep/26/prisoners-review",
+                ],
+            }
+            if topic_duplicate_reason(self.channel, selected["title"], history):
+                raise Blocked("unique_topic_or_verifiable_sources_missing")
+            checked = self.task(
+                "film-evidence", "wikidata-and-film-sources",
+                {"plan": selected, "research_version": "independent-reviews-20261123"},
+                lambda _: cinema.evidence(selected, self.cinema_registry),
+                minimum_seconds=125)
+            topic = {**selected, **checked}
+            self.memory.article(self.id, title=selected["title"],
+                                topic_plan=topic, channel=self.channel)
+            return topic
         if self.channel == "science":
             seed = self.source_seed(history)
             if seed:
                 return seed
+            if ovh_trial():
+                raise Blocked("ovh_trial_no_verified_science_seed")
         subject = ("оригинальной городской мистики, с уникальным сюжетом и развязкой" if self.channel == "legends"
                    else "научпопа о наблюдаемом природном явлении, приборе или научном объекте")
         if self.channel == "cinema":
@@ -203,8 +307,10 @@ class Article:
                        "независимый каталог проверит фильм сам. "
                        f"Публичные сигналы интереса: {json.dumps(signals, ensure_ascii=False)}. "
                        f"Недавние релизы: {json.dumps(releases, ensure_ascii=False)}.")
+        from .editorial_alt_models import enabled as alternative_test
+        topic_tokens = 1800 if groq_gemini_klein_pilot() else 6000 if alternative_test() else 3200
         for shift in range(2):
-            if shift and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") != "true":
+            if shift and not alternative_test() and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") != "true":
                 with self.memory.lock:
                     projection = groq_plan(self.memory)
                 if (projection["groq_usage"]["accounted_tokens"] >= self.config["groq_budget"]["target_daily_tokens"][1]
@@ -219,8 +325,26 @@ class Article:
                     raise Blocked("topic_list_missing")
             topic_prompt = prompt + (f" В этот раз выбери иные предметы для набора {shift}." if shift else "")
             try:
-                result = self.model(f"topics-{shift + 1}", "groq", topic_prompt,
-                                    validate=is_valid, tokens=3200)
+                saved_topic = None
+                if groq_gemini_klein_pilot() and self.memory.retry:
+                    # Reuse the original model-made candidate list even if
+                    # non-semantic prompt formatting changed between patches.
+                    # No new model request is needed to retry independent
+                    # verification of the same film candidates.
+                    with self.memory.lock:
+                        saved_topic = next((
+                            task["result"]
+                            for task in self.memory.data["tasks"].values()
+                            if task["article"] == self.id
+                            and task["operation"] == f"topics-{shift + 1}"
+                            and task["status"] == "completed"
+                            and isinstance(task.get("result"), dict)
+                            and isinstance(task["result"].get("text"), str)
+                        ), None)
+                result = (json_reply(saved_topic) if saved_topic is not None
+                          else self.model(f"topics-{shift + 1}", "groq", topic_prompt,
+                                          validate=is_valid, tokens=topic_tokens))
+                is_valid(result)
             except Blocked as exc:
                 # Retry malformed JSON as a new, metered model task. Never
                 # insert any assistant-authored topic or other creative data.
@@ -232,7 +356,7 @@ class Article:
                                  "текста до/после JSON. Не придумывай идентификаторы "
                                  "каталога фильмов, если не уверен.")
                 result = self.model(f"topics-json-retry-{shift + 1}", "groq",
-                                    strict_prompt, validate=is_valid, tokens=3200)
+                                    strict_prompt, validate=is_valid, tokens=topic_tokens)
             for row in result["topics"][:8]:
                 if not isinstance(row, dict):
                     continue
@@ -254,7 +378,8 @@ class Article:
                     row = {**row, "records": records}
                 if self.channel == "cinema":
                     try:
-                        film = self.task("film-evidence", "wikidata-and-film-sources", {"plan": row},
+                        film = self.task("film-evidence", "wikidata-and-film-sources",
+                            {"plan": row, "research_version": "wikimedia-ua-20261123"},
                             lambda _: cinema.evidence(row, self.cinema_registry), minimum_seconds=125)
                     except Blocked:
                         continue
@@ -291,10 +416,13 @@ class Article:
         self.memory.save()
         return {"raw": raw, "article": structured, "text_sha256": sha, "report": report}
 
-    def inspect(self, candidate, reference=None, *, repair=False):
+    def inspect(self, candidate, reference=None, *, repair=False, submitted_audit=None):
         raw, sha = candidate["raw"], candidate["text_sha256"]
-        facts = source_context(self.records)
+        pilot_resume = groq_ovh_klein_pilot() and self.memory.retry
+        facts = source_context(self.records, chars_per_source=6000 if ovh_finalize() or pilot_resume else 2000)
         def audit(text, language_issues):
+            if submitted_audit is not None:
+                return submitted_audit
             prompt = ("Проверь конкретные недостатки текста. Оцени связность, оригинальность, "
                       "смысловые повторы, естественность, достаточность раскрытия и сохранность важных "
                       "смысловых элементов. Учитывай замечания LanguageTool, оставляй только реальные ошибки. "
@@ -317,11 +445,43 @@ class Article:
                            + "\nЕсли статья свыше 6000 знаков, проверь конкретность и необходимость обоснования.")
             if reference:
                 prompt += "\nПРЕДЫДУЩАЯ ВЕРСИЯ ДЛЯ СРАВНЕНИЯ:\n" + canonical(reference["article"])
+            if ovh_finalize():
+                prompt += ("\nОтветь только JSON. Для claims копируй непрерывный отрывок из "
+                           "СТАТЬИ и непрерывную цитату на языке источника из блока ИСТОЧНИКИ. "
+                           "Цитата должна подтверждать числа в той же записи, что и в статье. "
+                           "Не добавляй план иллюстраций, не переписывай статью.")
+                return self.model("editorial-audit", "ovh", prompt, validate=lambda x: None,
+                                  metadata={"text_sha256": sha}, tokens=11000)
+            if ovh_trial():
+                count = len(candidate["article"]["sections"])
+                prompt += (f'\nВ тот же JSON включи image_plan с subject и массивом images. '
+                           f'Укажи ровно {count + 1} различных изображений: два для первого раздела '
+                           'и по одному для остальных. Каждая запись: section (номер раздела), '
+                           'kind (строго photo или illustration), subject, brief, query (английские строки). '
+                           'Включи оба вида. Для Wikimedia Commons выбирай широко документированные '
+                           'объекты и запросы по содержанию раздела. Не придумывай URL и лицензии.')
+                if groq_ovh_klein_pilot():
+                    sections = [1, 1, *range(2, count + 1)]
+                    prompt += (f" Поле image_plan.images обязано иметь ровно {count + 1} элементов. "
+                               f"Номера section в порядке ответа: {sections}. Две записи illustration "
+                               "для Klein, остальные — photo с английским запросом для Commons. "
+                               "Не включай варианты и пояснения. Цитаты из источников дословные, "
+                               "на языке источника, не короче 18 знаков.")
+                provider = "gemini" if gemini_pilot() else "ovh"
+                result = self.model("editorial-audit", provider, prompt, validate=lambda x: None,
+                                    metadata={"text_sha256": sha}, tokens=11000 if groq_ovh_klein_pilot() else 7800)
+                self.memory.article(self.id, trial_image_plan=result.get("image_plan"))
+                return result
             last_error = None
-            for provider in ("groq", "openrouter"):
+            from .editorial_alt_models import enabled as alternative_test
+            providers = (("gemini",) if groq_gemini_klein_pilot() else
+                         ("ovh-gptoss", "kilo-review") if without_openrouter() else
+                         ("openrouter",) if alternative_test() else ("groq", "openrouter"))
+            for provider in providers:
                 try:
                     return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
-                                      metadata={"text_sha256": sha}, tokens=2900 if provider == "groq" else 8300,
+                                      metadata={"text_sha256": sha}, tokens=(5000 if groq_gemini_klein_pilot() else
+                                                                   2900 if provider == "groq" else 8300),
                                       repair=repair)
                 except Blocked as exc:
                     last_error = exc
@@ -331,7 +491,17 @@ class Article:
             raise last_error
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
-                            "length_exception_reason": candidate["article"].get("length_exception_reason")},
+                            "length_exception_reason": candidate["article"].get("length_exception_reason"),
+                            **({"reviewer": gemini_model(),
+                                  **({"audit_sha256": digest(json.dumps(submitted_audit, sort_keys=True))}
+                                     if submitted_audit is not None else {})} if gemini_pilot() else
+                               {"reviewer": "ovh-qwen-pilot-resume"} if pilot_resume else
+                               {"reviewer": "ovh-qwen-correction", "audit_sha256": digest(
+                                    json.dumps(submitted_audit, ensure_ascii=False, sort_keys=True))} if ovh_recover() else
+                               {"reviewer": "ovh-qwen-facts-only"} if ovh_finalize() else
+                               {"reviewer": "ovh-qwen-combined" if submitted_audit is not None else
+                                "ovh-qwen-with-image-plan"} if ovh_trial() else
+                               {"reviewer": "ovhcloud"} if without_openrouter() else {})},
                            lambda _: qa(raw, self.channel, self.prior[1], self.records,
                                         audit, self.memory.time_left), minimum_seconds=20 * 60,
                            reusable=lambda row: all(row[key]["status"] == "completed"
@@ -341,6 +511,96 @@ class Article:
         return self.remember_version(raw, report)
 
     def prose(self, topic):
+        if ovh_finalize() or (groq_ovh_klein_pilot() and self.memory.retry):
+            entry = self.memory.data["articles"][self.id]
+            previous_sha = entry.get("text_sha256")
+            if not isinstance(previous_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", previous_sha):
+                raise Blocked("ovh_finalize_saved_text_missing")
+            path = self.folder / "versions" / (previous_sha + ".md")
+            if not path.is_file():
+                raise Blocked("ovh_finalize_saved_text_missing")
+            raw = path.read_text(encoding="utf-8")
+            if digest(canonical(parse_article(raw))) != previous_sha:
+                raise Blocked("qa_sha_mismatch")
+            self.current = self.remember_version(raw)
+            if gemini_pilot():
+                original = self.current
+                prompt = (f"{RULES}\nОтредактируй черновик, сохрани тему и ровно шесть "
+                          "разделов с жирными заголовками. Сохрани 3000–6000 знаков без пробелов, "
+                          "вступление и точное название канала в последнем призыве. "
+                          "Удали плохо подтверждённые цифры и факты. Все факты должны следовать "
+                          "из приведённых источников. Верни только полный текст статьи. "
+                          f"\nКАНАЛ: {SUBSCRIPTION_CHANNELS[self.channel]}"
+                          f"\nИСТОЧНИКИ:\n{source_context(self.records, chars_per_source=5000)}"
+                          f"\nЧЕРНОВИК:\n{raw}")
+                if os.environ.get("EDITORIAL_GEMINI_COMBINED_FALLBACK") == "true":
+                    prompt = prompt.replace("Верни только полный текст статьи.", (
+                        'Верни JSON с полями article, issues, claims, image_plan. article — полный '
+                        'отредактированный текст. issues — список оставшихся замечаний или []. '
+                        'claims — все проверяемые утверждения именно из article, включая числа. '
+                        'Каждая запись содержит claim (дословный отрывок текста), source (S1, S2 '
+                        'или S3), quote (точная непрерывная цитата источника на языке источника '
+                        'длиной от 18 знаков), verdict (supported или unsupported). Не выдумывай '
+                        'ссылок или цитат. image_plan содержит subject и images из ровно семи '
+                        'записей. section в порядке [1, 1, 2, 3, 4, 5, 6]. Две записи с kind '
+                        'illustration, пять с kind photo. Каждая запись содержит section, kind, '
+                        'а также английские subject, brief, query для Klein или Wikimedia Commons.'))
+                    answer = self.model("full-edit", "gemini", prompt, validate=lambda x: None,
+                                        metadata={"source_sha256": previous_sha}, tokens=8192)
+                    edited = answer.get("article")
+                    if not isinstance(edited, str) or not edited.strip():
+                        raise Blocked("empty_visible_content")
+                    image_plan = answer.get("image_plan")
+                else:
+                    edited = self.model("full-edit", "gemini", prompt,
+                                        metadata={"source_sha256": previous_sha}, tokens=4800)
+                    answer = image_plan = None
+                self.current = self.remember_version(edited)
+                self.memory.article(self.id, independent_editor_provider="gemini", trial_image_plan=image_plan)
+                self.current = self.inspect(self.current, original, submitted_audit=answer)
+                return self.current
+            if ovh_recover():
+                previous = read_json(self.folder / "versions" / (previous_sha + ".json"), {})
+                previous_issues = previous.get("issues", [])
+                fact_status = previous.get("facts", {}).get("status")
+                print(json.dumps({"ovh_recovery_previous_qa": {
+                    "facts": fact_status, "editorial": previous.get("editorial", {}).get("status"),
+                    "verified_claims": len(previous.get("facts", {}).get("evidence", [])),
+                    "issues": len(previous_issues)}}), flush=True)
+                if (previous and not previous_issues and fact_status == "completed"
+                        and all(previous.get(key, {}).get("status") == "completed"
+                                for key in ("model_a", "grammar", "editorial"))):
+                    self.current = self.remember_version(raw, previous)
+                    return self.current
+                prompt = (
+                    f"{RULES}\nДоработай научпоп, исправляя только перечисленные замечания. "
+                    "Удали утверждения, которые нельзя подтвердить приведёнными источниками, или замени "
+                    "их сведениями, которые источник подтверждает напрямую. Если числу нет точного "
+                    "подтверждения в той же записи (единицы, разделители, порядок цифр), убери число. "
+                    "Сохрани тему, интро и ровно шесть разделов с жирными заголовками. Сохрани 3000–6000 "
+                    "знаков без пробелов и точное название канала в заключительном призыве. "
+                    "Верни только один JSON с полями article, issues и claims. article — полный исправленный "
+                    "текст; issues — оставшиеся ошибки или пустой массив. claims — проверяемые фразы "
+                    "именно из исправленного текста. У каждого claim (дословная фраза), source (S1, S2 "
+                    "или S3 согласно источникам ниже), quote (дословная непрерывная цитата на языке "
+                    "источника длиной не менее 18 знаков), verdict (supported или unsupported). "
+                    "Проверь в claims все числовые утверждения. Без плана иллюстраций. "
+                    "Никогда не придумывай цитаты, данные и источники. "
+                    f"\nЗАМЕЧАНИЯ:\n{json.dumps(previous_issues[:35], ensure_ascii=False)}"
+                    f"\nИСТОЧНИКИ:\n{source_context(self.records, chars_per_source=8500)}"
+                    f"\nСОХРАНЁННЫЙ ТЕКСТ:\n{raw}")
+                result = self.model("repair-saved-facts", "ovh", prompt, validate=lambda x: None,
+                                    metadata={"text_sha256": previous_sha}, tokens=14000)
+                corrected = result.get("article")
+                if not isinstance(corrected, str) or not corrected.strip():
+                    raise Blocked("empty_visible_content")
+                self.current = self.remember_version(corrected)
+                if self.current["text_sha256"] != previous_sha:
+                    self.memory.article(self.id, trial_image_plan=None)
+                self.current = self.inspect(self.current, submitted_audit=result)
+            else:
+                self.current = self.inspect(self.current)
+            return self.current
         facts = source_context(self.records)
         angle = topic["angle"]
         style = ("Пиши художественный вымысел, с конкретным героем, причиной и завершённой развязкой."
@@ -358,14 +618,142 @@ class Article:
                  "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
-        author, editor = "groq", "openrouter"
+        if groq_gemini_klein_pilot():
+            if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true" and self.memory.retry:
+                previous = self.memory.data["articles"].get(self.id, {}).get("text_sha256")
+                if previous and re.fullmatch(r"[a-f0-9]{64}", previous):
+                    origin = self.folder / "versions" / (previous + ".md")
+                    checked = read_json(origin.with_suffix(".json"))
+                    fields = ("model_a", "grammar", "editorial")
+                    if self.channel != "legends":
+                        fields += ("facts",)
+                    if (origin.is_file() and checked and checked.get("text_sha256") == previous
+                            and all(checked.get(field, {}).get("status") == "completed" for field in fields)):
+                        recovered = origin.read_text(encoding="utf-8")
+                        if digest(canonical(parse_article(recovered))) == previous:
+                            self.current = {"raw": recovered, "article": parse_article(recovered),
+                                            "text_sha256": previous, "report": checked}
+                            return self.current
+            # The same metered Gemini response edits *and* audits the text.
+            # This avoids consuming one separate model call for a redundant
+            # second pass. All cited evidence is checked again by local QA.
+            original_raw = self.model("draft", "groq", brief, tokens=3000,
+                                      metadata={"topic": self.title})
+            original = self.remember_version(original_raw)
+            self.current = original
+            self.memory.article(self.id, draft_provider="groq",
+                                independent_editor_provider="gemini")
+            audit_context = source_context(self.records, chars_per_source=2600)
+            edit_prompt = (
+                brief + "\nТы независимый редактор и фактчекер. "
+                "Верни ОДИН JSON-объект с ключами article, issues, claims. "
+                "article — полный связный исправленный текст на русском, 3000–6000 "
+                "символов без пробелов, 6 или 7 разделов с жирными заголовками, "
+                "без пометок для изображений и с финальным приглашением подписаться. "
+                "issues — массив конкретных оставшихся ошибок; если ошибок нет, []. "
+                "claims — для научпопа и кино список проверяемых фактов именно из article. "
+                "Каждый элемент: claim (дословная фраза статьи), source (S1, S2...), "
+                "quote (точный отрывок источника), verdict (supported или unsupported). "
+                "Не придумывай цитаты, сцены, источники и персонажей; если текст "
+                "невозможно подтвердить, убери утверждение либо отметь unsupported. "
+                "Для вымышленной мистической истории claims оставь пустым массивом. "
+                "Сохраняй характерные детали автора, избегай шаблонов, повторов и "
+                "канцелярита. Не вставляй текст вне JSON. "
+                "\nДОКУМЕНТЫ ДЛЯ ПРОВЕРКИ:\n" + audit_context +
+                "\nИСХОДНЫЙ ЧЕРНОВИК:\n" + original_raw)
+            def check_edit(result):
+                article = result.get("article")
+                if not isinstance(article, str) or not article.strip():
+                    raise Blocked("gemini_combined_article_missing")
+                if not isinstance(result.get("issues"), list) or not isinstance(
+                        result.get("claims"), list):
+                    raise Blocked("gemini_combined_audit_missing")
+                if any(not isinstance(x, str) for x in result["issues"]):
+                    raise Blocked("gemini_combined_issues_invalid")
+                parsed = parse_article(article)
+                if not 6 <= len(parsed["sections"]) <= 7:
+                    raise Blocked("gemini_combined_section_count_invalid")
+            # Exactly one independently metered Gemini request per execution.
+            # 503, 429 and connection failures are persisted, not immediately
+            # retried: retries are allowed only after cooldown by restoring the
+            # encrypted checkpoint with the same unmodified original draft.
+            verdict = self.model("full-edit-with-audit", "gemini", edit_prompt,
+                                 validate=check_edit, tokens=6800,
+                                 metadata={"source_sha256": original["text_sha256"]})
+            edited = verdict["article"]
+            self.current = self.inspect(self.remember_version(edited), original,
+                                        submitted_audit=verdict)
+            self.attempts.append({"role": "independent_edit", "provider": "gemini",
+                                  "status": "qa_completed" if
+                                  self.current["report"]["editorial"]["status"] == "completed"
+                                  else "qa_incomplete",
+                                  "before": original["text_sha256"],
+                                  "after": self.current["text_sha256"]})
+            return self.current
+        if ovh_trial():
+            format_rules = ("\nОбязательная форма: короткое вступление, ровно шесть разделов с "
+                            "жирными заголовками и 3000–6000 знаков без пробелов. Последний "
+                            "абзац приглашает подписаться и называет канал точно.")
+            writer = "groq" if groq_ovh_klein_pilot() else "ovh-gptoss"
+            raw = self.model("draft", writer, brief + format_rules,
+                             metadata={"topic": self.title}, tokens=3000 if writer == "groq" else None)
+            original = self.remember_version(raw)
+            self.current = original
+            self.memory.article(self.id, draft_provider=writer, independent_editor_provider="ovh")
+            prompt = (brief + format_rules + "\nОтредактируй черновик до готового текста. "
+                      "Сохрани проверяемые факты и поддержанные источниками выводы. "
+                      "Верни только полный текст.\nЧЕРНОВИК:\n" + raw)
+            if self.memory.retry:
+                prompt = prompt.replace("Верни только полный текст.", "")
+                prompt += (
+                    '\nОтвет верни единым JSON без Markdown-обрамления. Поле article содержит полный '
+                    'отредактированный текст с буквальными Markdown-заголовками и переносами, '
+                    'закодированными в JSON. Проверь именно текст в article. Поле issues — список '
+                    'оставшихся редакционных замечаний или []. Поле claims — все проверяемые '
+                    'утверждения из article, включая числа и причинность. У каждого четыре поля: '
+                    'claim (дословно из article), source (S1, S2 и т. д.), quote (дословная цитата '
+                    'из указанного источника), verdict (supported или unsupported). '
+                    'Поле image_plan — объект с subject и images: всего семь разных изображений, '
+                    'два для раздела 1 и по одному для разделов 2–6. Для каждого укажи section, kind '
+                    '(photo или illustration), subject, brief и query для Wikimedia Commons. '
+                    'Используй оба вида. Не придумывай URL, лицензии или факты.')
+                verdict = self.model("full-edit-with-audit", "ovh", prompt,
+                                     validate=lambda data: None, tokens=14000,
+                                     metadata={"source_sha256": original["text_sha256"]})
+                edited = verdict.get("article")
+                if not isinstance(edited, str) or not edited.strip():
+                    raise Blocked("empty_visible_content")
+                self.memory.article(self.id, trial_image_plan=verdict.get("image_plan"))
+                self.current = self.remember_version(edited)
+                self.current = self.inspect(self.current, original, submitted_audit=verdict)
+            else:
+                edited = self.model("full-edit", "ovh", prompt,
+                                    metadata={"source_sha256": original["text_sha256"]},
+                                    tokens=12000 if groq_ovh_klein_pilot() else None)
+                self.current = self.remember_version(edited)
+                self.current = self.inspect(self.current, original)
+            return self.current
+        from .editorial_alt_models import enabled as alternative_test
+        author, editor = ("kilo", "openrouter") if alternative_test() else ("groq", "openrouter")
+        if without_openrouter():
+            editor = "ovh-gptoss"
         try:
             raw = self.model("draft", author, brief, metadata={"topic": self.title})
         except Blocked as exc:
-            if str(exc) in {"production_deadline", "groq_quota_wait_exceeds_deadline"}:
+            if alternative_test() or str(exc) in {"production_deadline", "groq_quota_wait_exceeds_deadline"}:
+                # Kilo/ModelScope were already tried as writers in the
+                # isolated route. OpenRouter must stay the independent editor.
                 raise
             author, editor = "openrouter", "groq"
             raw = self.model("draft-fallback", author, brief, metadata={"topic": self.title})
+        if alternative_test():
+            with self.memory.lock:
+                draft = next((call for call in reversed(self.memory.data["calls"])
+                              if call["article"] == self.id and call["status"] == "responded"
+                              and self.memory.data["tasks"][call["task"]]["operation"].startswith("draft")), None)
+            if draft:
+                author = draft["provider"]
+                self.memory.article(self.id, draft_model=draft["answer"].get("model"))
         self.memory.article(self.id, draft_provider=author, independent_editor_provider=editor)
         self.current = self.remember_version(raw)
         original = self.current
@@ -380,7 +768,7 @@ class Article:
                                 metadata={"source_sha256": original["text_sha256"]})
             self.remember_version(edited)
         except Blocked as exc:
-            can_retry = str(exc) in {"empty_visible_content", "connection_failed", "truncated_response"}
+            can_retry = str(exc) in {"empty_visible_content", "connection_failed", "connection_timeout", "truncated_response"}
             if can_retry:
                 try:
                     edited = self.model("full-edit-retry", editor, edit_prompt,
@@ -413,7 +801,8 @@ class Article:
                 "addressed_issues": before["report"]["issues"], "candidate_issues": after["report"]["issues"]}
 
     def revise(self, brief):
-        limit = self.escalation["agent_revision_limit"]
+        from .editorial_alt_models import enabled as alternative_test
+        limit = min(2, self.escalation["agent_revision_limit"]) if alternative_test() else self.escalation["agent_revision_limit"]
         seen = {self.current["text_sha256"], *(row["after"] for row in self.attempts if "after" in row)}
         for attempt in range(1, limit + 1):
             report = self.current["report"]
@@ -422,14 +811,18 @@ class Article:
             if self.memory.time_left() < 22 * 60:
                 self.blockers.append("revision_deferred_deadline")
                 break
-            prompt = (brief + "\nИсправь только перечисленные проблемы. Сохрани факты, сюжет и "
-                      "структуру, не повторяй отклонённые изменения. Верни полный исправленный текст. "
+            prompt = (brief + "\nИсправь только перечисленные проблемы. Сохрани факты и сюжет. "
+                      "Если зафиксирована ошибка section_structure, сделай ровно шесть или семь разделов "
+                      "с жирными заголовками и краткое вступление перед первым заголовком. "
+                      "Не повторяй отклонённые изменения. Верни полный исправленный текст. "
                       f"\nПРОБЛЕМЫ:\n{json.dumps(report['issues'], ensure_ascii=False)}"
                       f"\nУЖЕ ПРОВЕРЕННЫЕ РЕЗУЛЬТАТЫ:\n{json.dumps(self.attempts, ensure_ascii=False)}"
                       f"\nТЕКУЩАЯ ВЕРСИЯ:\n{self.current['raw']}")
             errors = []
             response = None
-            for provider in ("groq", "openrouter"):
+            providers = ("kilo",) if without_openrouter() else (
+                ("openrouter", "kilo") if alternative_test() else ("groq", "openrouter"))
+            for provider in providers:
                 try:
                     response = self.model(f"repair-{attempt}", provider, prompt)
                     break
@@ -456,69 +849,193 @@ class Article:
                 else "agent_revisions_pending")
 
     def images(self):
+        from .editorial_alt_models import enabled as alternative_test
+        pilot = groq_ovh_klein_pilot()
+        # Mystical scenes use Klein; science retains real photos + Klein mixed media.
+        sourced_illustrations = False
         article = self.current["article"]
         count = len(article["sections"])
-        if not 1 <= count <= self.config["maximum_images"]:
-            raise Blocked("image_plan_article_sections_unavailable")
+        if not 6 <= count <= 7:
+            raise Blocked("image_plan_layout_requires_six_or_seven_sections")
         guide = ("Только illustration. Сделай 7–8 кинематографичных, разных сцен." if self.channel == "legends"
                  else "Скомбинируй оба типа. Предпочти реальные фотографии, когда они точно показывают явление. "
                  "Photo для реальных объектов "
                  "и наблюдений, illustration для объяснения механизмов, аналогий и реконструкций. "
                  "Для photo дай краткий английский поисковый запрос; визуализация не изображает доказательство.")
+        if sourced_illustrations:
+            if self.channel == "legends":
+                guide = ("Подбери разные атмосферные фотографии или иллюстрации, "
+                         "подходящие конкретным разделам вымышленной истории.")
+            guide += (" Для каждой фотографии и иллюстрации составь краткий английский запрос "
+                      "для поиска в Wikimedia Commons. Планируй сюжетно точные кадры, опираясь "
+                      "на объекты, места и сцены, для которых реально найти самостоятельные "
+                      "свободно лицензированные работы. Не выдавай иллюстрацию за документальный кадр.")
         if self.channel == "cinema":
-            guide = ("Только photo: официальные кадры или пресс-материалы именно этого фильма. "
-                     "Описывай подлинную сцену, актёров и визуальный контекст; не придумывай эпизоды.")
-        prompt = (f"{guide} Строго {count+1} разных изображений на {count} разделов: "
+            guide = ("Только photo: подлинные кадры именно этого фильма из открытых источников. "
+                     "Для каждого кадра дай английский запрос по сцене и персонажам; не придумывай эпизоды. "
+                     "Постеры, фан-арт и кадры из других экранизаций не подходят.")
+        allowed_kinds = ("photo" if self.channel == "cinema" else
+                         "illustration" if self.channel == "legends" and not sourced_illustrations else
+                         "photo или illustration")
+        sample_kind = "illustration" if self.channel == "legends" else "photo"
+        prompt = (f"{guide} Поле kind: {allowed_kinds}. Укажи одно точное значение. "
+                  f"Строго {count+1} разных изображений на {count} разделов: "
                   "два разных изображения привяжи к разделу 1 (лучшее по смыслу и качеству "
                   "будет отдельной обложкой сразу после оглавления, второе — сразу после "
                   "первого заголовка), ровно по одному — к каждому разделу 2 и далее. "
                   "После каждого жирного заголовка должен идти кадр без пустых абзацев. "
                   "Оцени каждую сцену по смыслу и не вставляй отвлечённые заглушки. Верни JSON "
-                  '{"subject":"English overall theme","images":[{"section":1,"kind":"photo|illustration",'
+                  '{"subject":"English overall theme","images":[{"section":1,"kind":"'
+                  + sample_kind + '",'
                   '"subject":"English concrete scene or subject","brief":"English detailed visual brief",'
-                  '"query":"English search phrase for photo"}]}.\n'
+                  '"query":"English search phrase"}]}.\n'
                   + self.current["raw"])
+        # Give the planner exactly the canonical text used to validate literal
+        # evidence spans, even when the original Markdown wraps paragraphs.
+        source_sha = self.current["text_sha256"]
+        prompt = (prompt.removesuffix(self.current["raw"]) + scene_qa.CARD_RULES
+                  + "\nПервый из двух кадров первого раздела — обложка. "
+                  "Выбери для неё самый показательный отдельный момент, отличный от кадра раздела. "
+                  + "\nРАЗДЕЛЫ:\n" + json.dumps(
+                      {i: "\n".join([section["heading"], *section["paragraphs"]])
+                       for i, section in enumerate(article["sections"], 1)}, ensure_ascii=False))
+        def check_plan(result, *, sourced=False):
+            normalized = scene_qa.normalize_plan(result)
+            validate_plan(normalized, count, self.channel, self.config, sourced_illustrations=sourced)
+            return scene_qa.attach_cards(normalized, self.id, article, source_sha, article_title=self.title)
+
         plan = None
         last = None
-        for attempt, provider in enumerate(("groq", "openrouter"), 1):
+        if os.environ.get("EDITORIAL_IMAGE_RECOVERY_ONLY") == "true":
+            # Reuse a completed plan only if every card is grounded in this exact text.
+            with self.memory.lock:
+                cached = next((
+                    row["result"] for row in reversed(list(self.memory.data["tasks"].values()))
+                    if row["article"] == self.id and row["operation"].startswith("image-plan-")
+                    and row["status"] == "completed" and isinstance(row.get("result"), dict)
+                    and row["inputs"].get("text_sha256") == source_sha
+                    and row["inputs"].get("scene_qa_schema") == scene_qa.SCHEMA
+                ), None)
+            if cached is None:
+                raise Blocked("image_recovery_missing_grounded_original_plan")
+            plan = check_plan(json_reply(cached))
+        if plan is None and self.memory.retry and os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+            tasks = self.memory.data["tasks"]
+            candidates = [task["id"] for task in tasks.values()
+                          if task["article"] == self.id and task["operation"] == "image-plan-1"
+                          and task["inputs"].get("text_sha256") == source_sha]
+            for previous in reversed(candidates):
+                response = self.memory.response(previous)
+                if response:
+                    try:
+                        recovered = json_reply(response)
+                        check_plan(recovered)
+                        plan = recovered
+                        break
+                    except Blocked as exc:
+                        last = exc
+            if plan is None and last is not None:
+                prompt += ("\nПовтори только JSON. В каждом элементе images обязателен scene_card. "
+                           "Для экономии используй короткие наблюдаемые признаки и дословные цитаты. "
+                           "Дублировать описание во внешнем brief не требуется. Для photo сохрани query.")
+        providers = () if plan is not None else (("groq", "kilo") if without_openrouter() else (
+            ("groq",) if alternative_test() else ("groq", "openrouter")))
+        if ovh_trial():
+            plan = self.memory.data["articles"][self.id].get("trial_image_plan")
+            try:
+                if not isinstance(plan, dict):
+                    raise Blocked("image_plan_missing_from_ovh_review")
+                validate_plan(plan, count, self.channel, self.config, sourced_illustrations=True)
+            except Blocked:
+                if ((not ovh_finalize() and not pilot)
+                        or (pilot and self.memory.retry and not gemini_pilot())):
+                    raise
+                if ovh_recover() or pilot:
+                    layout = ", ".join(map(str, [1, 1, *range(2, count + 1)]))
+                    prompt += (f"\nПерепроверь JSON перед ответом: окончательный массив images "
+                               f"должен иметь ровно {count + 1} элементов; их section в порядке "
+                               f"записей: [{layout}]. Не включай другие варианты и пояснения.")
+                if pilot:
+                    prompt += " Укажи две иллюстрации для Klein. Для всех остальных записей используй photo."
+                provider = "gemini" if gemini_pilot() else "ovh"
+                plan = self.model("image-plan-1", provider, prompt,
+                                  validate=lambda x: validate_plan(x, count, self.channel, self.config,
+                                                                   sourced_illustrations=True),
+                                  metadata={"text_sha256": self.current["text_sha256"]}, tokens=9500)
+                self.memory.article(self.id, trial_image_plan=plan)
+            providers = ()
+        for attempt, provider in enumerate(providers, 1):
             try:
                 plan = self.model(f"image-plan-{attempt}", provider,
                                   prompt + (f"\nИсправь: {last}." if last else ""),
-                                  validate=lambda x: validate_plan(x, count, self.channel, self.config),
-                                  metadata={"text_sha256": self.current["text_sha256"]},
-                                  tokens=2800 if provider == "groq" else 5500)
+                                  validate=lambda x: check_plan(x, sourced=sourced_illustrations),
+                                  metadata={"text_sha256": source_sha, "scene_qa_schema": scene_qa.SCHEMA},
+                                  tokens=3400)
                 break
             except Blocked as exc:
                 last = exc
         if plan is None:
             raise last
-        for index, scene in enumerate(plan["images"], 1):
+        scenes = check_plan(plan, sourced=sourced_illustrations)["images"]
+        cover = next(i for i, scene in enumerate(scenes) if scene["section"] == 1)
+        for i, scene in enumerate(scenes):
+            scene["is_cover"] = i == cover
+            scene["channel"] = self.channel
+            if self.film:
+                scene["film"] = self.film["film"]
+                scene["spoilers"] = self.film["spoilers"]
+        if pilot:
+            if sum(scene["kind"] == "illustration" for scene in scenes) != 2:
+                raise Blocked("image_plan_requires_two_klein_illustrations")
+            scenes = sorted(scenes, key=lambda scene: scene["kind"] != "illustration")
+        for index, scene in enumerate(scenes, 1):
+            if self.film and not self.film["spoilers"] and cinema.spoiler_risk(scene):
+                self.blockers.append(f"image_{index:02d}: spoiler_scene_prohibited")
+                continue
             path = self.folder / "images" / f"{self.current['text_sha256'][:12]}-{index:02d}.jpg"
             existing = read_json(path.with_suffix(".json"))
-            if existing and path.is_file() and digest(path.read_bytes()) == existing["sha256"]:
-                self.pictures.append(existing)
-                continue
             try:
+                if existing and path.is_file() and digest(path.read_bytes()) == existing["sha256"]:
+                    if scene_qa.accepted_for(existing, scene["scene_card"], is_cover=scene["is_cover"]):
+                        self.pictures.append(existing)
+                        continue
+                    try:
+                        self.pictures.append(self.image_index.save(
+                            path.read_bytes(), existing, scene, plan["subject"], path, preserve=True))
+                        continue
+                    except scene_qa.ImageQAError as exc:
+                        if exc.args[0]["status"] == "provider_unavailable":
+                            raise Blocked("image_review_required_provider_unavailable") from None
+                    except (OSError, ValueError):
+                        pass
                 if self.film:
-                    executor = "licensed-official-film-stills"
+                    executor = "public-film-stills"
                     fn = lambda _, s=scene, p=path: cinema.stills(
                         s, plan["subject"], p, self.image_index, self.film["film"], self.cinema_registry)
-                elif scene["kind"] == "photo":
-                    executor = "commons-nasa"
-                    fn = lambda _, s=scene, p=path: photo(s, plan["subject"], p, self.image_index)
+                elif sourced_illustrations or scene["kind"] == "photo":
+                    executor = "commons-verified-license" if sourced_illustrations else "commons-nasa"
+                    # In the mixed-media science pilot, try traceable NASA photos after
+                    # Commons; NASA rights are explicitly left pending for owner review.
+                    # Only the sourced-illustration route requires Commons license metadata.
+                    options = {"verified_only": True} if self.channel == "science" or sourced_illustrations else {}
+                    fn = lambda _, s=scene, p=path: photo(s, plan["subject"], p, self.image_index, **options)
                 else:
                     executor = "klein"
                     fn = lambda task, s=scene, p=path: generated(s, plan["subject"], p, self.image_index,
                                                                  task, self.id, self.channel)
                 result = self.task(f"image-{index:02d}", executor,
-                                   {"scene": scene, "text_sha256": self.current["text_sha256"]},
+                                   {"scene": scene, "text_sha256": self.current["text_sha256"],
+                                    **({"source": executor} if sourced_illustrations or self.film else {})},
                                    fn, minimum_seconds=155)
                 if not path.is_file() or digest(path.read_bytes()) != result["sha256"]:
                     raise Blocked("stored_image_unavailable_or_sha_mismatch")
+                if not scene_qa.accepted_for(result, scene["scene_card"], is_cover=scene["is_cover"]):
+                    raise Blocked("image_review_required_stale_or_unverified")
                 self.pictures.append(result)
             except Blocked as exc:
                 self.blockers.append(f"image_{index:02d}: {exc}")
-                if str(exc) == "production_deadline" or str(exc).startswith("visual_matcher_unavailable"):
+                if str(exc) == "production_deadline" or str(exc).startswith((
+                        "visual_matcher_unavailable", "image_review_required_provider_unavailable")):
                     break
         if len(self.pictures) != len(plan["images"]):
             self.blockers.append("incomplete_image_plan")
@@ -527,8 +1044,46 @@ class Article:
 
     def run(self):
         existing = self.memory.data["articles"].get(self.id, {})
-        if existing.get("status") in ("review_pending", "rights_review_pending") and not self.memory.retry:
-            return existing["status"]
+        from .editorial_alt_models import enabled as alternative_test
+        if existing.get("status") in {"review_pending", "rights_review_pending"} and (
+                not self.memory.retry or alternative_test()):
+            review = self.memory.folder / "review" / self.id
+            saved = read_json(review / "Статус и проверки.json")
+            if saved and saved.get("text_sha256") == existing.get("text_sha256"):
+                try:
+                    final_visual_gate(
+                        saved.get("visual_article"), saved.get("images", []), saved["text_sha256"], self.id,
+                        lambda name: (review / "images" / name).read_bytes(),
+                        encoded=((review / "Статья.html").read_bytes(), (review / "Статья.docx").read_bytes()),
+                    )
+                    if saved.get("layout_status") == "verified":
+                        return existing["status"]
+                except (Blocked, OSError):
+                    pass
+        if os.environ.get("EDITORIAL_IMAGE_RECOVERY_ONLY") == "true":
+            if not self.memory.retry or self.channel != "cinema":
+                raise Blocked("image_recovery_requires_cinema_retry")
+            # Do not rerun any text model or QA. Read ONLY the immutable
+            # article text and report preserved in the authenticated state.
+            self.title = existing["title"]
+            topic = existing["topic_plan"]
+            self.records = topic["records"]
+            self.film = {k: topic[k] for k in ("film", "format", "spoilers", "detailed_plot_evidence")}
+            original_sha = existing["text_sha256"]
+            raw_path = self.folder / "versions" / (original_sha + ".md")
+            report_path = self.folder / "versions" / (original_sha + ".json")
+            if not raw_path.is_file() or not report_path.is_file():
+                raise Blocked("image_recovery_immutable_original_missing")
+            self.current = self.remember_version(raw_path.read_text(encoding="utf-8"),
+                                                  report=read_json(report_path))
+            if self.current["text_sha256"] != original_sha:
+                raise Blocked("image_recovery_original_sha_mismatch")
+            self.memory.article(self.id, status="running", channel=self.channel)
+            try:
+                self.images()
+            except Blocked as exc:
+                self.blockers.append(str(exc))
+            return self.finish()
         self.memory.article(self.id, status="running", channel=self.channel, prompt_version=PROMPT_VERSION,
                             started_at=existing.get("started_at") or now())
         try:
@@ -584,19 +1139,28 @@ class Article:
                 minimum=self.config["minimum_images"], maximum=self.config["maximum_images"])
             if visual_issues:
                 self.blockers.extend(visual_issues)
+            if any(not scene_qa.accepted_for(
+                    row, (row.get("image_qa") or {}).get("scene_card"), is_cover=row.get("is_cover"))
+                    or (row.get("image_qa") or {}).get("source_text_sha256") != self.current["text_sha256"]
+                    for row in self.pictures):
+                self.blockers.append("image_review_required_stale_or_unverified")
             summary["layout_status"] = "layout_blocked" if visual_issues else "verified"
             summary["layout_issues"] = visual_issues
             pending_rights = any(row["rights_status"] == "rights_review_pending" for row in self.pictures)
             status = ("partial_review_pending" if self.blockers else
-                      "rights_review_pending" if pending_rights else "review_pending")
+                      "rights_review_pending" if pending_rights and not self.film else "review_pending")
             summary.update(status=status, rights_status="rights_review_pending" if pending_rights else
                            "metadata_verified" if self.pictures else "unavailable")
+            if self.film and pending_rights:
+                summary["image_use"] = "private_editorial_review_only"
             folder = self.memory.folder / "review" / self.id
             try:
                 self.task("review-package", "docx-html-export",
                           {"text_sha256": report["text_sha256"], "checks_sha256": digest(
                               json.dumps(report, sort_keys=True, ensure_ascii=False)),
-                           "image_sha256": [row["sha256"] for row in self.pictures], "status": status},
+                           "visual_evidence_sha256": [digest(scene_qa.json_bytes(row["image_qa"]))
+                                                      for row in self.pictures],
+                           "scene_qa_schema": scene_qa.SCHEMA, "status": status},
                           lambda _: package(folder, self.title,
                                             sorted((self.folder / "versions").glob("*")), report,
                                             self.pictures, self.folder / "images", summary), minimum_seconds=-300)
@@ -664,7 +1228,7 @@ def status(memory):
     entries = memory.data["articles"]
     expected = {f"{channel}-{i:02d}" for channel, n in memory.config["articles_per_channel"].items()
                 for i in range(1, n + 1)}
-    return {"day": memory.day, "articles": {article: entries.get(article, {}).get("status", "missing")
+    result = {"day": memory.day, "articles": {article: entries.get(article, {}).get("status", "missing")
                                          for article in sorted(expected)},
             "calls": dict(Counter(x["provider"] for x in memory.data["calls"])),
             "production_started_at": memory.data.get("started_at"),
@@ -673,6 +1237,25 @@ def status(memory):
             "groq_forecast": groq_plan(memory),
             "delivery": memory.data.get("delivery", {"status": "not_connected"}),
             "publication_authorized": False}
+    if groq_ovh_klein_pilot():
+        draft_calls = [row for row in memory.data["calls"]
+                       if row["provider"] == "groq" and row["status"] == "responded"]
+        counts = [row.get("total_tokens") for row in draft_calls]
+        if counts and all(type(count) is int for count in counts):
+            result["groq_pilot_capacity"] = {
+                "tokens_for_one_draft": sum(counts),
+                "nine_draft_projection": 9 * sum(counts),
+            }
+    if gemini_pilot():
+        calls = [row for row in memory.data["calls"] if row["provider"] == "gemini"]
+        result["gemini_budget"] = {"project_rpm_configured": gemini_limit("EDITORIAL_GEMINI_RPM", 3, 30),
+                                   "local_daily_ceiling": memory.config["daily_calls"]["gemini"],
+                                   "per_article_ceiling": memory.config["per_article_calls"]["gemini"],
+                                   "planned_articles": sum(memory.config["articles_per_channel"].values()),
+                                   "base_calls": 2 * sum(memory.config["articles_per_channel"].values()),
+                                   "calls": len(calls),
+                                   "tokens": sum(row.get("usage", {}).get("total_tokens", 0) for row in calls)}
+    return result
 
 
 def review(memory):
@@ -683,7 +1266,7 @@ def review(memory):
                              for article, entry in memory.data["articles"].items()}
     write_json(review_dir / "Статус комплекта.json", report)
     packet = memory.folder / "Комплект согласования.zip"
-    sha = zip_packet(review_dir, packet)
+    sha = zip_packet(review_dir, packet, articles=report["articles"])
     write(packet.with_suffix(".sha256"), (sha + "\n").encode("utf-8"))
     memory.save()
     if not memory.private_git:
@@ -773,11 +1356,65 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
             cfg = {**cfg, "per_article_calls": {
                 **cfg["per_article_calls"], "openrouter": 12},
                 "daily_calls": {**cfg["daily_calls"], "openrouter": 36}}
+    if without_openrouter() and os.environ.get("EDITORIAL_ALT_MODELS_TEST") != "true":
+        raise Blocked("openrouter_disable_requires_alternate_validation")
+    if os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true":
+        from .editorial_alt_models import require_isolated
+        require_isolated()
+        if command not in {"daily", "retry"} or not validation_window or not encrypted_mode:
+            raise Blocked("alt_test_requires_encrypted_validation")
+        if groq_gemini_klein_pilot():
+            # One article for each currently requested test channel.
+            # A fresh article requires one topic, one draft, one image-plan
+            # request on Groq and at most one edit plus one QA on Gemini.
+            cfg = {**cfg, "articles_per_channel": {"legends": 1, "cinema": 1},
+                   "per_article_calls": {**cfg["per_article_calls"],
+                                         "groq": 3, "gemini": 2,
+                                         "klein": 8, "openrouter": 0,
+                                         "ovh": 0, "ovh-gptoss": 0, "kilo": 0},
+                   "daily_calls": {**cfg["daily_calls"],
+                                   "groq": 6, "gemini": 4,
+                                   "klein": 16, "openrouter": 0,
+                                   "ovh": 0, "ovh-gptoss": 0, "kilo": 0}}
+            if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+                if not validate_cinema:
+                    raise Blocked("release_trio_requires_isolated_cinema_validation")
+                cfg["articles_per_channel"]["science"] = 1
+                cfg["daily_calls"].update(groq=9, gemini=6, klein=18)
+                cfg["per_article_calls"]["groq"] = 4
+            if os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true":
+                cfg["articles_per_channel"] = {"cinema": 1}
+                cfg["per_article_calls"]["groq"] = 2
+                cfg["daily_calls"]["groq"] = 2
+                cfg["daily_calls"]["gemini"] = 2
+                cfg["daily_calls"]["klein"] = 8
+            if os.environ.get("EDITORIAL_LEGENDS_RECOVERY_ONLY") == "true":
+                if command != "retry":
+                    raise Blocked("legends_recovery_must_restore_existing_checkpoint")
+                cfg["articles_per_channel"] = {"legends": 1}
+                # Previous two failed Gemini calls are retained in encrypted state.
+                # Allow just ONE additional metered attempt, not a fresh budget.
+                cfg["per_article_calls"]["gemini"] = 3
+                cfg["daily_calls"]["gemini"] = 5
+                cfg["daily_calls"]["groq"] = 6
+                cfg["daily_calls"]["klein"] = 8
+        else:
+            if without_openrouter():
+                raise Blocked("openrouter_required_after_ovh_removal")
+            cfg = {**cfg,
+                   "per_article_calls": {**cfg["per_article_calls"], "kilo": 15,
+                                         "openrouter": 5, "klein": 12},
+                   "daily_calls": {**cfg["daily_calls"], "kilo": 32,
+                                   "openrouter": 10, "klein": 24}}
+            if os.environ.get("EDITORIAL_TWO_CHANNEL_PILOT") == "true":
+                cfg["articles_per_channel"] = {"legends": 1, "cinema": 1}
+    if ovh_trial():
+        raise Blocked("ovh_removed_from_project")
     return cfg
 
 
 def execute(command, state, private_git=None, day=None, validation_window=None, encrypted_mode=False,
-            *, validate_cinema=False):
+            *, validate_cinema=False, release_checkpoint=None):
     cfg = cycle_settings(command, validation_window, encrypted_mode, validate_cinema)
     tz = ZoneInfo(cfg["timezone"])
     today = datetime.now(tz).date().isoformat()
@@ -789,10 +1426,12 @@ def execute(command, state, private_git=None, day=None, validation_window=None, 
         private_git.restore(state, day)
     with (state / ".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if release_checkpoint and release_checkpoint.restore(state, day):
+            command = "retry"
         cutoff = deadline(day, cfg["production_stop"], tz)
         if validation_window:
             cutoff = datetime.now(timezone.utc) + timedelta(minutes=validation_window)
-        memory = Memory(state, day, cutoff, cfg, private_git, retry=command == "retry",
+        memory = Memory(state, day, cutoff, cfg, release_checkpoint or private_git, retry=command == "retry",
                         lane="experiment" if validation_window else "production")
         if command == "health":
             return health(private_git)
@@ -818,7 +1457,9 @@ def execute(command, state, private_git=None, day=None, validation_window=None, 
             return review(memory)
         if not private_git and not encrypted_mode:
             raise Blocked("storage_configuration_pending: encrypted_or_private_storage_required")
-        if day != today:
+        from .editorial_alt_models import enabled as alternative_test
+        if day != today and not (alternative_test() and command == "retry" and encrypted_mode
+                                 and memory.file.is_file() and day < today):
             raise Blocked("live_generation_only_for_current_moscow_date")
         if "started_at" not in memory.data:
             memory.data["started_at"] = now()
@@ -888,8 +1529,16 @@ def main():
                 raise Blocked("local_state_must_be_outside_repository")
             storage = PrivateGit(storage_repo, Path(temporary) / "storage", token) if storage_repo or token else None
             state = args.local_state or Path(temporary) / "editorial"
+            durable = None
+            if (os.environ.get("EDITORIAL_RELEASE_TRIO") == "true" and args.command in {"daily", "retry"}
+                    and args.encrypted_mode):
+                from .editorial_v1_checkpoints import ReleaseCheckpoint
+
+                durable = ReleaseCheckpoint(Path(temporary) / "v1-checkpoints",
+                                            os.environ.get("EDITORIAL_V1_CHECKPOINT_TOKEN"),
+                                            os.environ.get("GITHUB_RUN_ID"))
             result = execute(args.command, state, storage, args.date, args.validation_window, args.encrypted_mode,
-                             validate_cinema=args.validate_cinema)
+                             validate_cinema=args.validate_cinema, release_checkpoint=durable)
             if args.encrypted_mode and args.command in {"daily", "retry"}:
                 cfg = cycle_settings(args.command, args.validation_window, args.encrypted_mode, args.validate_cinema)
                 memory = Memory(state, result["day"], datetime.now(timezone.utc), cfg)
@@ -903,8 +1552,11 @@ def main():
         print(json.dumps(public, ensure_ascii=False, sort_keys=True))
         if args.command == "review" and result["status"] != "owner_notification_created":
             return 2
-        if args.command in {"daily", "retry"} and any(s not in {"review_pending", "rights_review_pending"}
-                                                      for s in result["articles"].values()):
+        from .editorial_alt_models import enabled as alternative_test
+        ready = {"review_pending"}
+        if not (args.validate_cinema or alternative_test()):
+            ready.add("rights_review_pending")
+        if args.command in {"daily", "retry"} and any(s not in ready for s in result["articles"].values()):
             return 2
     except (Blocked, StorageError, ValueError, OSError) as exc:
         message = str(exc) if isinstance(exc, (Blocked, StorageError)) else type(exc).__name__

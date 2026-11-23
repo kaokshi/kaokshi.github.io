@@ -1,0 +1,67 @@
+name: One-time Kilo free model JSON and instruction-following capability probe
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-kilo-capability-probe-once.yml
+permissions:
+  contents: read
+jobs:
+  kilo-synthetic-check:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      GITHUB_ACTIONS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Perform two tiny NON-ARTICLE JSON format tests on Kilo free virtual model only
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from pathlib import Path
+          from src.editorial_alt_models import KILO_ID, KILO_URL, candidate_headers, generate, require_isolated
+          from src.editorial_providers import parse_json, request
+          assert not os.environ.get("GROQ_API_KEY")
+          assert json.loads(Path("config/site.json").read_text())["publication_enabled"] is False
+          require_isolated()
+          models = parse_json(request(KILO_URL + "/models", ("ai-gateway.kilo.ai",),
+                                      headers=candidate_headers("kilo"))).get("data",[])
+          assert any(isinstance(m,dict) and m.get("id")==KILO_ID for m in models)
+          prompts = [
+              ('Return ONLY valid JSON: {"items":[{"type":"synthetic_fixture","number":17}],"ok":true}. No markdown, no explanation.',
+               lambda x: x.get("ok") is True and x.get("items")==[{"type":"synthetic_fixture","number":17}]),
+              ('Верни строго один JSON-объект с полями check="synthetic_only", count=3 и ok=true. Никаких пояснений.',
+               lambda x: x.get("check")=="synthetic_only" and x.get("count")==3 and x.get("ok") is True)
+          ]
+          results=[]
+          for i,(prompt,valid) in enumerate(prompts,1):
+              started=time.monotonic()
+              try:
+                  response=generate("kilo",prompt,max_tokens=240)
+                  raw=response["text"].strip()
+                  if raw.startswith("```"):
+                      raw=raw.partition("\n")[2].removesuffix("```").strip()
+                  data=json.loads(raw)
+                  passed=valid(data)
+                  results.append({"case":i,"request_succeeded":True,"json_valid":True,
+                                  "schema_passed":passed,"elapsed_seconds":round(time.monotonic()-started,2),
+                                  "usage":response.get("usage",{})})
+              except (Exception) as error:
+                  results.append({"case":i,"request_succeeded":False,
+                                  "error_code":type(error).__name__,
+                                  "elapsed_seconds":round(time.monotonic()-started,2)})
+          print("KILO_SYNTHETIC_RESULTS="+json.dumps(results,sort_keys=True))
+          print("This was NOT article generation; ModelScope was NOT called.")
+          if not all(x.get("schema_passed") for x in results):
+              raise SystemExit("kilo_synthetic_format_not_fully_verified")
+          PY

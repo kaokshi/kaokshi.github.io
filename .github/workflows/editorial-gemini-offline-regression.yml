@@ -1,0 +1,27 @@
+name: Gemini offline reliability regressions
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-gemini-offline-regression.yml
+      - tests/test_editorial_gemini_reliability.py
+      - src/editorial_providers.py
+      - src/editorial_brain.py
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gemini-offline-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify no-network Gemini error and quota regressions
+        run: |
+          python -m unittest -q tests.test_editorial_gemini_reliability tests.test_editorial_groq_gemini_klein

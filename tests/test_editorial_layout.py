@@ -12,8 +12,10 @@ from PIL import Image
 from src.editorial_images import validate_plan
 from src.editorial_layout import arrange, layout_issues
 from src.editorial_memory import digest
-from src.editorial_package import package
+from src.editorial_package import final_visual_gate, package
 from src.editorial_providers import Blocked
+from tests.editorial_scene_fixtures import certify, distinct_picture
+from src.editorial_scene_qa import section_text
 from src.editorial_review import canonical, parse_article, structural_checks
 
 
@@ -31,7 +33,7 @@ def image_fixture(root):
     folder.mkdir()
     for i in range(1, 8):
         output = folder / f"picture-{i}.jpg"
-        Image.new("RGB", (80, 60), (12 * i, 15 * i, 22 * i)).save(output)
+        distinct_picture(i).save(output)
         images.append({"file": output.name, "sha256": digest(output.read_bytes()),
                        "section": 1 if i <= 2 else i - 1,
                        "cover_score": 10 if i == 2 else 0,
@@ -81,6 +83,9 @@ class LayoutTests(unittest.TestCase):
             report = {"article": article, "text_sha256": digest(canonical(article)),
                       "facts": {"evidence": []}}
             dest = root / "legends-01"
+            for row in images:
+                certify(row, dest.name, row["file"] == "picture-2.jpg", report["text_sha256"],
+                        section_text(article["sections"][row["section"] - 1]))
             package(dest, "Окно на чердаке", [], report, images, source,
                     {"status": "rights_review_pending"})
 
@@ -141,6 +146,9 @@ class LayoutTests(unittest.TestCase):
             report = {"article": article, "text_sha256": digest(canonical(article)),
                       "facts": {"evidence": []}}
             folder = root / "science-01"
+            for row in images:
+                certify(row, folder.name, row["file"] == "picture-2.jpg", report["text_sha256"],
+                        section_text(article["sections"][row["section"] - 1]))
             package(folder, "Тест фото", [], report, images, source, {})
             checks = json.loads((folder / "Статус и проверки.json").read_text(encoding="utf-8"))
             self.assertEqual(checks["subscription_link_status"], "linked")
@@ -148,6 +156,44 @@ class LayoutTests(unittest.TestCase):
             html = (folder / "Статья.html").read_text(encoding="utf-8")
             self.assertIn("https://creativecommons.org/licenses/by/4.0/", html)
             self.assertIn('href="https://dzen.ru/sciencebox"', html)
+
+    def test_final_gate_rechecks_current_sections_local_files_and_html(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            source, images = image_fixture(root)
+            article = article_six()
+            text_sha = digest(canonical(article))
+            for row in images:
+                certify(row, "legends-01", row["file"] == "picture-2.jpg", text_sha,
+                        section_text(article["sections"][row["section"] - 1]))
+            report = {"article": article, "text_sha256": text_sha, "facts": {"evidence": []}}
+            folder = root / "legends-01"
+            ready = {"status": "rights_review_pending"}
+            for _ in range(2):
+                package(folder, "Synthetic article", [], report, images, source, ready)
+            files = lambda name: (source / name).read_bytes()
+            html, docx = ((folder / name).read_bytes() for name in ("Статья.html", "Статья.docx"))
+            final_visual_gate(article, images, text_sha, folder.name, files, encoded=(html, docx))
+            duplicate = BytesIO()
+            with Image.open(source / "picture-2.jpg") as original:
+                original.save(duplicate, "JPEG", quality=65)
+            duplicated_rows = [dict(row) for row in images]
+            duplicate_row = duplicated_rows[0]
+            duplicate_row["sha256"] = digest(duplicate.getvalue())
+            certify(duplicate_row, folder.name, False, text_sha, section_text(article["sections"][0]))
+            with self.assertRaisesRegex(Blocked, "duplicate_image_pixels"):
+                final_visual_gate(article, duplicated_rows, text_sha, folder.name,
+                                  lambda name: duplicate.getvalue() if name == duplicate_row["file"] else files(name))
+            html = html.replace(b'images/picture-2.jpg', b'https://old.example/expired.jpg')
+            with self.assertRaisesRegex(Blocked, "image_placement_mismatch"):
+                final_visual_gate(article, images, text_sha, folder.name, files, encoded=(html, docx))
+            asset = source / "picture-2.jpg"
+            asset.unlink()
+            with self.assertRaisesRegex(Blocked, "file_missing_or_invalid"):
+                final_visual_gate(article, images, text_sha, folder.name, files)
+            article["sections"][0]["paragraphs"].append("Изменение текста раздела.")
+            with self.assertRaisesRegex(Blocked, "stale_image_needs_recheck"):
+                final_visual_gate(article, images, digest(canonical(article)), folder.name, files)
 
     def test_intro_is_valid_before_first_heading(self):
         raw = ("Вступительный абзац.\n\n" +

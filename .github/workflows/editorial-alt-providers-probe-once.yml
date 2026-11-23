@@ -1,0 +1,74 @@
+name: Isolated Kilo ModelScope OpenRouter connectivity probe
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-alt-providers-probe-once.yml
+permissions:
+  contents: read
+jobs:
+  provider-only-probe:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
+      MODELSCOPE_API_TOKEN: ${{ secrets.MODELSCOPE_API_TOKEN }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check publication lock and hard absence of Groq
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          from src.editorial_alt_models import require_isolated
+          assert os.getenv("GROQ_API_KEY") is None
+          assert json.loads(Path("config/site.json").read_text())["publication_enabled"] is False
+          assert json.loads(Path("config/editorial_production.json").read_text())["schedule"]["enabled"] is False
+          require_isolated()
+          print("isolated=true, Groq absent, publishing disabled")
+          PY
+      - name: Probe Kilo free catalog and ModelScope existing token independently
+        env:
+          GITHUB_ACTIONS: 'true'
+        run: |
+          python - <<'PY'
+          import json,os
+          from src.editorial_alt_models import KILO_URL,KILO_ID,MODELSCOPE_URL,MODELSCOPE_ID,candidate_headers
+          from src.editorial_providers import request, parse_json, Blocked
+          result = {"kilo":"unverified","modelscope":"unverified",
+                    "openrouter_role":"independent_editor_only",
+                    "groq_calls":0,"generation_calls":0,"publication_authorized":False}
+          try:
+              rows = parse_json(request(KILO_URL + "/models",("ai-gateway.kilo.ai",),
+                                        headers=candidate_headers("kilo"))).get("data",[])
+              result["kilo"] = ("catalog_model_found" if any(
+                   isinstance(row,dict) and row.get("id")==KILO_ID for row in rows
+                   ) else "catalog_model_not_found")
+          except Exception as e:
+              result["kilo"] = "catalog_request_failed_" + type(e).__name__
+          if not os.environ.get("MODELSCOPE_API_TOKEN"):
+              result["modelscope"] = "account_api_token_missing"
+          else:
+              try:
+                  rows = parse_json(request(MODELSCOPE_URL + "/models",
+                                            ("api-inference.modelscope.cn",),
+                                            headers=candidate_headers("modelscope"))).get("data",[])
+                  result["modelscope"] = ("catalog_model_found" if any(
+                      isinstance(row,dict) and row.get("id")==MODELSCOPE_ID for row in rows
+                      ) else "catalog_model_not_found")
+              except Exception as e:
+                  result["modelscope"] = "catalog_request_failed_" + type(e).__name__
+          print("PROBE_RESULT=" + json.dumps(result,sort_keys=True))
+          # Informational only; the production test remains blocked until both
+          # models are confirmed FREE and available. No creative task requested.
+          PY

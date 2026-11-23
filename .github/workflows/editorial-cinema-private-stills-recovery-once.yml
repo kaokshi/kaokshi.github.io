@@ -1,0 +1,114 @@
+name: Restore cinema article and select real stills without generative calls
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-cinema-private-stills-recovery-once.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  cinema-recover-images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 125
+    env:
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_GROQ_GEMINI_KLEIN_PILOT: 'true'
+      EDITORIAL_CINEMA_ONLY_SEED: 'true'
+      EDITORIAL_IMAGE_RECOVERY_ONLY: 'true'
+      EDITORIAL_GROQ_FREE_ONLY: 'true'
+      EDITORIAL_TEST_FREE_ONLY: 'true'
+      EDITORIAL_CF_FREE_ONLY: 'true'
+      EDITORIAL_GROQ_FALLBACK_ONLY: 'false'
+      EDITORIAL_OVH_ONE_ARTICLE: 'false'
+      EDITORIAL_GROQ_OVH_KLEIN_PILOT: 'false'
+      EDITORIAL_TEST_WITHOUT_OPENROUTER: 'false'
+      GROQ_API_KEY: ''
+      GEMINI_API_KEY: ''
+      CLOUDFLARE_API_TOKEN: ''
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_ACTIONS: 'true'
+      OMP_NUM_THREADS: '2'
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_XET: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Freeze publication and forbid ALL paid or free generative API calls
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          s=json.loads(Path("config/site.json").read_text())
+          assert s["publication_enabled"] is False
+          assert all(not os.environ.get(k) for k in
+                 ("GROQ_API_KEY","GEMINI_API_KEY","CLOUDFLARE_API_TOKEN",
+                  "OPENROUTER_API_KEY","KILO_API_KEY","OVH_API_KEY"))
+          c=json.loads(Path("config/editorial_production.json").read_text())
+          with open(os.environ["GITHUB_ENV"],"a") as f:
+              f.write("EDITORIAL_REVIEW_PUBLIC_KEY="+c["schedule"]["owner_public_key"]+"\n")
+              f.write("EDITORIAL_STATE_DIR="+os.environ["RUNNER_TEMP"]+"/cinema-image-recovery\n")
+              f.write("EDITORIAL_SEALED_DIR="+os.environ["RUNNER_TEMP"]+"/cinema-image-sealed\n")
+          print("Resuming signed draft for PHOTO ONLY; no model API secrets exposed.")
+          PY
+      - name: Install pinned CPU image QA and documents
+        run: |
+          python -m pip install 'cryptography>=44,<48'
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
+          python -m pip install -r requirements-production.txt
+          aiw-ru models install modernbert lightgbm transformer || echo "::warning::Detector install incomplete; keep QA blocked"
+      - name: Restore exact original Groq Gemini cinema draft
+        run: |
+          umask 077
+          day="$(TZ=Europe/Moscow date +%F)"
+          echo "$day" > "$RUNNER_TEMP/editorial-day"
+          python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" --date "$day" --run-id 45179066538
+      - name: Resume only cached editorial stages and newly sourced actual film stills
+        id: images
+        timeout-minutes: 90
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ''
+          EDITORIAL_PRIVATE_REPOSITORY: ''
+        run: |
+          python -m src.editorial_brain retry --date "$(cat "$RUNNER_TEMP/editorial-day")" \
+            --encrypted-mode --validate-cinema --validation-window 90 --local-state "$EDITORIAL_STATE_DIR"
+      - name: Deliver clearly labeled final or incomplete review privately
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            python -m src.editorial_chat_plaintext publish --root "$EDITORIAL_STATE_DIR" \
+              --date "$(cat "$RUNNER_TEMP/editorial-day")"
+          fi
+      - name: Post sanitized image test status
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -f "$EDITORIAL_STATE_DIR/$(cat "$RUNNER_TEMP/editorial-day")/state.json" ]; then
+            python -m src.editorial_chat_bridge --root "$EDITORIAL_STATE_DIR" --date "$(cat "$RUNNER_TEMP/editorial-day")"
+          fi
+      - name: Seal original recovered test state
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            python -m src.editorial_delivery seal --root "$EDITORIAL_STATE_DIR" \
+              --date "$(cat "$RUNNER_TEMP/editorial-day")" --output "$EDITORIAL_SEALED_DIR"
+          fi
+      - name: Preserve only encrypted artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinema-prisoners-recovered-real-stills-encrypted
+          path: |
+            ${{ env.EDITORIAL_SEALED_DIR }}/checkpoint.enc
+            ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
+          if-no-files-found: warn
+          retention-days: 14

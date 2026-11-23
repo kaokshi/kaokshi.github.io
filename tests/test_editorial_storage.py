@@ -14,20 +14,23 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 from docx import Document
-from PIL import Image
 
 from src.editorial_brain import Memory, review, settings
-from src.editorial_delivery import restore_blob, retrieve, save_outputs
+from src.editorial_delivery import bundle_state, restore_blob, retrieve, save_outputs, seal_state
 from src.editorial_groq_budget import snapshot
 from src.editorial_groq_ledger import archive_document, collection
 from src.editorial_memory import digest, read_json, write_json
 from src.editorial_package import ArticleHTML, package
 from src.editorial_providers import Blocked
+from tests.editorial_scene_fixtures import certify, distinct_picture
+from src.editorial_scene_qa import section_text
 from src.editorial_review import canonical, parse_article
 
 
 DAY = "2026-11-22"
-FIXTURE = parse_article("**Проверка восстановления**\n" + "Контрольный текст. " * 230 + "Подпишитесь.")
+FIXTURE = parse_article("Тест восстановления.\n\n" + "\n\n".join(
+    f"**Проверка восстановления {n}**\n\n" + "Контрольный текст. " * 40 for n in range(1, 7))
+    + "Подпишитесь.")
 ARTICLE_IDS = ("legends-01", "science-01")
 
 
@@ -40,10 +43,12 @@ def build_fixture(root):
         for i in range(7):
             name = f"{i}.jpg"
             file = image_folder / name
-            Image.new("RGB", (80, 60), (i * 20, 70, 90)).save(file)
-            images.append({"file": name, "section": 1, "cover_score": i,
-                           "scene": "Контрольная иллюстрация", "kind": "generated",
-                           "sha256": digest(file.read_bytes())})
+            distinct_picture(i).save(file)
+            row = {"file": name, "section": max(i, 1), "cover_score": i,
+                   "scene": "Контрольная иллюстрация", "kind": "generated",
+                   "sha256": digest(file.read_bytes())}
+            images.append(certify(row, article_id, i == 0, digest(canonical(FIXTURE)),
+                                  section_text(FIXTURE["sections"][row["section"] - 1])))
         package(memory.folder / "review" / article_id, article_id, [],
                 {"article": FIXTURE, "text_sha256": digest(canonical(FIXTURE)), "facts": {"evidence": []}},
                 images, image_folder, {"status": "rights_review_pending"})
@@ -94,6 +99,22 @@ def validate_restored(encrypted, workspace, key):
 
 
 class StorageTests(unittest.TestCase):
+    def test_restore_preserves_drafts_when_old_visual_evidence_requires_recheck(self):
+        with TemporaryDirectory() as directory, patch.dict(
+                os.environ, {"EDITORIAL_STATE_KEY_HEX": os.urandom(32).hex()}):
+            root = Path(directory)
+            original = root / "original"
+            build_fixture(original)
+            checkpoint = seal_state(bundle_state(original, DAY))
+            restored = root / "restored"
+            with patch("src.editorial_delivery.verify_review",
+                       side_effect=Blocked("image_review_required_before_packaging")):
+                restore_blob(checkpoint, restored, DAY)
+            self.assertTrue((restored / DAY / "state.json").is_file())
+            self.assertTrue((restored / DAY / "review" / "legends-01" / "images" / "0.jpg").is_file())
+            self.assertFalse((restored / DAY / "Комплект согласования.zip").exists())
+            self.assertFalse((restored / DAY / "Комплект согласования.sha256").exists())
+
     def test_pack_restore_and_open_after_original_workspace_removed(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

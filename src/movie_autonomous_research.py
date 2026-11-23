@@ -9,13 +9,14 @@ from datetime import date
 import json
 import re
 from urllib.parse import urlencode, quote
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from .editorial_providers import Blocked
 
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 WIKIPEDIA_API = "https://ru.wikipedia.org/w/api.php"
-USER_AGENT = "ZenEditorialCinemaResearch/1.0 (source-checking; public articles)"
+USER_AGENT = "ZenEditorialCinemaResearch/1.0 (+https://kaokshi.github.io; factual film research)"
 MAX_BYTES = 1_000_000
 FILM_CLASSES = {"Q11424", "Q24869"}  # film, feature film
 
@@ -49,6 +50,15 @@ def fetch_json(endpoint, params):
             if not isinstance(result, dict) or result.get("error"):
                 raise ValueError("Invalid API response")
             return result
+        except HTTPError as exc:
+            # Do not retry a forbidden Wikimedia endpoint as if 403 were a transient outage.
+            if exc.code in (403, 404, 429):
+                raise Blocked("film_source_api_http_" + str(exc.code)) from None
+            if attempt == 0 and 500 <= exc.code < 600:
+                from time import sleep
+                sleep(1)
+                continue
+            raise Blocked("film_source_api_unavailable") from None
         except OSError as exc:
             if attempt == 0:
                 # The first Wikimedia endpoint failure can be transient.
@@ -69,6 +79,14 @@ def claim_ids(entity, property_id):
         if isinstance(value, dict) and re.fullmatch(r"Q[1-9][0-9]*", str(value.get("id", ""))):
             result.append(value["id"])
     return result
+
+
+def review_urls(entity):
+    for claim in entity.get("claims", {}).get("P1258", []):
+        value = claim.get("mainsnak", {}).get("datavalue", {}).get("value")
+        if (claim.get("rank") != "deprecated" and isinstance(value, str)
+                and re.fullmatch(r"m/[a-zA-Z0-9_-]{1,120}", value)):
+            yield "https://www.rottentomatoes.com/" + value
 
 
 def release_dates(entity):
@@ -210,6 +228,7 @@ def movie_sources(task, payload, *, get_json=fetch_json):
                  "imdb_id": (movie.get("claims", {}).get("P345") or [{}])[0]
                      .get("mainsnak", {}).get("datavalue", {}).get("value"),
                  "years": years, "release_dates": release_dates(movie),
+                 "catalog_review_urls": list(dict.fromkeys(review_urls(movie))),
                  "directors": directors, "cast": cast, "cast_roles": cast_roles,
                  "wikipedia_title": wiki_title},
         "documents": [

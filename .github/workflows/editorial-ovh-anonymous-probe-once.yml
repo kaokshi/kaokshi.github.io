@@ -1,0 +1,67 @@
+name: One-time OVHcloud Qwen low-reasoning JSON output probe
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-ovh-anonymous-probe-once.yml
+permissions:
+  contents: read
+jobs:
+  ovh-anonymous-probe:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
+      GITHUB_ACTIONS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check anonymous catalog and generate ONE tiny synthetic JSON using OVH
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from pathlib import Path
+          from src.editorial_alt_models import (preflight, generate, OVH_ID, OVH_CATALOG_URL,
+                                                 require_isolated)
+          from src.editorial_providers import request, parse_json, Blocked
+          assert os.environ.get("GROQ_API_KEY") is None
+          assert os.environ.get("OVH_AI_ENDPOINTS_ACCESS_TOKEN") is None
+          assert json.loads(Path("config/site.json").read_text())["publication_enabled"] is False
+          require_isolated()
+          catalog=parse_json(request(OVH_CATALOG_URL,("catalog.endpoints.ai.ovh.net",)))
+          available=[m.get("id") for m in catalog if isinstance(m,dict) and m.get("available")
+                     and m.get("category") in ("Large Language Models (LLM)","Reasoning LLM")]
+          print("OVH_CATALOG_AVAILABLE="+json.dumps(available[:30],ensure_ascii=False))
+          print("OVH_CHOSEN_MODEL="+OVH_ID)
+          try:
+              print("OVH_PREFLIGHT="+json.dumps(preflight(),sort_keys=True))
+          except Exception as error:
+              print("OVH_PREFLIGHT_BLOCKED="+type(error).__name__+":"+str(error))
+              raise SystemExit(2)
+          before=time.monotonic()
+          try:
+              response=generate("ovh",
+                  'Верни строго JSON-объект с полями kind="synthetic", number=42 и ok=true. Ничего больше.',
+                  max_tokens=700)
+              raw=response["text"].strip()
+              if raw.startswith("```"):
+                  raw=raw.partition("\n")[2].removesuffix("```").strip()
+              data=json.loads(raw)
+              result={"status":"passed" if data=={"kind":"synthetic","number":42,"ok":True} else "schema_failed",
+                      "latency_seconds":round(time.monotonic()-before,2),
+                      "provider_model":response["model"],"usage":response["usage"],
+                      "groq_calls":0,"publication_authorized":False}
+              print("OVH_SYNTHETIC_RESULT="+json.dumps(result,sort_keys=True))
+              if result["status"]!="passed": raise SystemExit(2)
+          except Exception as error:
+              print("OVH_SYNTHETIC_BLOCKED="+type(error).__name__+":"+str(error))
+              raise SystemExit(2)
+          PY

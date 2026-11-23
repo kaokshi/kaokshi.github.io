@@ -19,6 +19,7 @@ from tempfile import TemporaryDirectory
 
 from .editorial_memory import digest
 from .editorial_providers import Blocked
+from .editorial_scene_qa import require_packet_rows
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_REPO = "kaokshi/zen-editorial-review"
@@ -59,6 +60,45 @@ def run(argv, env, *, timeout=60):
     return value.stdout.strip()
 
 
+
+def push_private_main(args, env, *, execute=run, branch="main"):
+    """Push a prepared commit with a fresh remote SHA and bounded conflict recovery."""
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*", branch):
+        raise Blocked("private_review_unsupported_write_ref")
+    remote_ref = f"refs/heads/{branch}"
+    upload = [*args, "push", "origin", f"HEAD:{remote_ref}"]
+    for attempt in range(3):
+        try:
+            execute([*args, "fetch", "origin", remote_ref], env, timeout=90)
+            fetched = execute([*args, "rev-parse", "FETCH_HEAD"], env)
+        except Blocked:
+            if attempt == 2:
+                raise
+            continue
+        if not re.fullmatch(r"[0-9a-f]{40}", fetched):
+            raise Blocked("private_review_remote_sha_invalid")
+        local = execute([*args, "rev-parse", "HEAD"], env)
+        if local == fetched:
+            return fetched
+        try:
+            execute([*args, "-c", "user.name=Zen Editorial Bot",
+                     "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+                     "rebase", fetched], env, timeout=90)
+        except Blocked:
+            try:
+                execute([*args, "rebase", "--abort"], env)
+            except Blocked:
+                pass
+            raise Blocked("private_review_write_conflict_pending") from None
+        try:
+            execute(upload, env, timeout=120)
+            return execute([*args, "rev-parse", "HEAD"], env)
+        except Blocked:
+            if attempt == 2:
+                raise
+    raise AssertionError("unreachable private write retry")
+
+
 def connect(token, root, *, execute=run):
     if not token:
         raise Blocked("private_review_token_missing")
@@ -83,7 +123,7 @@ def connect(token, root, *, execute=run):
     return git, env
 
 
-def inputs(root, day):
+def inputs(root, day, *, ready_only=False):
     """Enumerate only the existing agent-built review files."""
     base = Path(root) / checked_day(day) / "review"
     result = []
@@ -93,13 +133,15 @@ def inputs(root, day):
         if not folder.is_dir() or folder.is_symlink():
             continue
         names = ("Статья.docx", "Статья.html", "Статья.md",
-                 "Текст для SHA-256.txt", "Статус и проверки.json", "SHA256SUMS.txt")
+                 "Текст для SHA-256.txt", "Статус и проверки.json", "SHA256SUMS.txt", "image_qa.json")
         checks = folder / "Статус и проверки.json"
         manifest = folder / "SHA256SUMS.txt"
         if not (checks.is_file() and manifest.is_file()):
             continue
         try:
             report = json.loads(checks.read_text(encoding="utf-8"))
+            if ready_only and report.get("status") != "review_pending":
+                continue
             rows = report.get("images", [])
             if not isinstance(rows, list):
                 raise ValueError()
@@ -116,6 +158,13 @@ def inputs(root, day):
         source = (folder / "Текст для SHA-256.txt").read_bytes()
         if digest(source) != report.get("text_sha256"):
             raise Blocked("private_review_canonical_sha_mismatch")
+        require_packet_rows(rows, report["text_sha256"], article_id=channel)
+        if report.get("status") in {"review_pending", "rights_review_pending"}:
+            from .editorial_package import final_visual_gate
+
+            final_visual_gate(report.get("visual_article"), rows, report["text_sha256"], channel,
+                              lambda name: (folder / "images" / name).read_bytes(),
+                              encoded=((folder / "Статья.html").read_bytes(), (folder / "Статья.docx").read_bytes()))
         expected = {}
         for line in manifest.read_text(encoding="utf-8").splitlines():
             parts = line.split("  ", 1)
@@ -170,11 +219,11 @@ def prune_directory(base, today, days):
     return removed
 
 
-def publish(root, day, *, token, execute=run, now=None):
+def publish(root, day, *, token, execute=run, now=None, ready_only=False):
     cfg = approval()
     checked_day(day)
     today = now or date.today()
-    batch = inputs(root, day)
+    batch = inputs(root, day, ready_only=ready_only)
     if not batch:
         return {"status": "no_agent_review_files", "channels": [],
                 "content_generated_by_assistant": False}
@@ -186,11 +235,18 @@ def publish(root, day, *, token, execute=run, now=None):
         published = []
         for channel, source, files in batch:
             output = private_root / day / channel
-            if output.exists():
-                shutil.rmtree(output)
+            # Preserve the owner-approved, independently generated
+            # illustrations folder when a text-only review is delivered later.
+            # Never count retained images as vetted for a new text SHA.
+            if output.is_symlink():
+                raise Blocked("unsafe_private_review_path")
+            if output.exists() and not output.is_dir():
+                raise Blocked("private_review_output_not_directory")
             for file in files:
                 relative = file.relative_to(source)
                 dst = output / relative
+                if dst.is_symlink() or dst.parent.is_symlink():
+                    raise Blocked("unsafe_private_review_file")
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(file, dst)
             published.append(channel)
@@ -200,7 +256,7 @@ def publish(root, day, *, token, execute=run, now=None):
             execute([*args, "-c", "user.name=Zen Editorial Bot",
                      "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                      "commit", "-m", "Owner-approved private chat review transport"], env)
-            execute([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=90)
+            push_private_main(args, env, execute=execute)
         return {"status": "private_chat_review_available", "day": day,
                 "channels": published, "expired_live_dates": removed,
                 "repository": PRIVATE_REPO,
@@ -223,7 +279,7 @@ def cleanup(*, token, today=None, execute=run):
             execute([*args, "-c", "user.name=Zen Editorial Bot",
                      "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                      "commit", "-m", "Expire private live review copies"], env)
-            execute([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=90)
+            push_private_main(args, env, execute=execute)
         return {"status": "private_chat_review_cleanup_done", "expired_dates": removed,
                 "git_history_may_retain_deleted_content": True}
 
@@ -233,12 +289,13 @@ def main():
     parser.add_argument("action", choices=("publish", "cleanup"))
     parser.add_argument("--root", type=Path)
     parser.add_argument("--date")
+    parser.add_argument("--ready-only", action="store_true")
     args = parser.parse_args()
     token = os.environ.get("EDITORIAL_PRIVATE_TOKEN", "")
     if args.action == "publish":
         if not args.root or not args.date:
             raise Blocked("private_review_root_and_date_required")
-        result = publish(args.root, args.date, token=token)
+        result = publish(args.root, args.date, token=token, ready_only=args.ready_only)
     else:
         result = cleanup(token=token)
     print(json.dumps(result, ensure_ascii=False))

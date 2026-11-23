@@ -15,6 +15,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from .editorial_encrypted_review import MAX_INPUT, decrypt, encrypt
 from .editorial_length import check_length
 from .editorial_memory import PrivateGit, StorageError, digest, read_json, write
+from .editorial_scene_qa import require_packet_rows
 from .editorial_providers import Blocked
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,7 +134,7 @@ def save_outputs(root, day, outgoing):
             "delivery": "delivery_integration_pending"}
 
 
-def unpack(data, target):
+def unpack(data, target, *, excluded=()):
     # Archive path validation alone cannot protect a destination with pre-existing
     # symlinked directories or files. Never extract through one, even in a
     # restored workspace; a failure must not write outside the chosen state root.
@@ -142,7 +143,7 @@ def unpack(data, target):
         raise Blocked("unsafe_restore_symlink")
     target_root = target.resolve()
     with safe_zip(data) as archive:
-        entries = archive.infolist()
+        entries = [entry for entry in archive.infolist() if entry.filename not in excluded]
         for entry in entries:
             candidate = target / entry.filename
             for parent in (candidate, *candidate.parents):
@@ -161,6 +162,7 @@ def unpack(data, target):
 
 def restore_blob(payload, root, day):
     data = unseal_state(payload)
+    excluded = ()
     with safe_zip(data) as archive:
         name = day + "/state.json"
         if name not in archive.namelist() or json.loads(archive.read(name))["day"] != day:
@@ -168,11 +170,21 @@ def restore_blob(payload, root, day):
         packet = day + "/Комплект согласования.zip"
         if packet in archive.namelist():
             raw = archive.read(packet)
-            report = verify_review(raw, allow_incomplete=True)
-            sha = archive.read(day + "/Комплект согласования.sha256").decode().strip()
-            if report["date"] != day or report["package_sha256"] != sha:
+            checksum = day + "/Комплект согласования.sha256"
+            if digest(raw) != archive.read(checksum).decode().strip():
                 raise Blocked("checkpoint_review_mismatch")
-    unpack(data, root)
+            try:
+                report = verify_review(raw, allow_incomplete=True)
+            except Blocked as exc:
+                if str(exc) not in {"image_review_required_before_packaging", "review_duplicate_image_pixels"}:
+                    raise
+                # The authenticated drafts, image files and ledger are still
+                # recoverable. Omit the old output that must be rebuilt.
+                excluded = (packet, checksum)
+            else:
+                if report["date"] != day:
+                    raise Blocked("checkpoint_review_mismatch")
+    unpack(data, root, excluded=excluded)
 
 
 def verify_review(data, *, allow_incomplete=False):
@@ -184,8 +196,12 @@ def verify_review(data, *, allow_incomplete=False):
                                                         for x in expected)):
             raise Blocked("invalid_review_article_index")
         present = {name.split("/")[0] for name in names if name.endswith("/SHA256SUMS.txt")}
+        ready = {article for article, status in expected.items()
+                 if status in {"review_pending", "rights_review_pending"}}
         if not allow_incomplete and (present != expected.keys() or any(
                 value not in {"review_pending", "rights_review_pending"} for value in expected.values())):
+            raise Blocked("review_packet_incomplete")
+        if not ready <= present:
             raise Blocked("review_packet_incomplete")
         if not present <= expected.keys() or any(name != "Статус комплекта.json" and
                 ("/" not in name or name.split("/", 1)[0] not in present) for name in names):
@@ -205,6 +221,9 @@ def verify_review(data, *, allow_incomplete=False):
                     article + "/SHA256SUMS.txt"}:
                 raise Blocked("review_manifest_incomplete")
             report = json.loads(archive.read(article + "/Статус и проверки.json"))
+            if (article in ready or report.get("status") in {"review_pending", "rights_review_pending"}) \
+                    and report.get("status") != expected[article]:
+                raise Blocked("review_article_status_mismatch")
             canonical = archive.read(article + "/Текст для SHA-256.txt")
             if digest(canonical) != report["text_sha256"]:
                 raise Blocked("review_canonical_text_sha_mismatch")
@@ -212,6 +231,14 @@ def verify_review(data, *, allow_incomplete=False):
                                            report.get("article_checks", {}).get("length_exception_reason"))
             if length_issue and not allow_incomplete:
                 raise Blocked("review_article_length_invalid: " + length_issue)
+            require_packet_rows(report["images"], report["text_sha256"], article_id=article)
+            if not allow_incomplete or report.get("status") in {"review_pending", "rights_review_pending"}:
+                from .editorial_package import final_visual_gate
+
+                final_visual_gate(report.get("visual_article"), report["images"], report["text_sha256"], article,
+                                  lambda name: archive.read(f"{article}/images/{name}"),
+                                  encoded=(archive.read(article + "/Статья.html"),
+                                           archive.read(article + "/Статья.docx")))
             assets = {name for name in verified if "/images/" in name}
             by_name = {article + "/images/" + row["file"]: row["sha256"] for row in report["images"]}
             if (assets != by_name.keys() or len(by_name) != len(report["images"])
@@ -286,6 +313,87 @@ def restore_checkpoint(root, day, command):
         download_artifact(latest, work)
         restore_blob((Path(work) / "checkpoint.enc").read_bytes(), root, latest["name"].removeprefix(prefix))
     return {"status": "checkpoint_restored"}
+
+
+def alternate_checkpoint_prefix(one_article):
+    from .editorial_alt_models import groq_gemini_klein_pilot, groq_ovh_klein_pilot
+    if groq_gemini_klein_pilot():
+        if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+            return "editorial-v1-three-channel-encrypted"
+        if os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true":
+            return "cinema-prisoners-groq-gemini35-encrypted"
+        return "groq-gemini35-klein-two-channel-encrypted"
+    if groq_ovh_klein_pilot():
+        return "agent-groq-ovh-klein-encrypted"
+    return "agent-ovh-one-encrypted" if one_article else "agent-alt-kilo-ovh-encrypted"
+
+
+def latest_alt_checkpoint(current_run_id, *, one_article=False):
+    """Locate a completed run from the current workflow within the same Moscow edition."""
+    path = f"repos/{PUBLIC_REPOSITORY}/actions"
+    current = json.loads(gh("api", f"{path}/runs/{current_run_id}"))
+    runs = json.loads(gh("api", f"{path}/workflows/{current['workflow_id']}/runs",
+                        "-f", f"branch={current['head_branch']}", "-f", "status=completed",
+                        "-F", "per_page=20", "--method", "GET"))["workflow_runs"]
+    tz = ZoneInfo("Europe/Moscow")
+    edition = datetime.fromisoformat(current["created_at"]).astimezone(tz).date()
+    for run in runs:
+        if (run["created_at"] >= current["created_at"]
+                or datetime.fromisoformat(run["created_at"]).astimezone(tz).date() != edition):
+            continue
+        prefix = alternate_checkpoint_prefix(one_article)
+        from .editorial_alt_models import groq_gemini_klein_pilot
+        name = (prefix if groq_gemini_klein_pilot() else
+                f"{prefix}-{run['id']}-{run['run_attempt']}")
+        if not groq_gemini_klein_pilot() and not one_article and str(run["id"]) == "45150195798":
+            name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
+        rows = json.loads(gh("api", f"{path}/runs/{run['id']}/artifacts?per_page=100"))["artifacts"]
+        if any(row["name"] == name and not row["expired"] for row in rows):
+            return str(run["id"])
+        if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+            from .editorial_v1_checkpoints import has_private_checkpoint
+
+            if has_private_checkpoint(str(run["id"]), edition.isoformat()):
+                return str(run["id"])
+    return None
+
+
+def restore_alt_checkpoint(root, day, run_id):
+    """Restore only an authenticated checkpoint from the isolated branch and workflow."""
+    if not run_id or not re.fullmatch(r"[1-9][0-9]{0,19}", run_id):
+        raise Blocked("invalid_validation_checkpoint_run")
+    run = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}"))
+    from .editorial_alt_models import groq_gemini_klein_pilot
+    is_new_pilot = groq_gemini_klein_pilot()
+    expected_workflow = (
+        ".github/workflows/editorial-v1-three-channel.yml"
+        if is_new_pilot and os.environ.get("EDITORIAL_RELEASE_TRIO") == "true" else
+        ".github/workflows/editorial-cinema-groq-gemini-confirmed-film-once.yml"
+        if is_new_pilot and os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true" else
+        ".github/workflows/editorial-groq-gemini-klein-two-channel-once.yml"
+        if is_new_pilot else ".github/workflows/editorial-alt-three-articles-v4-once.yml")
+    if (run["path"] != expected_workflow
+            or run["head_repository"]["full_name"] != PUBLIC_REPOSITORY
+            or run["head_branch"] != "assistant/kilo-modelscope-openrouter-isolated-20261123"
+            or run["status"] != "completed" or run["event"] not in {"workflow_dispatch", "push"}):
+        raise Blocked("validation_checkpoint_run_untrusted")
+    from .editorial_alt_models import ovh_trial
+    prefix = alternate_checkpoint_prefix(ovh_trial())
+    name = (prefix if is_new_pilot else f"{prefix}-{run_id}-{run['run_attempt']}")
+    if not is_new_pilot and not ovh_trial() and run_id == "45150195798":
+        name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
+    artifacts = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"))
+    if not any(row["name"] == name and not row["expired"] for row in artifacts["artifacts"]):
+        if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+            from .editorial_v1_checkpoints import restore_private_checkpoint
+
+            if restore_private_checkpoint(root, day, run_id):
+                return {"status": "private_checkpoint_restored", "run_id": run_id}
+        raise Blocked("validation_checkpoint_artifact_unavailable")
+    with TemporaryDirectory(prefix="zen-alt-restore-") as work:
+        download_artifact({"name": name, "workflow_run": {"id": run_id}}, work)
+        restore_blob((Path(work) / "checkpoint.enc").read_bytes(), root, day)
+    return {"status": "checkpoint_restored", "run_id": run_id}
 
 
 def publish_verified_directory(source, output):
@@ -399,7 +507,15 @@ def main():
                               run_id=args.run_id, allow_incomplete=args.allow_incomplete,
                               private_repository=repository)
         elif args.command == "restore":
-            result = restore_checkpoint(private_path(args.root), args.date, args.cycle_command)
+            root = private_path(args.root)
+            if args.run_id and os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true":
+                from .editorial_alt_models import require_isolated
+                require_isolated()
+                result = restore_alt_checkpoint(root, args.date, args.run_id)
+            elif args.run_id:
+                raise Blocked("validation_checkpoint_requires_isolated_alternate_run")
+            else:
+                result = restore_checkpoint(root, args.date, args.cycle_command)
         else:
             result = save_outputs(private_path(args.root), args.date, private_path(args.output))
         print(json.dumps(result, ensure_ascii=False))

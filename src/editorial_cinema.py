@@ -1,10 +1,13 @@
-"""Film identity, source sufficiency and authorized stills for the paused channel."""
+"""Film identity, source sufficiency and sourced stills for private review."""
 from datetime import date, timedelta
+import io
 import json
 import re
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
-from .editorial_memory import digest, read_json
+from . import editorial_scene_qa as scene_qa
+from .editorial_commons_images import search as commons_search
+from .editorial_memory import digest
 from .editorial_no_repeat import normalize
 from .editorial_providers import Blocked, ProviderError, request
 from .editorial_review import sources
@@ -17,6 +20,26 @@ STUDIO_DOMAINS = ("paramount.com", "universalpictures.com", "warnerbros.com", "s
                   "disney.com", "a24films.com", "focusfeatures.com", "lionsgate.com", "bfi.org.uk",
                   "rogerebert.com", "rottentomatoes.com", "bbc.com", "independent.co.uk", "theguardian.com")
 WIFI = "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/ru.wikipedia/all-access/"
+
+def spoiler_risk(scene):
+    """Conservative scene-level gate for spoiler-free review illustrations.
+
+    This cannot prove that a frame is spoiler-free: a human must still review
+    the actual pixels before release. It catches obvious model-planned reveals.
+    """
+    text = " ".join(str(scene.get(key, "")) for key in ("subject", "brief", "query")).casefold()
+    patterns = (
+        r"\b(?:final|last|closing|ending|end)\s+scene\b",
+        r"\b(?:final|ending)\s+(?:reveal|twist|shot|confrontation)\b",
+        r"\b(?:rescued|freed)\s+(?:girl|boy|child|victim|hostage)\b",
+        r"\b(?:killer|culprit|abductor|murderer)\s+(?:is\s+)?revealed\b",
+        r"\b(?:death|murder)\s+of\s+[a-z]",
+        r"финальн\w*\s+сцен",
+        r"развязк\w*",
+        r"раскрыт\w*\s+(?:убийц|похитит|преступник)",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
 
 
 def interest_signals(today=None):
@@ -78,7 +101,8 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
     trusted = [row for row in approved.get("plot_sources", []) if row.get("reviewed") is True
                and row.get("version_year") == year and row.get("kind") == "complete_plot"]
     deep_urls = [row["url"] for row in trusted]
-    fetched = fetch(list(dict.fromkeys([*deep_urls, *public_urls])), STUDIO_DOMAINS)
+    catalog_reviews = identity.get("catalog_review_urls", [])
+    fetched = fetch(list(dict.fromkeys([*deep_urls, *catalog_reviews, *public_urls])), STUDIO_DOMAINS)
     sources_ok = [row for row in fetched if row["status"] == "accessible"
                   and any(normalize(name) in normalize(row["text"])
                           for name in (identity["title"], identity["original_title"]) if len(normalize(name)) > 3)]
@@ -96,27 +120,72 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
             "detailed_plot_evidence": permitted_detail, "records": result}
 
 
+def commons_stills(scene, film):
+    title = film["original_title"]
+    query = scene.get("query") or scene["subject"]
+    for search_phrase in (f'"{title}" {query}', f'"{title}" film screenshot'):
+        if len(search_phrase) > 150:
+            continue
+        rows = commons_search(search_phrase, limit=12, opener=lambda req, timeout: io.BytesIO(
+            request(req.full_url, ("commons.wikimedia.org",), timeout=timeout, limit=3_000_000)))
+        for row in rows["candidates"]:
+            context = normalize(" ".join(row[key] for key in ("title", "description", "categories")))
+            filename = normalize(row["title"])
+            if (normalize(title) not in context or not re.search(r"\b(?:still|frame|screenshot)\b", context)
+                    or re.search(r"\b(?:poster|fan art|dvd cover|logo)\b", filename)):
+                continue
+            yield {**row, "scene": row["description"], "source": "Wikimedia Commons",
+                   "source_type": "public_reference", "year": film["year"], "original_title": title,
+                   "creator": row["artist"], "license": row["license_label"],
+                   "rights_status": "rights_review_pending"}
+
+
 def stills(scene, subject, path, index, film, rights_registry, downloader=request):
+    if not scene.get("scene_card"):
+        raise Blocked("image_scene_card_required")
     record = rights_registry.get(film["qid"], {})
-    stills = record.get("stills", [])
-    for row in sorted(stills, key=lambda x: -len(
-            set(normalize(scene["subject"]).split()) & set(normalize(x.get("scene", "")).split()))):
+    assets = set()
+    planned = set(normalize(scene["subject"]).split())
+
+    def candidate_rows():
+        yield from sorted(record.get("stills", []), key=lambda x: -len(
+            planned & set(normalize(x.get("scene", "")).split())))
+        try:
+            yield from commons_stills(scene, film)
+        except (ValueError, OSError, ProviderError):
+            return
+
+    for row in candidate_rows():
         if index.memory.time_left() < 75:
             raise Blocked("production_deadline")
-        if (row.get("rights_status") != "permission_verified" or row.get("year") != film["year"]
-                or row.get("original_title") != film["original_title"]
-                or not all(row.get(k) for k in ("sha256", "source_page", "rights_holder", "asset_url",
-                                                "rights_basis", "restrictions", "permission_ref"))
-                or row.get("source_type") not in {"official_press", "rights_holder"}):
+        if (row.get("year") != film["year"] or row.get("original_title") != film["original_title"]
+                or not row.get("source_page") or not row.get("asset_url")
+                or row["asset_url"] in assets):
             continue
+        assets.add(row["asset_url"])
+        host = urlsplit(row["asset_url"]).hostname
+        source_host = urlsplit(row["source_page"]).hostname
+        if not host or not source_host or not row["source_page"].startswith("https://"):
+            continue
+        # Curated domains come from the repository registry, never a model reply.
+        # Wikimedia candidates are confined to the existing Wikimedia image CDN.
+        domains = ("upload.wikimedia.org",) if row.get("source") == "Wikimedia Commons" else (host,)
+        permitted = (row.get("rights_status") == "permission_verified"
+                     and all(row.get(k) for k in ("sha256", "rights_holder", "rights_basis",
+                                                  "restrictions", "permission_ref")))
         try:
-            raw = downloader(row["asset_url"], STUDIO_DOMAINS, timeout=10)
-            if digest(raw) != row["sha256"]:
+            raw = downloader(row["asset_url"], domains, timeout=10)
+            if row.get("sha256") and digest(raw) != row["sha256"]:
                 continue
-            metadata = {**row, "kind": "photo", "film_id": film["qid"], "source": row["source_type"],
-                        "creator": row["rights_holder"]}
-            metadata.pop("sha256")
+            metadata = {**row, "kind": "photo", "film_id": film["qid"],
+                        "source": row.get("source") or source_host,
+                        "creator": row.get("creator") or row.get("rights_holder"),
+                        "rights_status": "permission_verified" if permitted else "rights_review_pending"}
+            metadata.pop("sha256", None)
             return index.save(raw, metadata, scene, subject, path)
+        except scene_qa.ImageQAError as exc:
+            if exc.args[0]["status"] == "provider_unavailable":
+                raise Blocked("image_review_required_provider_unavailable") from None
         except (ValueError, OSError, ProviderError):
             continue
-    raise Blocked("rights_review_pending: no_verified_official_still_for_scene")
+    raise Blocked("film_scene_still_not_found")

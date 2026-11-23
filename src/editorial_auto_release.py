@@ -16,6 +16,9 @@ from editorial_auto_route import decide, digest_article
 
 def prepare_release(article, evidence, settings):
     decision = decide(article, evidence)
+    if settings.get("publication_enabled") is not True:
+        decision["blockers"].append("owner_publication_freeze_active")
+        decision["disposition"] = "send_for_owner_review"
     if decision["disposition"] != "automatic_release_candidate":
         return {"decision": decision, "article": None, "settings": None}
     if article.get("status") != "draft":
@@ -48,10 +51,7 @@ def prepare_release(article, evidence, settings):
             for provider in ("modernbert", "lightgbm", "transformer", "ai_accent_detector")
         ],
     })
-    # If publication is currently off, turn it on in the same verified release
-    # transaction, never on mere installation of this tool.
     cfg = dict(settings)
-    cfg["publication_enabled"] = True
     return {"decision": decision, "article": new, "settings": cfg}
 
 

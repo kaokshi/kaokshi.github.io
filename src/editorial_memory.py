@@ -22,6 +22,42 @@ def now():
 def digest(value):
     return sha256(value.encode("utf-8") if isinstance(value, str) else value).hexdigest()
 
+def gemini_cooldown_seconds(calls, at=None):
+    """Fail closed during Gemini's transient overload without spending another call.
+
+    Only account-local, durable failed attempts are considered; this is not
+    a claim about Google's upstream rate-limit counters.
+    """
+    at = at or datetime.now(timezone.utc)
+    for row in reversed(calls):
+        if row.get("provider") != "gemini" or row.get("status") != "failed":
+            continue
+        error = row.get("error", "")
+        window = (240 if error in {"http_503_transient", "http_502_transient",
+                                  "http_504_transient"} else
+                  120 if error in {"connection_failed", "connection_timeout"} else
+                  90 if error == "http_429_transient" else 0)
+        if not window:
+            continue
+        stamp = row.get("completed_at")
+        try:
+            recorded = datetime.fromisoformat(stamp)
+            if recorded.tzinfo is None:
+                continue
+        except (TypeError, ValueError):
+            continue
+        seconds = (at - recorded).total_seconds()
+        if seconds < 0:
+            continue
+        # A server-provided Retry-After may require longer than our default.
+        retry_after = row.get("retry_after_seconds", 0)
+        if isinstance(retry_after, (int, float)) and retry_after > 0:
+            window = max(window, min(retry_after, 3600))
+        if seconds < window:
+            return int(window - seconds + 0.999)
+    return 0
+
+
 
 def read_json(path, default=None):
     if not path.exists():
@@ -112,8 +148,19 @@ class PrivateGit:
                          "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                          "commit", "-m", "Checkpoint editorial state")
         if self.command(*command, "rev-list", f"origin/{self.branch}..HEAD"):
+            from .editorial_chat_plaintext import push_private_main
+            from .editorial_providers import Blocked
+
             self.verify()
-            self.command(*command, "push", "origin", f"HEAD:refs/heads/{self.branch}")
+            def execute(args, env, timeout=60):
+                try:
+                    return self.command(*args)
+                except StorageError as exc:
+                    raise Blocked("private_checkpoint_git_operation_failed") from exc
+            try:
+                push_private_main(command, self.env, execute=execute, branch=self.branch)
+            except Blocked as exc:
+                raise StorageError("private_checkpoint_write_pending") from exc
 
     def owner_packet(self, day):
         self.verify()
@@ -220,7 +267,9 @@ class Memory:
                     details["reason_code"] = code(task.get("error"))
                 print(json.dumps(details), flush=True)
             if status in {"completed", "failed", "blocked"}:
-                task["used_calls"] = sum(call["task"] == task["id"] for call in self.data["calls"])
+                task["used_calls"] = sum(call["task"] == task["id"]
+                                         or call["task"].startswith(task["id"] + ".candidate-")
+                                         for call in self.data["calls"])
             self.save(durable)
 
     def time_left(self):
@@ -270,14 +319,20 @@ class Memory:
                    result_ref=f"state.json#tasks/{task_id}", elapsed_seconds=round(monotonic() - started, 2))
         return result
 
-    def call(self, task_id, article, provider, callback, *, metrics=None):
+    def call(self, task_id, article, provider, callback, *, metrics=None, editorial_edit=False):
         with self.lock:
             # A runner can stop after the external provider accepted a request but
             # before a response is saved. Never send an untraceable duplicate on retry.
             # A persisted "responded" call is reused by Article.model -> response().
             if any(row["task"] == task_id and row["provider"] == provider
-                   and row["status"] == "reserved" for row in self.data["calls"]):
+                   and (row["status"] == "reserved" or
+                        (provider == "klein" and row["status"] == "responded"))
+                   for row in self.data["calls"]):
                 raise ProviderError("previous_provider_request_outcome_unknown", stop=True)
+            if provider == "gemini":
+                cooldown = gemini_cooldown_seconds(self.data["calls"])
+                if cooldown:
+                    raise ProviderError("gemini_transient_cooldown", retry_after=cooldown)
             stopped = self.data["provider_stops"].get(provider)
             if stopped:
                 raise ProviderError("provider_stopped_" + stopped, stop=True)
@@ -287,6 +342,12 @@ class Memory:
             if (count[provider] >= self.config["daily_calls"][provider]
                     or for_article[provider] >= self.config["per_article_calls"][provider]):
                 raise ProviderError("call_budget_exhausted", stop=True)
+            if editorial_edit:
+                edits = sum(row["article"] == article and row["provider"] == "openrouter"
+                            and self.data["tasks"].get(row["task"], {}).get("operation", "").startswith(
+                                ("full-edit", "repair-")) for row in self.data["calls"])
+                if edits >= 2:
+                    raise ProviderError("openrouter_two_edit_requests_per_article_exhausted")
             reservation = {"task": task_id, "article": article, "provider": provider,
                            "at": now(), "status": "reserved", **(metrics or {})}
             self.data["calls"].append(reservation)
@@ -296,6 +357,8 @@ class Memory:
         except ProviderError as exc:
             with self.lock:
                 reservation.update(status="failed", error=str(exc), completed_at=now(), **exc.telemetry)
+                if exc.retry_after is not None:
+                    reservation["retry_after_seconds"] = exc.retry_after
                 if exc.stop:
                     self.data["provider_stops"][provider] = str(exc)
                 self.save()
@@ -309,7 +372,9 @@ class Memory:
                     reservation.update(answer.get("telemetry", {}))
                 # Persist the completed response before downstream validation.
                 reservation["answer"] = answer
-                self.save()
+            # Image providers return bytes in a tuple. The callback has already
+            # spooled them; persist the receipt and bytes together before QA.
+            self.save()
         return answer
 
     def response(self, task_id):

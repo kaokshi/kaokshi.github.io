@@ -1,0 +1,117 @@
+name: Recover saved legend with one Gemini request
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-legend-gemini-recovery-once.yml
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: zen-one-gemini-legend-recovery
+  cancel-in-progress: false
+jobs:
+  recover-legend:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    env:
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      EDITORIAL_GROQ_GEMINI_KLEIN_PILOT: 'true'
+      EDITORIAL_LEGENDS_RECOVERY_ONLY: 'true'
+      EDITORIAL_GROQ_FREE_ONLY: 'true'
+      EDITORIAL_TEST_FREE_ONLY: 'true'
+      EDITORIAL_CF_FREE_ONLY: 'true'
+      EDITORIAL_GEMINI_RPM: '2'
+      EDITORIAL_GEMINI_DAILY_CALLS: '5'
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.GOOGLE_GEMINI_API_KEY || secrets.GOOGLE_AI_API_KEY || secrets.GOOGLE_API_KEY || secrets.GEMINI_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      GITHUB_ACTIONS: 'true'
+      OMP_NUM_THREADS: '2'
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_XET: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify no publication and strict quota
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from src.editorial_brain import cycle_settings
+          assert json.loads(Path("config/site.json").read_text())["publication_enabled"] is False
+          cfg = cycle_settings("retry", 95, True)
+          assert cfg["articles_per_channel"] == {"legends": 1}
+          assert cfg["per_article_calls"]["gemini"] == 3
+          assert cfg["daily_calls"]["gemini"] == 5
+          required=("GROQ_API_KEY","GEMINI_API_KEY","CLOUDFLARE_ACCOUNT_ID",
+                    "CLOUDFLARE_API_TOKEN","EDITORIAL_PRIVATE_TOKEN","EDITORIAL_STATE_KEY_HEX")
+          missing=[k for k in required if not os.environ.get(k)]
+          if missing: raise SystemExit("missing_secret_names_only:"+",".join(missing))
+          owner=json.loads(Path("config/editorial_production.json").read_text())["schedule"]["owner_public_key"]
+          with open(os.environ["GITHUB_ENV"], "a") as out:
+              out.write("EDITORIAL_REVIEW_PUBLIC_KEY="+owner+"\n")
+              out.write("EDITORIAL_STATE_DIR="+os.environ["RUNNER_TEMP"]+"/legend-recovery-state\n")
+              out.write("EDITORIAL_SEALED_DIR="+os.environ["RUNNER_TEMP"]+"/legend-recovery-sealed\n")
+          print("One saved legend, one new Gemini call maximum, no publication.")
+          PY
+      - name: Install QA and visual validation
+        timeout-minutes: 12
+        run: |
+          python -m pip install 'cryptography>=44,<48'
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
+          python -m pip install -r requirements-production.txt
+          aiw-ru models install modernbert lightgbm transformer || echo '::warning::Detectors unavailable; quality will remain blocked'
+      - name: Restore previous model-written story and attempts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          umask 077
+          day="$(TZ=Europe/Moscow date +%F)"
+          echo "$day" > "$RUNNER_TEMP/editorial-day"
+          python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" --date "$day" --run-id 45177183176
+      - name: Edit saved legend with one combined Gemini request and validate illustrations
+        id: generate
+        timeout-minutes: 92
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ''
+          EDITORIAL_PRIVATE_REPOSITORY: ''
+        run: |
+          day="$(cat "$RUNNER_TEMP/editorial-day")"
+          python -m src.editorial_brain retry --date "$day" --encrypted-mode \
+            --validation-window 120 --local-state "$EDITORIAL_STATE_DIR"
+      - name: Private owner review, including clearly labeled incomplete drafts
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            python -m src.editorial_chat_plaintext publish --root "$EDITORIAL_STATE_DIR" --date "$day"
+          fi
+      - name: Seal original checkpoint for owner
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            python -m src.editorial_delivery seal --root "$EDITORIAL_STATE_DIR" \
+              --date "$(cat "$RUNNER_TEMP/editorial-day")" --output "$EDITORIAL_SEALED_DIR"
+          fi
+      - name: Store only encrypted checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-gemini-legend-recovery-encrypted
+          path: |
+            ${{ env.EDITORIAL_SEALED_DIR }}/checkpoint.enc
+            ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
+          retention-days: 14
+          if-no-files-found: warn

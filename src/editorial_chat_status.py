@@ -17,7 +17,7 @@ SAFE_PREFIXES = ("film_", "movie_", "cinema_", "qa_", "editorial_", "image_",
                  "call_", "production_", "revision_", "source_", "rights_",
                  "independent_", "document_", "topic_", "unique_", "invalid_",
                  "model_", "storage_", "fact_", "substantive_", "previous_",
-                 "language_", "grammar_", "connection_", "truncated_",
+                 "language_", "grammar_", "gemini_", "connection_", "truncated_",
                  "empty_", "request_", "response_", "film")
 
 
@@ -33,6 +33,14 @@ def code(value):
         return "independent_edit_unavailable"
     if stripped.startswith("document_export_failed: "):
         return "document_export_failed"
+    # Never leak provider errors, search terms, image descriptions or source URLs.
+    # Preserve only fixed error categories for the five missing photo tasks.
+    if match := re.match(r"^image_[0-9]{2}: (photo_candidates_rejected|no_traceable_photo_found|film_scene_still_not_found|spoiler_scene_prohibited)(?::|$)", stripped):
+        return "image_" + match.group(1)
+    if stripped.startswith("photo_candidates_rejected:") or stripped == "photo_candidates_rejected":
+        return "photo_candidates_rejected"
+    if stripped == "no_traceable_photo_found":
+        return "no_traceable_photo_found"
     return "unclassified_block"
 
 
@@ -58,7 +66,7 @@ def public_report(data, day):
     calls = {}
     for row in data.get("calls", []):
         provider = row.get("provider")
-        if provider in {"groq", "openrouter", "klein"}:
+        if provider in {"groq", "gemini", "openrouter", "klein", "kilo", "kilo-review", "ovh", "ovh-gptoss"}:
             calls[provider] = calls.get(provider, 0) + 1
     return {"schema": "zen-editorial-chat-status-v1", "day": day,
             "articles": entries, "provider_calls": calls,

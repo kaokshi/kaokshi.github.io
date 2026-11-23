@@ -1,0 +1,165 @@
+name: Groq Gemini 3.5 Klein two-channel private pilot
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-groq-gemini-klein-two-channel-once.yml
+  workflow_dispatch:
+    inputs:
+      resume_run:
+        description: Optional verified encrypted pilot checkpoint run ID
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: groq-gemini-klein-private-pilot
+  cancel-in-progress: false
+jobs:
+  private-two-channel-pilot:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_GROQ_GEMINI_KLEIN_PILOT: 'true'
+      EDITORIAL_GROQ_FREE_ONLY: 'true'
+      EDITORIAL_TEST_FREE_ONLY: 'true'
+      EDITORIAL_CF_FREE_ONLY: 'true'
+      EDITORIAL_GEMINI_RPM: '2'
+      EDITORIAL_GEMINI_DAILY_CALLS: '4'
+      EDITORIAL_GROQ_FALLBACK_ONLY: 'false'
+      EDITORIAL_OVH_ONE_ARTICLE: 'false'
+      EDITORIAL_GROQ_OVH_KLEIN_PILOT: 'false'
+      EDITORIAL_TEST_WITHOUT_OPENROUTER: 'false'
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.GOOGLE_GEMINI_API_KEY || secrets.GOOGLE_AI_API_KEY || secrets.GOOGLE_API_KEY || secrets.GEMINI_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      OMP_NUM_THREADS: '2'
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_XET: '1'
+      GITHUB_ACTIONS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify freeze and required free pilot credentials
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          site = json.loads(Path("config/site.json").read_text(encoding="utf-8"))
+          cfg = json.loads(Path("config/editorial_production.json").read_text(encoding="utf-8"))
+          assert site["publication_enabled"] is False
+          assert cfg["schedule"]["enabled"] is False
+          assert cfg["schedule"]["owner_approved"] is False
+          assert cfg["schedule"]["klein_free_only"] is True
+          required = ("GROQ_API_KEY", "GEMINI_API_KEY", "CLOUDFLARE_ACCOUNT_ID",
+                      "CLOUDFLARE_API_TOKEN", "EDITORIAL_STATE_KEY_HEX", "EDITORIAL_PRIVATE_TOKEN")
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit("pilot_missing_required_private_secrets:" + ",".join(missing))
+          for name in ("OVH_API_KEY", "OVH_AI_ENDPOINTS_ACCESS_TOKEN", "OPENROUTER_API_KEY", "KILO_API_KEY"):
+              assert not os.environ.get(name), name + "_forbidden"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write("EDITORIAL_REVIEW_PUBLIC_KEY=" + cfg["schedule"]["owner_public_key"] + "\n")
+              stream.write("EDITORIAL_STATE_DIR=" + os.environ["RUNNER_TEMP"] + "/groq-gemini-klein-pilot\n")
+              stream.write("EDITORIAL_SEALED_DIR=" + os.environ["RUNNER_TEMP"] + "/groq-gemini-klein-sealed\n")
+          print("Owner-only experimental Groq Gemini Klein path. OVH disabled. Publication OFF.")
+          PY
+      - name: Offline provider-budget and mixed-image regressions
+        run: |
+          python -m pip install 'cryptography>=44,<48'
+          python -m unittest -q tests.test_editorial_groq_gemini_klein tests.test_editorial_science_mixed_images
+      - name: Probe selected Gemini 3.5 Flash alias without generating tokens
+        run: |
+          python - <<'PY'
+          import json
+          from src.editorial_alt_models import preflight
+          from src.editorial_providers import gemini_model
+          status = preflight()
+          assert status["status"] == "preflight_passed"
+          assert gemini_model() == "gemini-3.5-flash"
+          print(json.dumps({"preflight": status, "actual_generation_model_pending": True}, sort_keys=True))
+          PY
+      - name: Check real Wikimedia Commons NASA and movie still candidates
+        if: always()
+        timeout-minutes: 3
+        continue-on-error: true
+        run: python -m src.editorial_photo_probe
+      - name: Install pinned text quality and image matching dependencies
+        timeout-minutes: 12
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
+          python -m pip install -r requirements-production.txt
+          aiw-ru models install modernbert lightgbm transformer || echo '::warning::Text detector install incomplete; full QA will block'
+      - name: Generate one new legend and one new cinema article
+        id: generate
+        timeout-minutes: 125
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ''
+          EDITORIAL_PRIVATE_REPOSITORY: ''
+          RESUME_RUN: ${{ inputs.resume_run }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          umask 077
+          day="$(TZ=Europe/Moscow date +%F)"
+          echo "$day" > "$RUNNER_TEMP/editorial-day"
+          command=daily
+          if [ -z "$RESUME_RUN" ] && [ "$GITHUB_EVENT_NAME" = push ]; then
+            RESUME_RUN="$(python - <<'PY_LATEST'
+          import os
+          from src.editorial_delivery import latest_alt_checkpoint
+          print(latest_alt_checkpoint(os.environ["GITHUB_RUN_ID"]) or "")
+          PY_LATEST
+            )"
+          fi
+          if [ -n "$RESUME_RUN" ]; then
+            python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" --date "$day" --run-id "$RESUME_RUN"
+            command=retry
+          fi
+          python -m src.editorial_brain "$command" --date "$day" --encrypted-mode \
+            --validate-cinema --validation-window 120 --local-state "$EDITORIAL_STATE_DIR"
+      - name: Deliver only completed editorial review packages to PRIVATE repository
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            python -m src.editorial_chat_plaintext publish --ready-only --root "$EDITORIAL_STATE_DIR" --date "$day"
+          fi
+      - name: Send sanitized private pilot status
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            if [ -f "$EDITORIAL_STATE_DIR/$day/state.json" ]; then
+              python -m src.editorial_chat_bridge --root "$EDITORIAL_STATE_DIR" --date "$day"
+            fi
+          fi
+      - name: Encrypt original partial work for retry without spending again
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            python -m src.editorial_delivery seal --root "$EDITORIAL_STATE_DIR" --date "$day" --output "$EDITORIAL_SEALED_DIR"
+          fi
+      - name: Preserve only encrypted original checkpoints
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: groq-gemini35-klein-two-channel-encrypted
+          path: |
+            ${{ env.EDITORIAL_SEALED_DIR }}/checkpoint.enc
+            ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
+          if-no-files-found: warn
+          retention-days: 14
