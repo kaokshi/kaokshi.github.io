@@ -650,27 +650,13 @@ class Article:
                 parsed = parse_article(article)
                 if not 6 <= len(parsed["sections"]) <= 7:
                     raise Blocked("gemini_combined_section_count_invalid")
-            try:
-                verdict = self.model("full-edit-with-audit", "gemini", edit_prompt,
-                                     validate=check_edit, tokens=6800,
-                                     metadata={"source_sha256": original["text_sha256"]})
-            except Blocked as exc:
-                # Retry once, as a separately charged task, only for transient
-                # failures. A second request cannot circumvent quotas or auth.
-                retryable = {"http_503_transient", "http_502_transient",
-                             "http_504_transient", "connection_timeout", "connection_failed"}
-                if str(exc) not in retryable:
-                    raise
-                with self.memory.lock:
-                    used = sum(row["article"] == self.id and
-                               row["provider"] == "gemini" for row in self.memory.data["calls"])
-                if used >= self.config["per_article_calls"]["gemini"]:
-                    raise
-                sleep(min(8, 2 ** used))
-                verdict = self.model("full-edit-with-audit-retry", "gemini",
-                                     edit_prompt, validate=check_edit, tokens=6800,
-                                     metadata={"source_sha256": original["text_sha256"],
-                                               "fallback_reason": str(exc)})
+            # Exactly one independently metered Gemini request per execution.
+            # 503, 429 and connection failures are persisted, not immediately
+            # retried: retries are allowed only after cooldown by restoring the
+            # encrypted checkpoint with the same unmodified original draft.
+            verdict = self.model("full-edit-with-audit", "gemini", edit_prompt,
+                                 validate=check_edit, tokens=6800,
+                                 metadata={"source_sha256": original["text_sha256"]})
             edited = verdict["article"]
             self.current = self.inspect(self.remember_version(edited), original,
                                         submitted_audit=verdict)
