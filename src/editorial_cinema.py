@@ -20,6 +20,26 @@ STUDIO_DOMAINS = ("paramount.com", "universalpictures.com", "warnerbros.com", "s
                   "rogerebert.com", "rottentomatoes.com", "bbc.com", "independent.co.uk", "theguardian.com")
 WIFI = "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/ru.wikipedia/all-access/"
 
+def spoiler_risk(scene):
+    """Conservative scene-level gate for spoiler-free review illustrations.
+
+    This cannot prove that a frame is spoiler-free: a human must still review
+    the actual pixels before release. It catches obvious model-planned reveals.
+    """
+    text = " ".join(str(scene.get(key, "")) for key in ("subject", "brief", "query")).casefold()
+    patterns = (
+        r"\b(?:final|last|closing|ending|end)\s+scene\b",
+        r"\b(?:final|ending)\s+(?:reveal|twist|shot|confrontation)\b",
+        r"\b(?:rescued|freed)\s+(?:girl|boy|child|victim|hostage)\b",
+        r"\b(?:killer|culprit|abductor|murderer)\s+(?:is\s+)?revealed\b",
+        r"\b(?:death|murder)\s+of\s+[a-z]",
+        r"финальн\w*\s+сцен",
+        r"развязк\w*",
+        r"раскрыт\w*\s+(?:убийц|похитит|преступник)",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
 
 def interest_signals(today=None):
     """Public audience-interest signal. Identity verification follows selection."""
