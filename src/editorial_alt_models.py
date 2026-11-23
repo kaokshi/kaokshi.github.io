@@ -14,6 +14,8 @@ KILO_ID = "kilo-auto/free"
 KILO_URL = "https://ai-gateway.kilo.ai/api/v1"
 OVH_ID = "qwen3-6-35b-a3b"
 OVH_MODEL = "qwen3.6-35b-a3b"
+OVH_GPTOSS_ID = "gpt-oss-120b"
+OVH_GPTOSS_MODEL = "gpt-oss-120b"
 OVH_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
 OVH_CATALOG_URL = "https://catalog.endpoints.ai.ovh.net/rest/v1/models_v2"
 _ovh_lock = Lock()
@@ -40,7 +42,7 @@ def candidate_headers(provider):
     if provider == "kilo":
         token = os.environ.get("KILO_API_KEY")
         return {"Authorization": "Bearer " + token} if token else {}
-    if provider == "ovh":
+    if provider in {"ovh", "ovh-gptoss"}:
         return {}  # Anonymous only, never sends an Authorization header.
     raise Blocked("invalid_alt_provider")
 
@@ -83,8 +85,12 @@ def preflight():
     _kilo_free(kilo)
     ovh = parse_json(request(OVH_CATALOG_URL, ("catalog.endpoints.ai.ovh.net",)))
     _ovh_available(ovh)
+    if not any(isinstance(row, dict) and row.get("id") == OVH_GPTOSS_ID
+               and row.get("available") is True for row in ovh):
+        raise Blocked("ovh_gptoss_model_unavailable")
     return {"status": "preflight_passed", "kilo_model": KILO_ID,
-            "ovh_model": OVH_ID, "ovh_access": "anonymous",
+            "ovh_model": OVH_ID, "ovh_gptoss_model": OVH_GPTOSS_ID,
+            "ovh_access": "anonymous",
             "groq_allowed": False, "publication_authorized": False}
 
 
@@ -93,8 +99,9 @@ def generate(provider, prompt, max_tokens=3000):
     require_isolated()
     if provider == "kilo":
         base, host, model = KILO_URL, "ai-gateway.kilo.ai", KILO_ID
-    elif provider == "ovh":
-        base, host, model = OVH_URL, "oai.endpoints.kepler.ai.cloud.ovh.net", OVH_MODEL
+    elif provider in {"ovh", "ovh-gptoss"}:
+        base, host = OVH_URL, "oai.endpoints.kepler.ai.cloud.ovh.net"
+        model = OVH_GPTOSS_MODEL if provider == "ovh-gptoss" else OVH_MODEL
     else:
         raise Blocked("invalid_alt_provider")
     if type(max_tokens) is not int or not 1 <= max_tokens <= 7900:
