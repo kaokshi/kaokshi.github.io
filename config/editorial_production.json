@@ -10,12 +10,10 @@
   },
   "per_article_calls": {
     "groq": 17,
-    "openrouter": 5,
     "klein": 12
   },
   "daily_calls": {
     "groq": 34,
-    "openrouter": 10,
     "klein": 20
   },
   "minimum_images": 7,
@@ -78,5 +76,19 @@
       "repair": 4700
     },
     "forecast_non_groq_seconds": 1200
+  },
+  "cloudflare_quota_guard": {
+    "enabled": true,
+    "minimum_free_neurons_for_cycle": 6000,
+    "require_authenticated_analytics": true,
+    "notes": "Conservative preflight for two daily channels; analytics is delayed, so this is not a guaranteed billing lock."
+  },
+  "gemini_quota_guard": {
+    "enabled": true,
+    "mode": "read_only",
+    "model": "",
+    "verified_free_daily_requests": null,
+    "automated_generation_enabled": false,
+    "notes": "No official exact remaining-requests API via Gemini API key; report unknown until separately verified."
   }
 }
