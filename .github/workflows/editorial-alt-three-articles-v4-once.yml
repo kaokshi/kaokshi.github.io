@@ -221,6 +221,27 @@ jobs:
           args=(--encrypted-mode --validation-window 120 --local-state "$EDITORIAL_STATE_DIR")
           if [ "$INCLUDE_CINEMA" = true ]; then args+=(--validate-cinema); fi
           python -m src.editorial_brain "$command" --date "$day" "${args[@]}"
+      - name: Test Klein once if the article did not reach image generation
+        if: always() && env.EDITORIAL_GROQ_OVH_KLEIN_PILOT == 'true' && steps.generate.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from src.editorial_brain import validate_klein
+          from src.editorial_providers import Blocked
+          day_file = Path(os.environ["RUNNER_TEMP"]) / "editorial-day"
+          if not day_file.is_file():
+              raise SystemExit(0)
+          state = Path(os.environ["EDITORIAL_STATE_DIR"]) / day_file.read_text().strip() / "state.json"
+          if not state.is_file() or any(row["provider"] == "klein"
+                                       for row in json.loads(state.read_text())["calls"]):
+              raise SystemExit(0)
+          try:
+              print(json.dumps({"klein_component_only": validate_klein()}), flush=True)
+          except (Blocked, OSError) as exc:
+              print(json.dumps({"klein_component_only": "blocked", "reason": str(exc)}), flush=True)
+          PY
       - name: Deliver verified articles independently to private review
         if: always()
         run: |

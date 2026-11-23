@@ -288,6 +288,13 @@ def restore_checkpoint(root, day, command):
     return {"status": "checkpoint_restored"}
 
 
+def alternate_checkpoint_prefix(one_article):
+    from .editorial_alt_models import groq_ovh_klein_pilot
+    if groq_ovh_klein_pilot():
+        return "agent-groq-ovh-klein-encrypted"
+    return "agent-ovh-one-encrypted" if one_article else "agent-alt-kilo-ovh-encrypted"
+
+
 def latest_alt_checkpoint(current_run_id, *, one_article=False):
     """Locate a completed run from the current workflow within the same Moscow edition."""
     path = f"repos/{PUBLIC_REPOSITORY}/actions"
@@ -301,7 +308,7 @@ def latest_alt_checkpoint(current_run_id, *, one_article=False):
         if (run["created_at"] >= current["created_at"]
                 or datetime.fromisoformat(run["created_at"]).astimezone(tz).date() != edition):
             continue
-        prefix = "agent-ovh-one-encrypted" if one_article else "agent-alt-kilo-ovh-encrypted"
+        prefix = alternate_checkpoint_prefix(one_article)
         name = f"{prefix}-{run['id']}-{run['run_attempt']}"
         if not one_article and str(run["id"]) == "45150195798":
             name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
@@ -322,7 +329,7 @@ def restore_alt_checkpoint(root, day, run_id):
             or run["status"] != "completed" or run["event"] not in {"workflow_dispatch", "push"}):
         raise Blocked("validation_checkpoint_run_untrusted")
     from .editorial_alt_models import ovh_trial
-    prefix = "agent-ovh-one-encrypted" if ovh_trial() else "agent-alt-kilo-ovh-encrypted"
+    prefix = alternate_checkpoint_prefix(ovh_trial())
     name = f"{prefix}-{run_id}-{run['run_attempt']}"
     if not ovh_trial() and run_id == "45150195798":
         name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"

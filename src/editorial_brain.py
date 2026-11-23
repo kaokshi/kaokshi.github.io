@@ -383,7 +383,8 @@ class Article:
 
     def inspect(self, candidate, reference=None, *, repair=False, submitted_audit=None):
         raw, sha = candidate["raw"], candidate["text_sha256"]
-        facts = source_context(self.records, chars_per_source=6000 if ovh_finalize() else 2000)
+        pilot_resume = groq_ovh_klein_pilot() and self.memory.retry
+        facts = source_context(self.records, chars_per_source=6000 if ovh_finalize() or pilot_resume else 2000)
         def audit(text, language_issues):
             if submitted_audit is not None:
                 return submitted_audit
@@ -425,8 +426,12 @@ class Article:
                            'Включи оба вида. Для Wikimedia Commons выбирай широко документированные '
                            'объекты и запросы по содержанию раздела. Не придумывай URL и лицензии.')
                 if groq_ovh_klein_pilot():
-                    prompt += (" Из семи изображений дай ровно две illustration для генерации Klein. "
-                               "Остальные — реальные фото с английским запросом для Commons.")
+                    sections = [1, 1, *range(2, count + 1)]
+                    prompt += (f" Поле image_plan.images обязано иметь ровно {count + 1} элементов. "
+                               f"Номера section в порядке ответа: {sections}. Две записи illustration "
+                               "для Klein, остальные — photo с английским запросом для Commons. "
+                               "Не включай варианты и пояснения. Цитаты из источников дословные, "
+                               "на языке источника, не короче 18 знаков.")
                 result = self.model("editorial-audit", "ovh", prompt, validate=lambda x: None,
                                     metadata={"text_sha256": sha}, tokens=11000 if groq_ovh_klein_pilot() else 7800)
                 self.memory.article(self.id, trial_image_plan=result.get("image_plan"))
@@ -449,7 +454,8 @@ class Article:
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
                             "length_exception_reason": candidate["article"].get("length_exception_reason"),
-                            **({"reviewer": "ovh-qwen-correction", "audit_sha256": digest(
+                            **({"reviewer": "ovh-qwen-pilot-resume"} if pilot_resume else
+                               {"reviewer": "ovh-qwen-correction", "audit_sha256": digest(
                                     json.dumps(submitted_audit, ensure_ascii=False, sort_keys=True))} if ovh_recover() else
                                {"reviewer": "ovh-qwen-facts-only"} if ovh_finalize() else
                                {"reviewer": "ovh-qwen-combined" if submitted_audit is not None else
@@ -464,7 +470,7 @@ class Article:
         return self.remember_version(raw, report)
 
     def prose(self, topic):
-        if ovh_finalize():
+        if ovh_finalize() or (groq_ovh_klein_pilot() and self.memory.retry):
             entry = self.memory.data["articles"][self.id]
             previous_sha = entry.get("text_sha256")
             if not isinstance(previous_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", previous_sha):
@@ -745,7 +751,7 @@ class Article:
                     raise Blocked("image_plan_missing_from_ovh_review")
                 validate_plan(plan, count, self.channel, self.config, sourced_illustrations=True)
             except Blocked:
-                if not ovh_finalize() and not pilot:
+                if (not ovh_finalize() and not pilot) or (pilot and self.memory.retry):
                     raise
                 if ovh_recover() or pilot:
                     layout = ", ".join(map(str, [1, 1, *range(2, count + 1)]))
@@ -1102,10 +1108,11 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
             cfg[ledger].update(kilo=0, openrouter=0, ovh=8 if ovh_recover() else 4 if ovh_finalize() else 2,
                                **{"ovh-gptoss": 1, "kilo-review": 0})
         if groq_ovh_klein_pilot():
-            if command != "daily" or ovh_finalize():
-                raise Blocked("groq_ovh_klein_pilot_requires_fresh_isolated_trial")
+            if ovh_finalize():
+                raise Blocked("groq_ovh_klein_pilot_cannot_use_ovh_only_finalize")
             for ledger in ("daily_calls", "per_article_calls"):
-                cfg[ledger].update(groq=2, ovh=5, klein=4, **{"ovh-gptoss": 0})
+                cfg[ledger].update(groq=2 if command == "daily" else 0, ovh=5 if command == "daily" else 7,
+                                   klein=4, **{"ovh-gptoss": 0})
     return cfg
 
 
