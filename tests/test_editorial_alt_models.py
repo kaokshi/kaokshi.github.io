@@ -92,6 +92,34 @@ class EditorialAlternativeRoutingTests(unittest.TestCase):
             _ovh_available([{"id":OVH_ID, "available":False}])
         self.assertTrue(_ovh_available([{"id":OVH_ID, "available":True}]))
 
+    def test_openrouter_third_text_edit_is_blocked_but_audit_allowed(self):
+        from threading import RLock
+        from types import SimpleNamespace
+        from src.editorial_brain import Article
+        cfg = {"EDITORIAL_ALT_MODELS_TEST":"true",
+               "EDITORIAL_ISOLATED_VALIDATION":"true", "GITHUB_ACTIONS":"true",
+               "GROQ_API_KEY":"", "EDITORIAL_GROQ_FALLBACK_ONLY":"false"}
+        article = self.synthetic_article("legends")
+        article.memory.lock = RLock()
+        article.memory.data = {
+            "tasks": {
+                "full-id":{"operation":"full-edit"},
+                "repair-id":{"operation":"repair-1"}},
+            "calls": [
+                {"article":"legends-01","provider":"openrouter",
+                 "task":"full-id","status":"responded"},
+                {"article":"legends-01","provider":"openrouter",
+                 "task":"repair-id","status":"failed"}]}
+        with patch.dict(os.environ, cfg):
+            with self.assertRaisesRegex(Blocked, "openrouter_two_edit_requests_per_article_exhausted"):
+                article.model("repair-2", "openrouter", "SYNTHETIC-FIXTURE")
+            with self.assertRaisesRegex(Blocked, "openrouter_two_edit_requests_per_article_exhausted"):
+                article.model("full-edit-retry", "openrouter", "SYNTHETIC-FIXTURE")
+            with patch("src.editorial_brain.text_call", return_value={
+                "text":"SYNTHETIC-FIXTURE","model":"test","usage":{},"telemetry":{}}):
+                result=article.model("editorial-audit", "openrouter", "SYNTHETIC-FIXTURE")
+                self.assertEqual(result,"SYNTHETIC-FIXTURE")
+
     def test_writers_and_editor_are_separated_without_groq(self):
         from src.editorial_brain import Article
         cfg = {"EDITORIAL_ALT_MODELS_TEST": "true",
