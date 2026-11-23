@@ -99,39 +99,17 @@ class Article:
         from .editorial_alt_models import enabled as alternate_enabled, require_isolated
         if alternate_enabled():
             require_isolated()
-            if ovh_trial():
-                route = {"draft": "ovh-gptoss", "full-edit": "ovh", "editorial-audit": "ovh",
-                         "full-edit-with-audit": "ovh"}
-                if ovh_finalize():
-                    route = {"editorial-audit": "ovh", "image-plan-1": "ovh"}
-                if ovh_recover():
-                    route = {"repair-saved-facts": "ovh", "image-plan-1": "ovh"}
-                if groq_ovh_klein_pilot():
-                    editor = "gemini" if gemini_pilot() else "ovh"
-                    route = {"draft": "groq", "full-edit": editor, "editorial-audit": editor,
-                             "image-plan-1": editor}
-                if route.get(stage) != provider:
-                    raise Blocked("ovh_trial_stage_or_provider_outside_budget")
-            if provider == "groq" and not groq_ovh_klein_pilot():
-                # Old stage labels route through the requested experiment;
-                # no request reaches Groq and no Groq quota is consumed.
-                if stage.startswith(("editorial-audit", "repair-", "full-edit")):
-                    editor = "ovh-gptoss" if without_openrouter() else "openrouter"
-                    return self.model(stage, editor, prompt, validate=validate,
-                                      tokens=tokens, metadata=metadata, repair=repair)
-                # Kilo writes drafts. Independent OVH models each perform
-                # source/topic and visual planning on a separate channel.
-                if without_openrouter():
-                    primary = "kilo"
-                elif stage.startswith("topics-") or stage.startswith("topics-json-retry-"):
-                    primary = "ovh-gptoss" if self.channel == "science" else (
-                        "ovh" if self.channel == "cinema" else "kilo")
-                elif stage.startswith("image-plan"):
-                    primary = "ovh" if self.channel == "science" else (
-                        "ovh-gptoss" if self.channel == "legends" else "kilo")
-                else:
-                    primary = "kilo"
-                return self.model(stage, primary, prompt, validate=validate,
+            if ovh_trial() or groq_ovh_klein_pilot():
+                raise Blocked("ovh_removed_from_project")
+            if provider in {"ovh", "ovh-gptoss"}:
+                raise Blocked("ovh_removed_from_project")
+            if provider == "groq":
+                # Existing editorial stages request Groq by historical name;
+                # the isolated no-OVH pilot uses Kilo for creative work and
+                # OpenRouter only for independent QA / editing.
+                editor_stage = stage.startswith(("editorial-audit", "repair-", "full-edit"))
+                route = "openrouter" if editor_stage else "kilo"
+                return self.model(stage, route, prompt, validate=validate,
                                   tokens=tokens, metadata=metadata, repair=repair)
         if provider == "groq" and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
             # Authenticated, zero-price OpenRouter catalog was checked by the workflow.
@@ -218,23 +196,11 @@ class Article:
                 "http_429_groq_daily_quota",
                 "provider_stopped_http_429_groq_daily_quota",
             }
-            if alternate_enabled() and provider in {"kilo", "ovh", "ovh-gptoss"}:
-                attempted = (*tried, provider)
-                order = ("kilo", "ovh-gptoss", "ovh") if self.channel == "science" else (
-                    "kilo", "ovh", "ovh-gptoss")
-                if without_openrouter():
-                    if stage.startswith(("editorial-audit", "full-edit")):
-                        order = ("ovh-gptoss", "ovh")
-                    elif stage == "draft":
-                        order = ("kilo",)
-                other = next((candidate for candidate in order if candidate not in attempted), None)
-                if other and not reason.startswith(("production_deadline", "previous_provider_request",
-                                                    "invalid_alt_", "kilo_model_not_verified_free")):
-                    fallback_stage = stage.split("-writer-fallback", 1)[0] + "-writer-fallback"
-                    return self.model(fallback_stage, other, prompt, validate=validate, tokens=tokens,
-                                      metadata={**(metadata or {}), "fallback_from": provider,
-                                                "fallback_reason": reason},
-                                      repair=repair, tried=attempted)
+            if alternate_enabled() and provider == "kilo":
+                # No fallback may contact OVH after the owner removed it.
+                # Preserve blocked stage without pretending that an editor
+                # can replace unavailable independent authoring.
+                raise
             if (provider != "groq" or stage.startswith("editorial-audit")
                     or reason not in quota_blockers):
                 raise
@@ -747,7 +713,8 @@ class Article:
     def images(self):
         from .editorial_alt_models import enabled as alternative_test
         pilot = groq_ovh_klein_pilot()
-        sourced_illustrations = alternative_test() and self.channel != "cinema" and not pilot
+        # Mystical scenes use Klein; science retains real photos + Klein mixed media.
+        sourced_illustrations = False
         article = self.current["article"]
         count = len(article["sections"])
         if not 6 <= count <= 7:
@@ -1149,14 +1116,17 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
         require_isolated()
         if command not in {"daily", "retry"} or not validation_window or not encrypted_mode:
             raise Blocked("alt_test_requires_encrypted_validation")
-        cfg = {**cfg,
-               "per_article_calls": {**cfg["per_article_calls"], "kilo": 11, "ovh": 6, "ovh-gptoss": 6},
-               "daily_calls": {**cfg["daily_calls"], "kilo": 30, "ovh": 12, "ovh-gptoss": 12}}
         if without_openrouter():
-            # Historical failed requests remain in the encrypted ledger.
-            cfg["per_article_calls"].update(ovh=9, openrouter=0, **{"ovh-gptoss": 9, "kilo-review": 6})
-            cfg["daily_calls"].update(ovh=20, openrouter=0, **{"ovh-gptoss": 20, "kilo-review": 12})
+            raise Blocked("openrouter_required_after_ovh_removal")
+        cfg = {**cfg,
+               "per_article_calls": {**cfg["per_article_calls"], "kilo": 15,
+                                     "openrouter": 5, "klein": 12},
+               "daily_calls": {**cfg["daily_calls"], "kilo": 32,
+                               "openrouter": 10, "klein": 24}}
+        if os.environ.get("EDITORIAL_TWO_CHANNEL_PILOT") == "true":
+            cfg["articles_per_channel"] = {"legends": 1, "cinema": 1}
     if ovh_trial():
+        raise Blocked("ovh_removed_from_project")
         if not without_openrouter() or validate_cinema:
             raise Blocked("ovh_trial_requires_one_science_article_without_openrouter")
         if ovh_finalize() and command != "retry":
