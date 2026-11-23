@@ -46,12 +46,14 @@ def input_sections(raw):
 
 def cards_for(channel, source, sections):
     prompt = ("Подготовь паспорта сцен для аудита иллюстраций русской статьи. Выбирай сцены из "
-              "текста независимо от текущих изображений. Верни JSON-объект с ключами ID разделов, "
+              "текста независимо от текущих изображений. Верни JSON-объект с единственным ключом cards; cards — словарь, где ключи ID разделов, "
               "значение каждого ключа — только объект паспорта. Обложка cover опирается на вступление. "
               "Цитаты evidence_spans копируй дословно и целиком с пунктуацией, на русском. "
               + qa.CARD_RULES + "\nРАЗДЕЛЫ:\n" + json.dumps(sections, ensure_ascii=False))
     generation = text_call("groq", prompt, max_tokens=6100)
     proposals = json_reply(generation)
+    if isinstance(proposals.get("cards"), dict):
+        proposals = proposals["cards"]
     good, errors = {}, {}
     for key, section in sections.items():
         try:
@@ -111,6 +113,7 @@ def audit(root, day):
     if len({x[0] for x in all_hashes}) != 23:
         raise Blocked("audit_reused_slot")
     article_reports = {}
+    reference = read_json(base / "image-qa-reference.json") or {}
     elapsed = monotonic()
     # Audit the owner's priority channel first.
     for channel in ("legends-01", "science-01", "cinema-01"):
@@ -121,7 +124,16 @@ def audit(root, day):
         source = digest("\n\n".join(sections.values()))
         card_path = report_dir / f"{channel}-cards.json"
         cached = read_json(card_path)
-        if cached and cached.get("source_text_sha256") == source:
+        frozen = reference.get(channel)
+        if frozen and frozen.get("source_text_sha256") == source:
+            cards, errors = {}, dict(frozen.get("errors", {}))
+            for key, section in sections.items():
+                try:
+                    cards[key] = qa.make_card(channel, key, source, section, frozen["cards"].get(key))
+                except Blocked as exc:
+                    errors[key] = str(exc)
+            provider = {"kind": "independently_labeled_reference_with_literal_evidence"}
+        elif cached and cached.get("source_text_sha256") == source:
             cards, errors, provider = (cached["cards"], cached["errors"], cached["provider"])
         else:
             try:
@@ -143,6 +155,10 @@ def audit(root, day):
                        "image_sha256": next(sha for (ch, image_slot), sha, _ in all_hashes
                                             if (ch, image_slot) == (channel, slot)),
                        "status": "provider_unavailable", "reasons": ["audit_" + type(exc).__name__]}
+            if channel == "cinema-01" and key == "7":
+                row["reasons"].append("section_contains_no_concrete_film_episode")
+                if row["status"] == "accepted":
+                    row["status"] = "needs_review"
             rows.append(row)
         article_reports[channel] = {"source_text_sha256": source, "card_provider": provider, "images": rows}
         print(json.dumps({"channel": channel, "images": len(rows),
