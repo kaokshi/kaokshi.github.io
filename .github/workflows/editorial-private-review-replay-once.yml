@@ -1,16 +1,12 @@
 name: One-time import of existing AGENT-created private review (no generation)
 on:
-  push:
-    branches:
-      - assistant/replay-agent-private-review-once-20261123
-    paths:
-      - .github/workflows/editorial-private-review-replay-once.yml
+  workflow_dispatch:
 permissions:
   contents: read
   actions: read
 jobs:
   agent-original-review:
-    if: github.repository == 'kaokshi/kaokshi.github.io'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'kaokshi/kaokshi.github.io'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
