@@ -19,7 +19,7 @@ from docx.shared import Inches, Pt
 
 from .editorial_chat_plaintext import approval, checked_day, connect, push_private_main, run
 from .editorial_providers import Blocked
-from .editorial_scene_qa import SCHEMA
+from .editorial_scene_qa import SCHEMA, verified_model_evidence
 
 AUDIT_DIR = "image-qa-audit-v4"
 CHANNELS = ("legends-01", "cinema-01", "science-01")
@@ -102,6 +102,7 @@ def with_contents(raw):
 
 
 def require_audited_bundle(base):
+    from .editorial_images import image_hashes
     from .editorial_memory import digest, json_bytes, read_json
     from .editorial_scene_audit import input_sections
     from .editorial_review import HEADING
@@ -109,7 +110,7 @@ def require_audited_bundle(base):
     evidence = read_json(base / AUDIT_DIR / "image_qa.json")
     if not evidence or evidence.get("schema") != SCHEMA:
         raise Blocked("offline_bundle_requires_current_image_audit")
-    seen = set()
+    fingerprints = []
     for channel in CHANNELS:
         folder = base / channel
         markdown = (folder / FILE_NAME).read_text(encoding="utf-8")
@@ -134,19 +135,20 @@ def require_audited_bundle(base):
             row = entries[section]
             card = row.get("scene_card")
             path = folder / "illustrations" / f"{slot}.jpg"
+            sha, fingerprint = image_hashes(path)
             if (not card or row.get("status") != "accepted" or row.get("slot") != slot
                     or row.get("schema") != SCHEMA or row.get("source_text_sha256") != source
                     or card.get("article_id") != channel or card.get("section_id") != section
                     or card.get("section_text_sha256") != digest(sections[section])
                     or card.get("source_text_sha256") != source
                     or row.get("scene_card_sha256") != digest(json_bytes(card))
-                    or not row.get("vision") or row.get("duplicate") or not row.get("policy")
+                    or not verified_model_evidence(row) or not row.get("policy")
                     or row.get("visual_quality", {}).get("passed") is not True
-                    or row.get("image_sha256") != digest(path.read_bytes())):
+                    or row.get("image_sha256") != sha):
                 raise Blocked("offline_bundle_image_review_required_" + channel)
-            if row["image_sha256"] in seen:
+            if any((int(fingerprint, 16) ^ int(previous, 16)).bit_count() <= 6 for previous in fingerprints):
                 raise Blocked("offline_bundle_duplicate_image")
-            seen.add(row["image_sha256"])
+            fingerprints.append(fingerprint)
 
 
 def build_archive(base, path, zipfile):
