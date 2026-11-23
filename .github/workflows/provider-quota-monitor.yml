@@ -39,6 +39,7 @@ jobs:
       - name: Verify safe quota monitor and no production changes
         run: |
           python -m py_compile src/editorial_quota_monitor.py
+          test -f tests/test_quota_monitor.py
           python -m unittest discover -s tests -p 'test_quota_monitor.py' -q
           python - <<'PY'
           import json
