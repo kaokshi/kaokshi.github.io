@@ -1,0 +1,49 @@
+name: Deliver preserved pilot draft privately (no model calls)
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-deliver-partial-review-once.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  private-partial-review:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_GROQ_GEMINI_KLEIN_PILOT: 'true'
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install checkpoint decryptor only
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Restore exact sealed pilot state
+        run: |
+          umask 077
+          day="$(TZ=Europe/Moscow date +%F)"
+          python -m src.editorial_delivery restore --root "$RUNNER_TEMP/pilot-partial-review" --date "$day" --run-id 45177183176
+          echo "EDITORIAL_REVIEW_DAY=$day" >> "$GITHUB_ENV"
+      - name: Transfer agent-created INCOMPLETE review files to approved PRIVATE repository
+        run: |
+          python -m src.editorial_chat_plaintext publish --root "$RUNNER_TEMP/pilot-partial-review" --date "$EDITORIAL_REVIEW_DAY"
+      - name: Confirm publication stays disabled
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          site = json.loads(Path('config/site.json').read_text())
+          assert site['publication_enabled'] is False
+          print('Partial private test review only; no RSS or Dzen publication.')
+          PY
