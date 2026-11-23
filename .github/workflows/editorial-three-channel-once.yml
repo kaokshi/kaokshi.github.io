@@ -1,16 +1,12 @@
 name: One-time three-channel autonomous agent test
 on:
-  push:
-    branches:
-      - assistant/agent-three-channel-probe-20261123
-    paths:
-      - .github/workflows/editorial-three-channel-once.yml
+  workflow_dispatch:
 permissions:
   contents: read
   actions: read
 jobs:
   agent-only-test:
-    if: github.repository == 'kaokshi/kaokshi.github.io' && github.ref == 'refs/heads/assistant/agent-three-channel-probe-20261123'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'kaokshi/kaokshi.github.io' && github.ref == 'refs/heads/assistant/agent-three-channel-probe-20261123'
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     env:
