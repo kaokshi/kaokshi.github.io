@@ -120,9 +120,9 @@ def sources(urls, domains):
     return records
 
 
-def source_context(records):
+def source_context(records, *, chars_per_source=2000):
     available = [(i, row) for i, row in enumerate(records, 1) if row["status"] == "accessible"][:3]
-    return "\n\n".join(f"S{i} {row['url']}\n{row['text'][:2000]}" for i, row in available)
+    return "\n\n".join(f"S{i} {row['url']}\n{row['text'][:chars_per_source]}" for i, row in available)
 
 
 def fact_evidence(text, audit, records):

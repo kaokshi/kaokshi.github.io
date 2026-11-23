@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import fcntl
 
 from . import editorial_cinema as cinema
-from .editorial_alt_models import ovh_trial, without_openrouter
+from .editorial_alt_models import ovh_finalize, ovh_trial, without_openrouter
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_layout import layout_issues
@@ -102,6 +102,8 @@ class Article:
             if ovh_trial():
                 route = {"draft": "ovh-gptoss", "full-edit": "ovh", "editorial-audit": "ovh",
                          "full-edit-with-audit": "ovh"}
+                if ovh_finalize():
+                    route = {"editorial-audit": "ovh", "image-plan-1": "ovh"}
                 if route.get(stage) != provider:
                     raise Blocked("ovh_trial_stage_or_provider_outside_budget")
             if provider == "groq":
@@ -370,7 +372,7 @@ class Article:
 
     def inspect(self, candidate, reference=None, *, repair=False, submitted_audit=None):
         raw, sha = candidate["raw"], candidate["text_sha256"]
-        facts = source_context(self.records)
+        facts = source_context(self.records, chars_per_source=6000 if ovh_finalize() else 2000)
         def audit(text, language_issues):
             if submitted_audit is not None:
                 return submitted_audit
@@ -396,6 +398,13 @@ class Article:
                            + "\nЕсли статья свыше 6000 знаков, проверь конкретность и необходимость обоснования.")
             if reference:
                 prompt += "\nПРЕДЫДУЩАЯ ВЕРСИЯ ДЛЯ СРАВНЕНИЯ:\n" + canonical(reference["article"])
+            if ovh_finalize():
+                prompt += ("\nОтветь только JSON. Для claims копируй непрерывный отрывок из "
+                           "СТАТЬИ и непрерывную цитату на языке источника из блока ИСТОЧНИКИ. "
+                           "Цитата должна подтверждать числа в той же записи, что и в статье. "
+                           "Не добавляй план иллюстраций, не переписывай статью.")
+                return self.model("editorial-audit", "ovh", prompt, validate=lambda x: None,
+                                  metadata={"text_sha256": sha}, tokens=11000)
             if ovh_trial():
                 count = len(candidate["article"]["sections"])
                 prompt += (f'\nВ тот же JSON включи image_plan с subject и массивом images. '
@@ -426,7 +435,8 @@ class Article:
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
                             "length_exception_reason": candidate["article"].get("length_exception_reason"),
-                            **({"reviewer": "ovh-qwen-combined" if submitted_audit is not None else
+                            **({"reviewer": "ovh-qwen-facts-only"} if ovh_finalize() else
+                               {"reviewer": "ovh-qwen-combined" if submitted_audit is not None else
                                 "ovh-qwen-with-image-plan"} if ovh_trial() else
                                {"reviewer": "ovhcloud"} if without_openrouter() else {})},
                            lambda _: qa(raw, self.channel, self.prior[1], self.records,
@@ -438,6 +448,20 @@ class Article:
         return self.remember_version(raw, report)
 
     def prose(self, topic):
+        if ovh_finalize():
+            entry = self.memory.data["articles"][self.id]
+            previous_sha = entry.get("text_sha256")
+            if not isinstance(previous_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", previous_sha):
+                raise Blocked("ovh_finalize_saved_text_missing")
+            path = self.folder / "versions" / (previous_sha + ".md")
+            if not path.is_file():
+                raise Blocked("ovh_finalize_saved_text_missing")
+            raw = path.read_text(encoding="utf-8")
+            if digest(canonical(parse_article(raw))) != previous_sha:
+                raise Blocked("qa_sha_mismatch")
+            self.current = self.remember_version(raw)
+            self.current = self.inspect(self.current)
+            return self.current
         facts = source_context(self.records)
         angle = topic["angle"]
         style = ("Пиши художественный вымысел, с конкретным героем, причиной и завершённой развязкой."
@@ -656,9 +680,18 @@ class Article:
             ("groq",) if alternative_test() else ("groq", "openrouter"))
         if ovh_trial():
             plan = self.memory.data["articles"][self.id].get("trial_image_plan")
-            if not isinstance(plan, dict):
-                raise Blocked("image_plan_missing_from_ovh_review")
-            validate_plan(plan, count, self.channel, self.config, sourced_illustrations=True)
+            try:
+                if not isinstance(plan, dict):
+                    raise Blocked("image_plan_missing_from_ovh_review")
+                validate_plan(plan, count, self.channel, self.config, sourced_illustrations=True)
+            except Blocked:
+                if not ovh_finalize():
+                    raise
+                plan = self.model("image-plan-1", "ovh", prompt,
+                                  validate=lambda x: validate_plan(x, count, self.channel, self.config,
+                                                                   sourced_illustrations=True),
+                                  metadata={"text_sha256": self.current["text_sha256"]}, tokens=9500)
+                self.memory.article(self.id, trial_image_plan=plan)
             providers = ()
         for attempt, provider in enumerate(providers, 1):
             try:
@@ -980,9 +1013,12 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
     if ovh_trial():
         if not without_openrouter() or validate_cinema:
             raise Blocked("ovh_trial_requires_one_science_article_without_openrouter")
+        if ovh_finalize() and command != "retry":
+            raise Blocked("ovh_finalize_requires_verified_checkpoint")
         cfg["articles_per_channel"] = {"science": 1}
         for ledger in ("daily_calls", "per_article_calls"):
-            cfg[ledger].update(kilo=0, openrouter=0, ovh=2, **{"ovh-gptoss": 1, "kilo-review": 0})
+            cfg[ledger].update(kilo=0, openrouter=0, ovh=4 if ovh_finalize() else 2,
+                               **{"ovh-gptoss": 1, "kilo-review": 0})
     return cfg
 
 

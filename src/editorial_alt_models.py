@@ -35,6 +35,10 @@ def ovh_trial():
     return os.environ.get("EDITORIAL_OVH_ONE_ARTICLE") == "true"
 
 
+def ovh_finalize():
+    return ovh_trial() and os.environ.get("EDITORIAL_OVH_FINALIZE") == "true"
+
+
 def require_isolated():
     if (not enabled() or os.environ.get("EDITORIAL_ISOLATED_VALIDATION") != "true"
             or os.environ.get("GITHUB_ACTIONS") != "true"):
