@@ -94,6 +94,18 @@ class Article:
         return self.memory.task(self.id, stage, executor, inputs, fn, **kwargs)
 
     def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
+        from .editorial_alt_models import enabled as alternate_enabled, require_isolated
+        if alternate_enabled():
+            require_isolated()
+            if provider == "groq":
+                # Old stage labels route through the requested experiment;
+                # no request reaches Groq and no Groq quota is consumed.
+                if stage.startswith(("editorial-audit", "repair-", "full-edit")):
+                    return self.model(stage, "openrouter", prompt, validate=validate,
+                                      tokens=tokens, metadata=metadata, repair=repair)
+                primary = "kilo" if self.channel == "legends" else "modelscope"
+                return self.model(stage, primary, prompt, validate=validate,
+                                  tokens=tokens, metadata=metadata, repair=repair)
         if provider == "groq" and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
             # Authenticated, zero-price OpenRouter catalog was checked by the workflow.
             # Do not contact Groq at all when its daily capacity is unavailable.
@@ -144,6 +156,18 @@ class Article:
                 "http_429_groq_daily_quota",
                 "provider_stopped_http_429_groq_daily_quota",
             }
+            if (alternate_enabled() and provider in {"kilo", "modelscope"}
+                    and not stage.endswith("-writer-fallback")):
+                # Try the other MAIN writer once, never the editor as writer.
+                # Paid models and Groq are not eligible for this experiment.
+                other = "modelscope" if provider == "kilo" else "kilo"
+                if reason.startswith(("http_401_", "http_402_", "http_403_",
+                                      "invalid_alt_", "kilo_model_not_verified_free")):
+                    raise
+                return self.model(stage + "-writer-fallback", other, prompt,
+                                  validate=validate, tokens=tokens,
+                                  metadata={**(metadata or {}), "fallback_from": provider,
+                                            "fallback_reason": reason}, repair=repair)
             if (provider != "groq" or stage.startswith("editorial-audit")
                     or reason not in quota_blockers):
                 raise
@@ -318,7 +342,8 @@ class Article:
             if reference:
                 prompt += "\nПРЕДЫДУЩАЯ ВЕРСИЯ ДЛЯ СРАВНЕНИЯ:\n" + canonical(reference["article"])
             last_error = None
-            for provider in ("groq", "openrouter"):
+            from .editorial_alt_models import enabled as alternative_test
+            for provider in (("openrouter",) if alternative_test() else ("groq", "openrouter")):
                 try:
                     return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
                                       metadata={"text_sha256": sha}, tokens=2900 if provider == "groq" else 8300,
@@ -358,11 +383,14 @@ class Article:
                  "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
-        author, editor = "groq", "openrouter"
+        from .editorial_alt_models import enabled as alternative_test
+        author, editor = (("kilo" if self.channel == "legends" else "modelscope"), "openrouter") if alternative_test() else ("groq", "openrouter")
         try:
             raw = self.model("draft", author, brief, metadata={"topic": self.title})
         except Blocked as exc:
-            if str(exc) in {"production_deadline", "groq_quota_wait_exceeds_deadline"}:
+            if alternative_test() or str(exc) in {"production_deadline", "groq_quota_wait_exceeds_deadline"}:
+                # Kilo/ModelScope were already tried as writers in the
+                # isolated route. OpenRouter must stay the independent editor.
                 raise
             author, editor = "openrouter", "groq"
             raw = self.model("draft-fallback", author, brief, metadata={"topic": self.title})
@@ -429,7 +457,7 @@ class Article:
                       f"\nТЕКУЩАЯ ВЕРСИЯ:\n{self.current['raw']}")
             errors = []
             response = None
-            for provider in ("groq", "openrouter"):
+            for provider in (("openrouter",) if alternative_test() else ("groq", "openrouter")):
                 try:
                     response = self.model(f"repair-{attempt}", provider, prompt)
                     break
@@ -480,7 +508,8 @@ class Article:
                   + self.current["raw"])
         plan = None
         last = None
-        for attempt, provider in enumerate(("groq", "openrouter"), 1):
+        from .editorial_alt_models import enabled as alternative_test
+        for attempt, provider in enumerate(("groq",) if alternative_test() else ("groq", "openrouter"), 1):
             try:
                 plan = self.model(f"image-plan-{attempt}", provider,
                                   prompt + (f"\nИсправь: {last}." if last else ""),
@@ -773,6 +802,14 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
             cfg = {**cfg, "per_article_calls": {
                 **cfg["per_article_calls"], "openrouter": 12},
                 "daily_calls": {**cfg["daily_calls"], "openrouter": 36}}
+    if os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true":
+        from .editorial_alt_models import require_isolated
+        require_isolated()
+        if not validate_cinema:
+            raise Blocked("alt_test_requires_three_channel_isolation")
+        cfg = {**cfg,
+               "per_article_calls": {**cfg["per_article_calls"], "kilo": 10, "modelscope": 10},
+               "daily_calls": {**cfg["daily_calls"], "kilo": 24, "modelscope": 24}}
     return cfg
 
 
