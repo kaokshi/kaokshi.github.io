@@ -16,6 +16,9 @@ jobs:
     timeout-minutes: 8
     env:
       EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      EDITORIAL_GROQ_FREE_ONLY: 'true'
+      GITHUB_ACTIONS: 'true'
       EDITORIAL_GROQ_GEMINI_KLEIN_PILOT: 'true'
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
       EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
