@@ -1,9 +1,5 @@
 name: Gemini API access and quota visibility (read-only)
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/gemini-quota.yml'
   workflow_dispatch:
   schedule:
     - cron: '35 6 * * *'
@@ -28,7 +24,7 @@ jobs:
           python-version: '3.12'
       - run: python -m unittest -v tests.test_editorial_gemini_quota
   read-gemini:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
