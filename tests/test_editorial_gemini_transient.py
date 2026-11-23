@@ -40,7 +40,8 @@ class GeminiTransientTests(unittest.TestCase):
             return response()
         with patch.dict(os.environ, environment()), \
              patch("src.editorial_providers.request", side_effect=fake_request), \
-             patch("src.editorial_providers._gemini_last_request", float("-inf")):
+             patch("src.editorial_providers._gemini_last_request", float("-inf")), \
+             patch("src.editorial_providers.sleep"):
             first = gemini_text("fixture", 512)
             fallback = gemini_text("fixture", 512, fallback_model=True)
         self.assertEqual(first["model"], "gemini-3.6-flash")
