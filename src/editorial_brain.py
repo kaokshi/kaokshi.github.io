@@ -266,7 +266,7 @@ class Article:
                        f"Публичные сигналы интереса: {json.dumps(signals, ensure_ascii=False)}. "
                        f"Недавние релизы: {json.dumps(releases, ensure_ascii=False)}.")
         from .editorial_alt_models import enabled as alternative_test
-        topic_tokens = 6000 if alternative_test() else 3200
+        topic_tokens = 1800 if groq_gemini_klein_pilot() else 6000 if alternative_test() else 3200
         for shift in range(2):
             if shift and not alternative_test() and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") != "true":
                 with self.memory.lock:
@@ -419,7 +419,8 @@ class Article:
             for provider in providers:
                 try:
                     return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
-                                      metadata={"text_sha256": sha}, tokens=2900 if provider == "groq" else 8300,
+                                      metadata={"text_sha256": sha}, tokens=(5000 if groq_gemini_klein_pilot() else
+                                                                   2900 if provider == "groq" else 8300),
                                       repair=repair)
                 except Blocked as exc:
                     last_error = exc
@@ -560,7 +561,7 @@ class Article:
             # Economical pilot: one Groq draft, one Gemini full edit and one
             # independent Gemini QA. Save the original before editing to ensure
             # a failed API request never destroys the draft or spends it again.
-            original_raw = self.model("draft", "groq", brief, tokens=3400,
+            original_raw = self.model("draft", "groq", brief, tokens=3000,
                                       metadata={"topic": self.title})
             original = self.remember_version(original_raw)
             self.current = original
@@ -817,7 +818,7 @@ class Article:
                                   validate=lambda x: validate_plan(x, count, self.channel, self.config,
                                                                    sourced_illustrations=sourced_illustrations),
                                   metadata={"text_sha256": self.current["text_sha256"]},
-                                  tokens=6000 if alternative_test() else (2800 if provider == "groq" else 5500))
+                                  tokens=1800 if groq_gemini_klein_pilot() else 6000 if alternative_test() else (2800 if provider == "groq" else 5500))
                 break
             except Blocked as exc:
                 last = exc
