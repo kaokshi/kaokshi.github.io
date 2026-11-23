@@ -94,16 +94,8 @@ class Article:
         return self.memory.task(self.id, stage, executor, inputs, fn, **kwargs)
 
     def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
-        if provider == "groq" and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
-            # Authenticated, zero-price OpenRouter catalog was checked by the workflow.
-            # Do not contact Groq at all when its daily capacity is unavailable.
-            return self.model(stage, "openrouter", prompt, validate=validate,
-                              tokens=max(7800, tokens or 0),
-                              metadata={**(metadata or {}), "fallback_from": "groq",
-                                        "fallback_reason": "groq_preflight_capacity_unavailable"},
-                              repair=repair)
         if tokens is None:
-            tokens = 3700 if provider == "groq" else 7800
+            tokens = 3700
 
         def send(task, ceiling):
             callback = lambda: text_call(provider, prompt, ceiling)
@@ -124,33 +116,10 @@ class Article:
                     raise
                 return send(task, tokens)
 
-        try:
-            result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
-                                               "prompt_sha256": digest(prompt), **(metadata or {})},
-                               execute, minimum_seconds=130,
-                               validator=(lambda response: validate(json_reply(response))) if validate else None)
-        except Blocked as exc:
-            # Route a quota-stopped Groq stage to a separately recorded, verified-free
-            # OpenRouter task. Do not hide authentication failures, malformed answers,
-            # incomplete previous requests or any editorial validation errors.
-            reason = str(exc)
-            quota_blockers = {
-                "call_budget_exhausted",
-                "groq_quota_wait_exceeds_deadline",
-                "groq_daily_quota_reset_pending",
-                "groq_editorial_budget_exhausted",
-                "groq_daily_budget_exhausted",
-                "groq_editorial_reserve_protected",
-                "http_429_groq_daily_quota",
-                "provider_stopped_http_429_groq_daily_quota",
-            }
-            if (provider != "groq" or stage.startswith("editorial-audit")
-                    or reason not in quota_blockers):
-                raise
-            return self.model(stage, "openrouter", prompt, validate=validate,
-                              tokens=max(7800, tokens),
-                              metadata={**(metadata or {}), "fallback_from": "groq",
-                                        "fallback_reason": reason}, repair=repair)
+        result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
+                                            "prompt_sha256": digest(prompt), **(metadata or {})},
+                           execute, minimum_seconds=130,
+                           validator=(lambda response: validate(json_reply(response))) if validate else None)
         return json_reply(result) if validate else result["text"]
 
     def source_seed(self, history):
@@ -204,16 +173,13 @@ class Article:
                        f"Публичные сигналы интереса: {json.dumps(signals, ensure_ascii=False)}. "
                        f"Недавние релизы: {json.dumps(releases, ensure_ascii=False)}.")
         for shift in range(2):
-            if shift and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") != "true":
+            if shift:
                 with self.memory.lock:
                     projection = groq_plan(self.memory)
                 if (projection["groq_usage"]["accounted_tokens"] >= self.config["groq_budget"]["target_daily_tokens"][1]
                         or not all(projection[key] for key in ("fits_editorial_budget",
                             "fits_observed_organization_headroom", "deadline_estimate_fits"))):
                     raise Blocked("groq_optional_topic_retry_deferred")
-            # When Groq was preflight-blocked and the zero-price OpenRouter
-            # route was separately verified, only the latter's real request
-            # envelope and the common deadline may gate this retry.
             def is_valid(plan):
                 if not isinstance(plan.get("topics"), list):
                     raise Blocked("topic_list_missing")
@@ -317,18 +283,8 @@ class Article:
                            + "\nЕсли статья свыше 6000 знаков, проверь конкретность и необходимость обоснования.")
             if reference:
                 prompt += "\nПРЕДЫДУЩАЯ ВЕРСИЯ ДЛЯ СРАВНЕНИЯ:\n" + canonical(reference["article"])
-            last_error = None
-            for provider in ("groq", "openrouter"):
-                try:
-                    return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
-                                      metadata={"text_sha256": sha}, tokens=2900 if provider == "groq" else 8300,
-                                      repair=repair)
-                except Blocked as exc:
-                    last_error = exc
-                    if provider == "openrouter" and str(exc) == "empty_visible_content":
-                        return self.model("editorial-audit-retry", provider, prompt, validate=lambda x: None,
-                                          metadata={"text_sha256": sha}, tokens=9000)
-            raise last_error
+            return self.model("editorial-audit", "groq", prompt, validate=lambda x: None,
+                              metadata={"text_sha256": sha}, tokens=2900, repair=repair)
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
                             "length_exception_reason": candidate["article"].get("length_exception_reason")},
@@ -358,14 +314,8 @@ class Article:
                  "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
-        author, editor = "groq", "openrouter"
-        try:
-            raw = self.model("draft", author, brief, metadata={"topic": self.title})
-        except Blocked as exc:
-            if str(exc) in {"production_deadline", "groq_quota_wait_exceeds_deadline"}:
-                raise
-            author, editor = "openrouter", "groq"
-            raw = self.model("draft-fallback", author, brief, metadata={"topic": self.title})
+        author, editor = "groq", None
+        raw = self.model("draft", author, brief, metadata={"topic": self.title})
         self.memory.article(self.id, draft_provider=author, independent_editor_provider=editor)
         self.current = self.remember_version(raw)
         original = self.current
@@ -374,22 +324,10 @@ class Article:
                        "Если объём мал, развивай только недостаточно раскрытые места. "
                        "Сохрани естественный CTA. Верни полностью отредактированный текст.\nЧЕРНОВИК:\n"
                        + raw)
+        # No second text model is enabled. Keep a visible blocker rather than
+        # treating a second pass by Groq as an independent editorial review.
         edited = None
-        try:
-            edited = self.model("full-edit", editor, edit_prompt,
-                                metadata={"source_sha256": original["text_sha256"]})
-            self.remember_version(edited)
-        except Blocked as exc:
-            can_retry = str(exc) in {"empty_visible_content", "connection_failed", "truncated_response"}
-            if can_retry:
-                try:
-                    edited = self.model("full-edit-retry", editor, edit_prompt,
-                                        metadata={"source_sha256": original["text_sha256"]})
-                    self.remember_version(edited)
-                except Blocked as last:
-                    self.blockers.append(f"independent_edit_unavailable: {last}")
-            else:
-                self.blockers.append(f"independent_edit_unavailable: {exc}")
+        self.blockers.append("independent_edit_unavailable: no_independent_provider")
         self.current = self.inspect(original)
         if edited and canonical(parse_article(edited)) != canonical(original["article"]):
             candidate = self.inspect(self.remember_version(edited), self.current)
@@ -429,7 +367,7 @@ class Article:
                       f"\nТЕКУЩАЯ ВЕРСИЯ:\n{self.current['raw']}")
             errors = []
             response = None
-            for provider in ("groq", "openrouter"):
+            for provider in ("groq",):
                 try:
                     response = self.model(f"repair-{attempt}", provider, prompt)
                     break
@@ -480,13 +418,13 @@ class Article:
                   + self.current["raw"])
         plan = None
         last = None
-        for attempt, provider in enumerate(("groq", "openrouter"), 1):
+        for attempt, provider in enumerate(("groq", "groq"), 1):
             try:
                 plan = self.model(f"image-plan-{attempt}", provider,
                                   prompt + (f"\nИсправь: {last}." if last else ""),
                                   validate=lambda x: validate_plan(x, count, self.channel, self.config),
                                   metadata={"text_sha256": self.current["text_sha256"]},
-                                  tokens=2800 if provider == "groq" else 5500)
+                                  tokens=2800)
                 break
             except Blocked as exc:
                 last = exc
@@ -707,7 +645,7 @@ def review(memory):
 
 
 def health(storage):
-    required = ("GROQ_API_KEY", "OPENROUTER_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN")
+    required = ("GROQ_API_KEY", "GEMINI_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_QUOTA_TOKEN")
     return {"configuration_only": True, "private_storage": "connected" if storage else "not_connected",
             "credentials_present": {name: bool(os.environ.get(name)) for name in required},
             "free_account_attested": {s: os.environ.get(var) == "true" for s, var in (
@@ -765,14 +703,6 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
                 or os.environ.get("EDITORIAL_ISOLATED_VALIDATION") != "true"):
             raise Blocked("cinema_validation_requires_isolated_encrypted_cycle")
         cfg = {**cfg, "articles_per_channel": {**cfg["articles_per_channel"], "cinema": 1}}
-        if os.environ.get("EDITORIAL_TEST_FREE_ONLY") == "true":
-            # The configured 10 OpenRouter calls cover the two production
-            # channels only. A three-channel isolated QA requires a separate
-            # bounded test envelope, still enforced by verified $0 model pricing
-            # and the provider's actual account quota.
-            cfg = {**cfg, "per_article_calls": {
-                **cfg["per_article_calls"], "openrouter": 12},
-                "daily_calls": {**cfg["daily_calls"], "openrouter": 36}}
     return cfg
 
 

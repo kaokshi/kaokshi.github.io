@@ -86,9 +86,10 @@ jobs:
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
       EDITORIAL_TEST_FREE_ONLY: ${{ inputs.isolated_validation && inputs.validation_free_accounts_confirmed && 'true' || 'false' }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_QUOTA_TOKEN: ${{ secrets.CLOUDFLARE_QUOTA_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GH_TOKEN: ${{ github.token }}
       TOKENIZERS_PARALLELISM: 'false'
       OMP_NUM_THREADS: '2'
@@ -167,6 +168,14 @@ jobs:
           PYTHON
           visibility="$(GH_TOKEN="$EDITORIAL_PRIVATE_TOKEN" gh api "repos/$EDITORIAL_PRIVATE_REPOSITORY" --jq '.visibility')"
           test "$visibility" = private
+      - name: Require safe Cloudflare capacity before image-heavy editorial cycle
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
+        run: |
+          python -m src.cloudflare_quota --output "$RUNNER_TEMP/cloudflare-editorial-preflight.json" --require-free-neurons 6000
+      - name: Check Gemini model availability without generation
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'quota' || env.EDITORIAL_EFFECTIVE_COMMAND == 'health'
+        continue-on-error: true
+        run: python -m src.editorial_gemini_quota --output "$RUNNER_TEMP/gemini-availability.json"
       - name: Inspect shared Groq quota status without model calls
         id: quota
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'quota'
@@ -208,21 +217,16 @@ jobs:
           path: ${{ env.EDITORIAL_QUOTA_DIR }}/ready.txt
           if-no-files-found: error
           retention-days: 7
-      - name: Require verified free text capacity before a full run
+      - name: Require verified Groq capacity (no alternate paid or free provider)
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
         env:
           QUOTA_STATE: ${{ steps.quota.outputs.state }}
           PROBE_OUTCOME: ${{ steps.probe.outcome }}
         run: |
           if [ "$QUOTA_STATE" != ready ] && [ "$PROBE_OUTCOME" != success ]; then
-            echo "::notice::Groq unavailable; independently verifying the existing free OpenRouter model."
-            python -m src.editorial_free_fallback --github-env "$GITHUB_ENV"
+            echo "::error::Groq capacity is not verified. Editorial model calls are suspended; no OpenRouter fallback."
+            exit 2
           fi
-      - name: Require actual free OpenRouter headroom for three independent test articles
-        if: >-
-          inputs.isolated_validation && inputs.validate_cinema &&
-          (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry')
-        run: python -m src.editorial_free_fallback --github-env "$GITHUB_ENV" --quota-only --minimum-free-remaining 36
       - name: Restore sanitized Groq accounting
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
         run: |
@@ -233,9 +237,7 @@ jobs:
           echo "EDITORIAL_GROQ_CURRENT_PROBE=$EDITORIAL_QUOTA_DIR/probe.json" >> "$GITHUB_ENV"
       - name: Reserve the remaining Groq envelope before production
         id: reserve_groq
-        if: >-
-          (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry') &&
-          env.EDITORIAL_GROQ_FALLBACK_ONLY != 'true'
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
         run: python -m src.editorial_groq_ledger reserve --prior "$EDITORIAL_GROQ_LEDGER" --file "$EDITORIAL_QUOTA_DIR/reservation.json"
       - name: Save the Groq envelope in case the runner is interrupted
         if: steps.reserve_groq.outcome == 'success'
