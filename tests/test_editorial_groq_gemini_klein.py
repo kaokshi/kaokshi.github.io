@@ -64,6 +64,23 @@ class PilotRouteTests(unittest.TestCase):
         check.assert_called_once_with()
         request.assert_not_called()
 
+    def test_gemini_503_enforces_cooldown_without_silent_retry(self):
+        from time import monotonic
+        import src.editorial_providers as providers
+        old = providers._gemini_last_request
+        now = monotonic()
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "offline-fixture"}), \
+             patch("src.editorial_providers.request",
+                   side_effect=ProviderError("http_503_transient")) as request:
+            try:
+                with self.assertRaisesRegex(ProviderError, "http_503_transient"):
+                    providers.gemini_packet("https://generativelanguage.googleapis.com/v1beta/models/test:generateContent",
+                                            {"contents": []})
+                self.assertEqual(request.call_count, 1)
+                self.assertGreaterEqual(providers._gemini_last_request, now + 30)
+            finally:
+                providers._gemini_last_request = old
+
     def test_groq_requires_verified_free_account(self):
         env = self.env()
         env["EDITORIAL_GROQ_FREE_ONLY"] = "false"
