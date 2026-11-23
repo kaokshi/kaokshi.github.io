@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import fcntl
 
 from . import editorial_cinema as cinema
-from .editorial_alt_models import gemini_pilot, groq_ovh_klein_pilot, ovh_finalize, ovh_recover, ovh_trial, without_openrouter
+from .editorial_alt_models import gemini_pilot, groq_gemini_klein_pilot, groq_ovh_klein_pilot, ovh_finalize, ovh_recover, ovh_trial, without_openrouter
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_layout import layout_issues
@@ -103,12 +103,15 @@ class Article:
                 raise Blocked("ovh_removed_from_project")
             if provider in {"ovh", "ovh-gptoss"}:
                 raise Blocked("ovh_removed_from_project")
-            if provider == "groq":
-                # Existing editorial stages request Groq by historical name;
-                # the isolated no-OVH pilot uses Kilo for creative work and
-                # OpenRouter only for independent QA / editing.
-                editor_stage = stage.startswith(("editorial-audit", "repair-", "full-edit"))
-                route = "openrouter" if editor_stage else "kilo"
+            if groq_gemini_klein_pilot():
+                if provider not in {"groq", "gemini"}:
+                    raise Blocked("pilot_text_provider_not_allowed")
+                if provider == "groq" and stage.startswith(("editorial-audit", "full-edit", "repair-")):
+                    return self.model(stage, "gemini", prompt, validate=validate,
+                                      tokens=tokens, metadata=metadata, repair=repair)
+            elif provider == "groq":
+                # Legacy Kilo-only isolated tests remain separate from this pilot.
+                route = "openrouter" if stage.startswith(("editorial-audit", "repair-", "full-edit")) else "kilo"
                 return self.model(stage, route, prompt, validate=validate,
                                   tokens=tokens, metadata=metadata, repair=repair)
         if provider == "groq" and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
@@ -180,7 +183,7 @@ class Article:
             result = self.task(stage, provider, inputs, execute, minimum_seconds=130,
                                validator=(lambda response: validate(json_reply(response))) if validate else None)
         except Blocked as exc:
-            if ovh_trial():
+            if ovh_trial() or groq_gemini_klein_pilot():
                 raise
             # Route a quota-stopped Groq stage to a separately recorded, verified-free
             # OpenRouter task. Do not hide authentication failures, malformed answers,
@@ -410,8 +413,9 @@ class Article:
                 return result
             last_error = None
             from .editorial_alt_models import enabled as alternative_test
-            providers = ("ovh-gptoss", "kilo-review") if without_openrouter() else (
-                ("openrouter",) if alternative_test() else ("groq", "openrouter"))
+            providers = (("gemini",) if groq_gemini_klein_pilot() else
+                         ("ovh-gptoss", "kilo-review") if without_openrouter() else
+                         ("openrouter",) if alternative_test() else ("groq", "openrouter"))
             for provider in providers:
                 try:
                     return self.model("editorial-audit", provider, prompt, validate=lambda x: None,
@@ -552,6 +556,32 @@ class Article:
                  "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
+        if groq_gemini_klein_pilot():
+            # Economical pilot: one Groq draft, one Gemini full edit and one
+            # independent Gemini QA. Save the original before editing to ensure
+            # a failed API request never destroys the draft or spends it again.
+            original_raw = self.model("draft", "groq", brief, tokens=3400,
+                                      metadata={"topic": self.title})
+            original = self.remember_version(original_raw)
+            self.current = original
+            self.memory.article(self.id, draft_provider="groq",
+                                independent_editor_provider="gemini")
+            edit_prompt = (
+                brief + "\\nТы редактор. Исправь композицию, логику и язык."
+                " Сохрани все достоверные факты, сюжет и сильное вступление."
+                " Оставь 3000–6000 знаков без пробелов, шесть или семь разделов"
+                " с жирными заголовками и призыв подписаться в конце."
+                " Не выдумывай сцены фильма и цитаты. Верни только полный текст."
+                "\\nЧЕРНОВИК:\\n" + original_raw)
+            edited = self.model("full-edit", "gemini", edit_prompt,
+                                tokens=6200,
+                                metadata={"source_sha256": original["text_sha256"]})
+            self.current = self.inspect(self.remember_version(edited), original)
+            self.attempts.append({"role": "independent_edit", "provider": "gemini",
+                                  "status": "accepted_after_qa",
+                                  "before": original["text_sha256"],
+                                  "after": self.current["text_sha256"]})
+            return self.current
         if ovh_trial():
             format_rules = ("\nОбязательная форма: короткое вступление, ровно шесть разделов с "
                             "жирными заголовками и 3000–6000 знаков без пробелов. Последний "
@@ -1116,36 +1146,31 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
         require_isolated()
         if command not in {"daily", "retry"} or not validation_window or not encrypted_mode:
             raise Blocked("alt_test_requires_encrypted_validation")
-        if without_openrouter():
-            raise Blocked("openrouter_required_after_ovh_removal")
-        cfg = {**cfg,
-               "per_article_calls": {**cfg["per_article_calls"], "kilo": 15,
-                                     "openrouter": 5, "klein": 12},
-               "daily_calls": {**cfg["daily_calls"], "kilo": 32,
-                               "openrouter": 10, "klein": 24}}
-        if os.environ.get("EDITORIAL_TWO_CHANNEL_PILOT") == "true":
-            cfg["articles_per_channel"] = {"legends": 1, "cinema": 1}
+        if groq_gemini_klein_pilot():
+            # One article for each currently requested test channel.
+            # A fresh article requires one topic, one draft, one image-plan
+            # request on Groq and at most one edit plus one QA on Gemini.
+            cfg = {**cfg, "articles_per_channel": {"legends": 1, "cinema": 1},
+                   "per_article_calls": {**cfg["per_article_calls"],
+                                         "groq": 3, "gemini": 2,
+                                         "klein": 8, "openrouter": 0,
+                                         "ovh": 0, "ovh-gptoss": 0, "kilo": 0},
+                   "daily_calls": {**cfg["daily_calls"],
+                                   "groq": 6, "gemini": 4,
+                                   "klein": 16, "openrouter": 0,
+                                   "ovh": 0, "ovh-gptoss": 0, "kilo": 0}}
+        else:
+            if without_openrouter():
+                raise Blocked("openrouter_required_after_ovh_removal")
+            cfg = {**cfg,
+                   "per_article_calls": {**cfg["per_article_calls"], "kilo": 15,
+                                         "openrouter": 5, "klein": 12},
+                   "daily_calls": {**cfg["daily_calls"], "kilo": 32,
+                                   "openrouter": 10, "klein": 24}}
+            if os.environ.get("EDITORIAL_TWO_CHANNEL_PILOT") == "true":
+                cfg["articles_per_channel"] = {"legends": 1, "cinema": 1}
     if ovh_trial():
         raise Blocked("ovh_removed_from_project")
-        if not without_openrouter() or validate_cinema:
-            raise Blocked("ovh_trial_requires_one_science_article_without_openrouter")
-        if ovh_finalize() and command != "retry":
-            raise Blocked("ovh_finalize_requires_verified_checkpoint")
-        cfg["articles_per_channel"] = {"science": 1}
-        for ledger in ("daily_calls", "per_article_calls"):
-            cfg[ledger].update(kilo=0, openrouter=0, ovh=8 if ovh_recover() else 4 if ovh_finalize() else 2,
-                               **{"ovh-gptoss": 1, "kilo-review": 0})
-        if groq_ovh_klein_pilot():
-            if ovh_finalize():
-                raise Blocked("groq_ovh_klein_pilot_cannot_use_ovh_only_finalize")
-            for ledger in ("daily_calls", "per_article_calls"):
-                cfg[ledger].update(groq=2 if command == "daily" else 0, ovh=5 if command == "daily" else 7,
-                                   klein=4, **{"ovh-gptoss": 0})
-        if gemini_pilot():
-            if command != "retry":
-                raise Blocked("gemini_pilot_requires_groq_checkpoint")
-            cfg["daily_calls"].update(ovh=0, gemini=gemini_limit("EDITORIAL_GEMINI_DAILY_CALLS", 27, 27))
-            cfg["per_article_calls"].update(ovh=0, gemini=3)
     return cfg
 
 
