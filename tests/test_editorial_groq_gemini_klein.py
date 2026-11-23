@@ -1,4 +1,5 @@
 """No-network regression checks for the owner-selected experimental provider route."""
+import json
 import os
 import unittest
 from unittest.mock import patch
@@ -50,6 +51,15 @@ class PilotRouteTests(unittest.TestCase):
         self.assertEqual(cfg["articles_per_channel"], {"legends": 1, "science": 1, "cinema": 1})
         self.assertEqual(cfg["daily_calls"]["klein"], 18)
         self.assertEqual(cfg["daily_calls"]["gemini"], 6)
+
+    def test_groq_scene_planner_selects_json_wire_format(self):
+        payload = {"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]}
+        with patch.dict(os.environ, self.env()), patch(
+                "src.editorial_providers.request",
+                return_value=(json.dumps(payload).encode(), {}, 200)) as request:
+            self.assertEqual(text_call("groq", "Return a JSON object.", 500, response_json=True)["text"], "{}")
+        wire = json.loads(request.call_args.kwargs["data"])
+        self.assertEqual(wire["response_format"], {"type": "json_object"})
 
     def test_ovh_route_is_blocked_before_any_network_access(self):
         with patch.dict(os.environ, self.env()), \

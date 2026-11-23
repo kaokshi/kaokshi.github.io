@@ -319,7 +319,7 @@ def gemini_text(prompt, max_tokens, *, response_json=False, fallback_model=False
             "usage": metered, "telemetry": {}}
 
 
-def text_call(provider, prompt, max_tokens=7500):
+def text_call(provider, prompt, max_tokens=7500, *, response_json=False):
     # Owner decision 2026-11-23: OVH is removed from all live text routes.
     if provider in {"ovh", "ovh-gptoss"}:
         raise ProviderError("ovh_removed_from_project", stop=True)
@@ -346,6 +346,8 @@ def text_call(provider, prompt, max_tokens=7500):
         url = "https://api.groq.com/openai/v1/chat/completions"
         domain, secret, max_key = "api.groq.com", "GROQ_API_KEY", "max_completion_tokens"
         extra = {"reasoning_effort": "low"}
+        if response_json:
+            extra["response_format"] = {"type": "json_object"}
     elif provider == "openrouter":
         require_free_router()
         url = "https://openrouter.ai/api/v1/chat/completions"

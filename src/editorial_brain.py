@@ -130,11 +130,16 @@ class Article:
         if without_openrouter() and not ovh_trial() and provider in {"ovh", "ovh-gptoss", "kilo-review"}:
             tokens = min(tokens, 7800)
 
+        structured_scene = (provider == "groq" and stage.startswith("image-plan-")
+                            and os.environ.get("EDITORIAL_RELEASE_TRIO") == "true")
+
         def send(task, ceiling):
             if provider == "gemini":
                 callback = lambda: gemini_text(prompt, min(ceiling, 8192),
                                                response_json=validate is not None,
                                                fallback_model=stage.endswith("-retry"))
+            elif structured_scene:
+                callback = lambda: text_call(provider, prompt, ceiling, response_json=True)
             else:
                 callback = lambda: text_call(provider, prompt, ceiling)
             if provider == "groq":
@@ -172,6 +177,8 @@ class Article:
                             else gemini_model()) if provider == "gemini" else MODELS[provider],
                   "prompt_version": PROMPT_VERSION,
                   "prompt_sha256": digest(prompt), **(metadata or {})}
+        if structured_scene:
+            inputs["response_format"] = "json_object"
         if isinstance(self.memory, Memory) and self.memory.retry:
             with self.memory.lock:
                 for row in self.memory.data["tasks"].values():
@@ -612,7 +619,7 @@ class Article:
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
         if groq_gemini_klein_pilot():
-            if self.memory.retry and os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+            if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true" and self.memory.retry:
                 previous = self.memory.data["articles"].get(self.id, {}).get("text_sha256")
                 if previous and re.fullmatch(r"[a-f0-9]{64}", previous):
                     origin = self.folder / "versions" / (previous + ".md")
@@ -1243,7 +1250,8 @@ def status(memory):
         result["gemini_budget"] = {"project_rpm_configured": gemini_limit("EDITORIAL_GEMINI_RPM", 3, 30),
                                    "local_daily_ceiling": memory.config["daily_calls"]["gemini"],
                                    "per_article_ceiling": memory.config["per_article_calls"]["gemini"],
-                                   "planned_articles": 9, "base_calls": 18,
+                                   "planned_articles": sum(memory.config["articles_per_channel"].values()),
+                                   "base_calls": 2 * sum(memory.config["articles_per_channel"].values()),
                                    "calls": len(calls),
                                    "tokens": sum(row.get("usage", {}).get("total_tokens", 0) for row in calls)}
     return result

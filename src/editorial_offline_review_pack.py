@@ -83,6 +83,24 @@ def write_docx(raw, folder, output):
     doc.save(output)
 
 
+def with_contents(raw):
+    from .editorial_review import HEADING
+
+    lines = raw.splitlines()
+    first = [line.strip() for line in lines if line.strip()]
+    if not first or not first[0].startswith("# "):
+        raise Blocked("offline_bundle_title_missing")
+    if len(first) > 1 and first[1] in {"**Оглавление**", "## Оглавление"}:
+        return raw
+    headings = [match[1] for line in lines if (match := HEADING.fullmatch(line.strip()))]
+    if not 6 <= len(headings) <= 7:
+        raise Blocked("offline_bundle_invalid_contents")
+    title_line = next(i for i, line in enumerate(lines) if line.strip())
+    contents = [f"{index}. {heading}" for index, heading in enumerate(headings, 1)]
+    return "\n".join([*lines[:title_line + 1], "", "**Оглавление**", "", *contents, "",
+                       *lines[title_line + 1:]]) + "\n"
+
+
 def require_audited_bundle(base):
     from .editorial_memory import digest, json_bytes, read_json
     from .editorial_scene_audit import input_sections
@@ -91,11 +109,12 @@ def require_audited_bundle(base):
     evidence = read_json(base / AUDIT_DIR / "image_qa.json")
     if not evidence or evidence.get("schema") != SCHEMA:
         raise Blocked("offline_bundle_requires_current_image_audit")
+    seen = set()
     for channel in CHANNELS:
         folder = base / channel
         markdown = (folder / FILE_NAME).read_text(encoding="utf-8")
         sections, slots = input_sections(markdown)
-        blocks = [line.strip() for line in markdown.splitlines() if line.strip()]
+        blocks = [line.strip() for line in with_contents(markdown).splitlines() if line.strip()]
         if len(blocks) < 3 or blocks[1] not in {"**Оглавление**", "## Оглавление"}:
             raise Blocked("offline_bundle_missing_contents_" + channel)
         opening = [line for line in blocks[2:] if not re.match(r"^\d+\.\s+", line)]
@@ -122,8 +141,12 @@ def require_audited_bundle(base):
                     or card.get("source_text_sha256") != source
                     or row.get("scene_card_sha256") != digest(json_bytes(card))
                     or not row.get("vision") or row.get("duplicate") or not row.get("policy")
+                    or row.get("visual_quality", {}).get("passed") is not True
                     or row.get("image_sha256") != digest(path.read_bytes())):
                 raise Blocked("offline_bundle_image_review_required_" + channel)
+            if row["image_sha256"] in seen:
+                raise Blocked("offline_bundle_duplicate_image")
+            seen.add(row["image_sha256"])
 
 
 def package(day, token):
@@ -145,7 +168,7 @@ def package(day, token):
                 doc=folder/FILE_NAME
                 if not doc.is_file():
                     raise Blocked("offline_review_source_missing_"+channel)
-                raw=doc.read_text(encoding="utf-8")
+                raw=with_contents(doc.read_text(encoding="utf-8"))
                 refs=IMAGE_LINK.findall(raw)
                 expected=7 if channel=="science-01" else 8
                 if BAD_EXTERNAL_IMAGE.search(raw) or len(refs)!=expected:
@@ -168,6 +191,21 @@ def package(day, token):
                 html.write_text(text_to_html(TITLES[channel],raw),encoding="utf-8")
                 word=path/(channel+".docx")
                 write_docx(raw,folder,word)
+                from .editorial_package import ArticleHTML
+
+                expected_refs = [f"illustrations/{slot}.jpg" for _, slot in refs]
+                html_check = ArticleHTML()
+                html_check.feed(html.read_text(encoding="utf-8"))
+                reopened = Document(word)
+                if html_check.all_images != expected_refs or html_check.extra_media or len(reopened.inline_shapes) != len(refs):
+                    raise Blocked("offline_bundle_export_images_invalid_" + channel)
+                media_hashes = []
+                for p in reopened.paragraphs:
+                    for image_xml in p._p.xpath(".//a:blip"):
+                        rel = image_xml.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+                        media_hashes.append(sha256(reopened.part.related_parts[rel].blob).hexdigest())
+                if media_hashes != [sha256((folder / ref).read_bytes()).hexdigest() for ref in expected_refs]:
+                    raise Blocked("offline_bundle_docx_image_order_invalid_" + channel)
                 name={
                     "legends-01":"01_Мистика",
                     "cinema-01":"02_Кино",
