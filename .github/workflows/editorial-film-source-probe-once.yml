@@ -45,3 +45,39 @@ jobs:
                                 "publication_authorized": False}))
               raise SystemExit(2)
           PY
+      - name: Verify independent factual review sources for selected film
+        run: |
+          python - <<'PY'
+          import json
+          from src.editorial_cinema import evidence
+          from src.editorial_providers import Blocked
+          plan = {
+              "film_title": "Пленницы",
+              "year": 2013,
+              "format": "review",
+              "spoilers": False,
+              "sources": [
+                  "https://www.rottentomatoes.com/m/prisoners_2013",
+                  "https://www.rogerebert.com/reviews/prisoners-2013",
+                  "https://www.theguardian.com/film/2013/sep/26/prisoners-review",
+              ],
+          }
+          try:
+              row = evidence(plan, {})
+              print(json.dumps({
+                  "status": "cinema_independent_sources_verified",
+                  "film": row["film"]["title"],
+                  "format": row["format"],
+                  "spoilers": row["spoilers"],
+                  "records": len(row["records"]),
+                  "independent_sources": len(row["records"]) - 1,
+                  "plot_events_verified": row["detailed_plot_evidence"],
+                  "publication_authorized": False,
+              }, ensure_ascii=False))
+              assert row["format"] == "review" and len(row["records"]) >= 2
+          except Blocked as exc:
+              print(json.dumps({"status": "cinema_sources_blocked",
+                                "reason_code": str(exc) if str(exc).startswith(("film_", "movie_")) else "unclassified_block",
+                                "publication_authorized": False}))
+              raise SystemExit(2)
+          PY
