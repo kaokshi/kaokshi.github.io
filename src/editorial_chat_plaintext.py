@@ -106,8 +106,22 @@ def inputs(root, day):
         except (ValueError, OSError):
             raise Blocked("private_review_report_invalid") from None
         files = [folder / name for name in names if (folder / name).is_file()]
-        if not (folder / "Статья.html").is_file() or not (folder / "Текст для SHA-256.txt").is_file():
+        if any(not (folder / required).is_file() for required in (
+                "Статья.docx", "Статья.html", "Текст для SHA-256.txt",
+                "Статус и проверки.json", "SHA256SUMS.txt")):
             raise Blocked("private_review_required_files_missing")
+        # Reject corrupted or partly modified editorial packages before exposing
+        # any readable copy. The owner may still receive an explicitly incomplete
+        # article if the producer itself labeled it as such.
+        source = (folder / "Текст для SHA-256.txt").read_bytes()
+        if digest(source) != report.get("text_sha256"):
+            raise Blocked("private_review_canonical_sha_mismatch")
+        expected = {}
+        for line in manifest.read_text(encoding="utf-8").splitlines():
+            parts = line.split("  ", 1)
+            if len(parts) != 2 or not re.fullmatch(r"[a-f0-9]{64}", parts[0]):
+                raise Blocked("private_review_manifest_invalid")
+            expected[parts[1]] = parts[0]
         for image in rows:
             name = image.get("file") if isinstance(image, dict) else None
             if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9._-]+\.(jpg|jpeg|png|webp)", name):
@@ -116,6 +130,11 @@ def inputs(root, day):
             if not file.is_file() or file.is_symlink() or digest(file.read_bytes()) != image.get("sha256"):
                 raise Blocked("private_review_image_sha_mismatch")
             files.append(file)
+        seen = {p.relative_to(folder).as_posix() for p in files
+                if p.name != "SHA256SUMS.txt"}
+        if expected.keys() != seen or any(
+                digest((folder / name).read_bytes()) != sha for name, sha in expected.items()):
+            raise Blocked("private_review_manifest_mismatch")
         for path in files:
             if path.is_symlink() or not path.resolve().is_relative_to(folder.resolve()):
                 raise Blocked("private_review_unsafe_file")
