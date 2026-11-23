@@ -1,6 +1,6 @@
-"""Isolated zero-cost Kilo primary + OVHcloud anonymous backup experiment.
+"""Legacy isolated provider adapters. OVH has been retired and is denied below.
 
-No OVH credentials or paid routes; no Groq calls. Real production remains unchanged.
+Kilo is the only available text writer here. No OVH network traffic is permitted.
 """
 from decimal import Decimal, InvalidOperation
 import json
@@ -63,7 +63,9 @@ def require_isolated():
     if groq_ovh_klein_pilot() and os.environ.get("EDITORIAL_GROQ_FREE_ONLY") != "true":
         raise Blocked("groq_free_account_unconfirmed")
     if os.environ.get("OVH_AI_ENDPOINTS_ACCESS_TOKEN") or os.environ.get("OVH_API_KEY"):
-        raise Blocked("ovh_anonymous_test_must_not_use_paid_api_key")
+        raise Blocked("ovh_removed_from_project")
+    if os.environ.get("EDITORIAL_OVH_ONE_ARTICLE") == "true" or os.environ.get("EDITORIAL_GROQ_OVH_KLEIN_PILOT") == "true":
+        raise Blocked("ovh_removed_from_project")
 
 
 def candidate_headers(provider):
@@ -71,7 +73,7 @@ def candidate_headers(provider):
         token = os.environ.get("KILO_API_KEY")
         return {"Authorization": "Bearer " + token} if token else {}
     if provider in {"ovh", "ovh-gptoss"}:
-        return {}  # Anonymous only, never sends an Authorization header.
+        raise Blocked("ovh_removed_from_project")
     raise Blocked("invalid_alt_provider")
 
 
@@ -118,13 +120,8 @@ def preflight():
         _kilo_free(kilo)
         if without_openrouter():
             _kilo_free(kilo, KILO_REVIEW)
-    ovh = parse_json(request(OVH_CATALOG_URL, ("catalog.endpoints.ai.ovh.net",)))
-    _ovh_available(ovh)
-    _ovh_available(ovh, OVH_GPTOSS_ID)
-    return {"status": "preflight_passed", "kilo_model": None if ovh_trial() else KILO_ID,
-            "ovh_model": OVH_ID, "ovh_gptoss_model": OVH_GPTOSS_ID,
-            "ovh_access": "anonymous",
-            "groq_allowed": groq_ovh_klein_pilot(), "publication_authorized": False}
+    return {"status": "preflight_passed", "kilo_model": KILO_ID,
+            "ovh_enabled": False, "publication_authorized": False}
 
 
 def reserve_ovh_slot():
@@ -147,8 +144,7 @@ def generate(provider, prompt, max_tokens=3000):
         model = KILO_REVIEW if provider == "kilo-review" else KILO_ID
         base, host = KILO_URL, "ai-gateway.kilo.ai"
     elif provider in {"ovh", "ovh-gptoss"}:
-        base, host = OVH_URL, "oai.endpoints.kepler.ai.cloud.ovh.net"
-        model = OVH_GPTOSS_MODEL if provider == "ovh-gptoss" else OVH_MODEL
+        raise Blocked("ovh_removed_from_project")
     else:
         raise Blocked("invalid_alt_provider")
     token_cap = 14000 if ovh_trial() and provider == "ovh" else 7900
