@@ -265,6 +265,9 @@ jobs:
                             "source_count": len(check["records"]), "cinema_scheduled": False,
                             "film_still_rights": "not_verified", "publication_authorized": False}))
           PYTHON
+      - name: Verify actual private storage with encrypted synthetic probe
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'storage-test'
+        run: python -m src.editorial_storage_probe
       - name: Exercise package recovery in separate processes without providers
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'storage-test'
         run: |
