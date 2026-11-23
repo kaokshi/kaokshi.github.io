@@ -1,0 +1,67 @@
+name: One-time import of existing AGENT-created private review (no generation)
+on:
+  push:
+    branches:
+      - assistant/replay-agent-private-review-once-20261123
+    paths:
+      - .github/workflows/editorial-private-review-replay-once.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  agent-original-review:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify no content creation and no publication
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          assert json.loads(Path("config/site.json").read_text())["publication_enabled"] is False
+          assert json.loads(Path("config/editorial_production.json").read_text())["schedule"]["enabled"] is False
+          cfg=json.loads(Path("config/editorial_chat_plaintext.json").read_text())
+          assert cfg["owner_approved"] is True and cfg["enabled"] is True
+          print("Only existing agent artifacts will be read; no models used.")
+          PY
+      - name: Install checkpoint reader
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Read original archived AGENT state (encrypted artifact only)
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 45126126260
+          name: editorial-three-agent-only-20261123
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/agent-encrypted
+      - name: Publish only already-authored files to private owner-approved GitHub
+        run: |
+          umask 077
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from src.editorial_delivery import restore_blob
+          from src.editorial_chat_plaintext import inputs, publish
+          base = Path(os.environ["RUNNER_TEMP"])
+          checkpoint = base / "agent-encrypted" / "checkpoint.enc"
+          if not checkpoint.is_file():
+              raise SystemExit("previous_agent_checkpoint_not_found")
+          output = base / "private-agent-review-state"
+          restore_blob(checkpoint.read_bytes(), output, "2026-11-23")
+          available = [row[0] for row in inputs(output, "2026-11-23")]
+          print("Previously agent-generated review folders:", available)
+          result = publish(output, "2026-11-23",
+                           token=os.environ.get("EDITORIAL_PRIVATE_TOKEN", ""))
+          print("Private transport:", result["status"])
+          print("Owner-authorized review channels:", result["channels"])
+          print("No model generation and no article publication.")
+          PY
