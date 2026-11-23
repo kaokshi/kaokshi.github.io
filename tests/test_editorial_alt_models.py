@@ -68,6 +68,30 @@ class EditorialAlternativeRoutingTests(unittest.TestCase):
         article.task = lambda stage, provider, inputs, action, **kwargs: action("synthetic-task")
         return article
 
+    def test_kilo_failure_routes_to_ovh_and_never_groq_or_openrouter_writer(self):
+        from src.editorial_providers import ProviderError
+        cfg = {"EDITORIAL_ALT_MODELS_TEST":"true",
+               "EDITORIAL_ISOLATED_VALIDATION":"true", "GITHUB_ACTIONS":"true",
+               "GROQ_API_KEY":"", "EDITORIAL_GROQ_FALLBACK_ONLY":"false"}
+        observed = []
+        def fake_text_call(provider, prompt, max_tokens):
+            observed.append(provider)
+            if provider == "kilo":
+                raise ProviderError("call_budget_exhausted")
+            return {"text":"SYNTHETIC-FIXTURE-ONLY", "model":"synthetic",
+                    "usage":{}, "telemetry":{}}
+        with patch.dict(os.environ, cfg), patch("src.editorial_brain.text_call", fake_text_call):
+            article = self.synthetic_article("legends")
+            self.assertEqual(article.model("draft", "groq", "synthetic test"),
+                             "SYNTHETIC-FIXTURE-ONLY")
+        self.assertEqual(observed, ["kilo", "ovh"])
+
+    def test_ovh_catalog_rejects_unavailable_model(self):
+        from src.editorial_alt_models import _ovh_available, OVH_ID
+        with self.assertRaisesRegex(Blocked, "ovh_model_unavailable"):
+            _ovh_available([{"id":OVH_ID, "available":False}])
+        self.assertTrue(_ovh_available([{"id":OVH_ID, "available":True}]))
+
     def test_writers_and_editor_are_separated_without_groq(self):
         from src.editorial_brain import Article
         cfg = {"EDITORIAL_ALT_MODELS_TEST": "true",
