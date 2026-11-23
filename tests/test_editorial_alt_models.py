@@ -63,7 +63,8 @@ class EditorialAlternativeRoutingTests(unittest.TestCase):
         article = Article.__new__(Article)
         article.channel = channel
         article.id = channel + "-01"
-        article.memory = SimpleNamespace(call=lambda task, aid, provider, callback: callback())
+        article.memory = SimpleNamespace(call=lambda task, aid, provider, callback: callback(),
+                                         response=lambda task: None)
         article.task = lambda stage, provider, inputs, action, **kwargs: action("synthetic-task")
         return article
 
