@@ -1,0 +1,41 @@
+name: Restore real cinema stills to private review without AI calls
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-recover-private-cinema-images-once.yml
+permissions:
+  contents: read
+concurrency:
+  group: private-editorial-owner-visuals
+  cancel-in-progress: false
+jobs:
+  restore-stills:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      GITHUB_ACTIONS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Confirm no public publication
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json,os
+          assert json.loads(Path('config/site.json').read_text())['publication_enabled'] is False
+          assert os.environ['EDITORIAL_PRIVATE_TOKEN']
+          print('Restoring only previously verified real film images')
+          PY
+      - name: Install image sanity checker
+        run: python -m pip install 'Pillow>=11,<13'
+      - name: Restore real cinema stills after review transport overwrote their folder
+        run: |
+          python -m src.editorial_private_visuals cinema --date "$(TZ=Europe/Moscow date +%F)"
