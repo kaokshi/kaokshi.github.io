@@ -1,4 +1,4 @@
-name: One-time OVHcloud Qwen canonical model name probe
+name: One-time OVHcloud Qwen official lowercase model ID probe
 on:
   push:
     branches:
