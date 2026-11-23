@@ -280,8 +280,9 @@ def text_call(provider, prompt, max_tokens=7500):
     # Owner decision 2026-11-23: OVH is removed from all live text routes.
     if provider in {"ovh", "ovh-gptoss"}:
         raise ProviderError("ovh_removed_from_project", stop=True)
-    from .editorial_alt_models import gemini_pilot, groq_ovh_klein_pilot, require_isolated
-    pilot = groq_ovh_klein_pilot()
+    from .editorial_alt_models import (gemini_pilot, groq_gemini_klein_pilot,
+                                      groq_ovh_klein_pilot, require_isolated)
+    pilot = groq_ovh_klein_pilot() or groq_gemini_klein_pilot()
     if pilot:
         require_isolated()
     allowed = ({"groq", "gemini"} if gemini_pilot() else {"groq", "ovh"}) if pilot else {"ovh", "ovh-gptoss"}
