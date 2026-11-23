@@ -33,6 +33,14 @@ def code(value):
         return "independent_edit_unavailable"
     if stripped.startswith("document_export_failed: "):
         return "document_export_failed"
+    # Never leak provider errors, search terms, image descriptions or source URLs.
+    # Preserve only fixed error categories for the five missing photo tasks.
+    if match := re.match(r"^image_[0-9]{2}: (photo_candidates_rejected|no_traceable_photo_found)(?::|$)", stripped):
+        return "image_" + match.group(1)
+    if stripped.startswith("photo_candidates_rejected:") or stripped == "photo_candidates_rejected":
+        return "photo_candidates_rejected"
+    if stripped == "no_traceable_photo_found":
+        return "no_traceable_photo_found"
     return "unclassified_block"
 
 
