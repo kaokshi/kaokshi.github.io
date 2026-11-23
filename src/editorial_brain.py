@@ -895,8 +895,8 @@ class Article:
                 raise Blocked("image_recovery_missing_original_plan")
             plan = json_reply(cached)
             validate_plan(plan, count, self.channel, self.config)
-        providers = ("groq", "kilo") if without_openrouter() else (
-            ("groq",) if alternative_test() else ("groq", "openrouter"))
+        providers = () if plan is not None else (("groq", "kilo") if without_openrouter() else (
+            ("groq",) if alternative_test() else ("groq", "openrouter")))
         if ovh_trial():
             plan = self.memory.data["articles"][self.id].get("trial_image_plan")
             try:
