@@ -32,3 +32,16 @@
 ## Что ещё не подтверждено
 
 Подключённый GitHub-аккаунт имеет доступ к пустому приватному репозиторию, но доступ `EDITORIAL_PRIVATE_TOKEN` из GitHub Actions пока не проверен. Автоматическая доставка в текущий ChatGPT-чат остаётся `delivery_integration_pending` до подтверждённого транспортного маршрута. Не объявлять её подключённой на основании факта успешного GitHub-коммита.
+
+## Проверка реального GitHub Actions доступа (только вручную)
+
+После создания `EDITORIAL_PRIVATE_TOKEN`, `EDITORIAL_STATE_KEY_HEX` и настройки публичного ключа:
+
+1. Открой [Editorial production в GitHub Actions](https://github.com/kaokshi/kaokshi.github.io/actions/workflows/editorial-production.yml).
+2. Нажми **Run workflow**. Выбери ветку `assistant/groq-quota-fallback-20261123`.
+3. Для `command` выбери **storage-test**. Оставь `isolated_validation=false`, `verify_quota=false`, `validate_cinema=false`, `validate_klein=false`. Затем запусти workflow.
+4. Должен пройти шаг **Verify actual private storage with encrypted synthetic probe**. Он через секретный PAT проверит приватность репозитория, создаст временный зашифрованный тестовый файл, прочитает, сверит и удалит его. Это не генерация статьи и не публикация.
+5. В логе ожидается `private_encrypted_roundtrip_verified`. Если шаг завершится ошибкой, не передавай в чат секреты и закрытые ключи; передай только ссылку на GitHub Actions и текст статуса/ошибки.
+
+Наличие токенов в GitHub Secrets невозможно подтвердить по коду или регрессионным тестам. Настоящая проверка считается выполненной только после успешного ручного запуска указанного workflow. До этого `owner_access_verified` и `schedule.enabled` остаются `false`.
+
