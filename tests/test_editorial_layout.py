@@ -95,7 +95,7 @@ class LayoutTests(unittest.TestCase):
             for i in range(1, 7):
                 heading = f'<h2 id="section-{i}">Раздел {i}</h2>'
                 image = "picture-1.jpg" if i == 1 else f"picture-{i+1}.jpg"
-                self.assertIn(heading + f'<figure><img src="images/{image}"', html)
+                self.assertIn(heading + f'\n<figure><img src="images/{image}"', html)
 
             text = (dest / "Текст для SHA-256.txt").read_text(encoding="utf-8")
             self.assertEqual(digest(text), report["text_sha256"])
