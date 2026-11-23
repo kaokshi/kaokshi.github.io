@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 from src.editorial_chat_status import code, from_state, public_report
 from src.editorial_chat_bridge import publish_status
-from src.editorial_free_fallback import free_remaining, require_free_envelope
 from src.editorial_brain import cycle_settings
 from src.editorial_schedule import plan
 from src.editorial_providers import Blocked
@@ -33,7 +32,7 @@ class ChatStatusTests(unittest.TestCase):
                 "two": {"article": "cinema-01", "status": "blocked",
                         "operation": "film-evidence", "error": "PRIVATE-URL-WITH-TEXT"},
             },
-            "calls": [{"provider": "openrouter", "answer": {"text": "SENSITIVE-PROSE-NO-EXPORT"}}],
+            "calls": [{"provider": "retired_provider", "answer": {"text": "SENSITIVE-PROSE-NO-EXPORT"}}],
             "private_key": "SENSITIVE-KEY-NO-EXPORT",
         }
 
@@ -46,7 +45,7 @@ class ChatStatusTests(unittest.TestCase):
                          "editorial-audit")
         self.assertEqual(report["articles"]["cinema-01"]["failed_tasks"][0]["code"],
                          "unclassified_block")
-        self.assertEqual(report["provider_calls"]["openrouter"], 1)
+        self.assertEqual(report["provider_calls"]["retired_provider"], 1)
         self.assertEqual(report["ready_count"], 0)
         self.assertFalse(report["contents_included"])
 
@@ -91,27 +90,22 @@ class ChatStatusTests(unittest.TestCase):
 
 
 class FreeQuotaSafetyTests(unittest.TestCase):
-    def test_account_headroom_does_not_make_model_paid(self):
-        def fake(url, domains, headers):
-            self.assertEqual(url, "https://openrouter.ai/api/v1/key")
-            return json.dumps({"data": {"free_model_daily_requests":
-                                       {"remaining": 40, "limit": 50, "used": 10}}}).encode()
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "local-fake-key"}):
-            self.assertEqual(free_remaining(fetch=fake), 40)
-        self.assertEqual(require_free_envelope(36, reader=lambda: 40), 40)
-        with self.assertRaisesRegex(Blocked, "insufficient"):
-            require_free_envelope(36, reader=lambda: 30)
+    def test_cloudflare_free_reserve_configured(self):
+        cfg = cycle_settings("daily")
+        self.assertTrue(cfg["cloudflare_quota_guard"]["enabled"])
+        self.assertGreaterEqual(cfg["cloudflare_quota_guard"]["minimum_free_neurons_for_cycle"], 6000)
+        self.assertNotIn("retired_provider", cfg["daily_calls"])
 
     def test_three_channel_budget_raised_only_in_isolated_free_test(self):
         with patch.dict(os.environ, {"EDITORIAL_ISOLATED_VALIDATION": "true",
                                      "EDITORIAL_TEST_FREE_ONLY": "true"}):
             cfg = cycle_settings("daily", 90, True, True)
         self.assertEqual(cfg["articles_per_channel"]["cinema"], 1)
-        self.assertEqual(cfg["daily_calls"]["openrouter"], 36)
-        self.assertEqual(cfg["per_article_calls"]["openrouter"], 12)
+        self.assertNotIn("retired_provider", cfg["daily_calls"])
+        self.assertNotIn("retired_provider", cfg["per_article_calls"])
         regular = cycle_settings("daily")
         self.assertEqual(regular["articles_per_channel"]["cinema"], 0)
-        self.assertEqual(regular["daily_calls"]["openrouter"], 10)
+        self.assertNotIn("retired_provider", regular["daily_calls"])
 
     def test_isolated_main_does_not_activate_production(self):
         cfg = cycle_settings("daily")
@@ -171,7 +165,7 @@ class AutonomousRetryTests(unittest.TestCase):
             return {"topics": [{"title": "Исключительно синтетическая тема номер один",
                                 "angle": "проверка структуры машинного ответа", "sources": []}]}
         agent.model = fake_model
-        with patch.dict(os.environ, {"EDITORIAL_GROQ_FALLBACK_ONLY": "true"}):
+        with patch.dict(os.environ, {}):
             result = agent.plan()
         self.assertEqual(result["title"], "Исключительно синтетическая тема номер один")
         self.assertEqual([event[0] for event in events],
@@ -182,7 +176,7 @@ class AutonomousRetryTests(unittest.TestCase):
         cfg = cycle_settings("daily")
         self.assertFalse(cfg["schedule"]["enabled"])
         self.assertEqual(cfg["articles_per_channel"]["cinema"], 0)
-        self.assertEqual(cfg["daily_calls"]["openrouter"], 10)
+        self.assertNotIn("retired_provider", cfg["daily_calls"])
 
 if __name__ == "__main__":
     unittest.main()
