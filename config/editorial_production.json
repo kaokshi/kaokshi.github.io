@@ -12,13 +12,15 @@
     "groq": 17,
     "klein": 12,
     "gemini": 2,
-    "routerai": 2
+    "routerai": 2,
+    "routerai_review": 2
   },
   "daily_calls": {
     "groq": 34,
     "klein": 20,
     "gemini": 4,
-    "routerai": 4
+    "routerai": 4,
+    "routerai_review": 4
   },
   "minimum_images": 7,
   "maximum_images": 8,
@@ -111,7 +113,10 @@
     "max_calls_per_article": 2,
     "max_calls_per_cycle": 4,
     "require_balance_preflight": true,
-    "status": "integration_ready_spend_guard_pending",
-    "note": "Do not enable until RouterAI credits endpoint and durable daily/monthly spend reservation are validated. UI token prices are not a guaranteed charge ceiling."
+    "status": "models_configured_paid_calls_disabled_pending_durable_spend_guard",
+    "note": "Sonnet writes draft; DeepSeek independently rewrites/edits; Groq is kept for topic/QA/recovery until the new scheme is validated. Disabled until verified balance, costs, durable reservations, and authorized test.",
+    "primary_model": "anthropic/claude-sonnet-5.5",
+    "review_model": "deepseek/deepseek-v3.2",
+    "roles": "claude_primary_deepseek_independent_reviewer"
   }
 }
