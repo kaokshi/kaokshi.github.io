@@ -125,5 +125,64 @@ class FreeQuotaSafetyTests(unittest.TestCase):
                          "skip")
 
 
+
+class AutonomousRetryTests(unittest.TestCase):
+    def test_transient_film_source_api_retry_keeps_same_source(self):
+        from io import BytesIO
+        from unittest.mock import MagicMock
+        from src.movie_autonomous_research import fetch_json
+
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"status":"ok"}'
+        calls = []
+        def mock_open(request, timeout):
+            calls.append(request.full_url)
+            if len(calls) == 1:
+                raise OSError("temporary offline")
+            return response
+        with patch("src.movie_autonomous_research.urlopen", side_effect=mock_open), \
+             patch("time.sleep", return_value=None):
+            result = fetch_json("https://www.wikidata.org/w/api.php",
+                                {"action": "query", "format": "json"})
+        self.assertEqual(result, {"status": "ok"})
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], calls[1])
+
+    def test_invalid_topic_json_is_retried_by_agent_not_manual_text(self):
+        from threading import RLock
+        from types import SimpleNamespace
+        from src.editorial_brain import Article
+        from src.editorial_providers import Blocked
+
+        agent = Article.__new__(Article)
+        agent.id = "legends-01"
+        agent.channel = "legends"
+        agent.prior = ({"legends": []}, [], [])
+        agent.config = {"science_source_domains": []}
+        saved = []
+        agent.memory = SimpleNamespace(
+            data={"articles": {}}, lock=RLock(),
+            article=lambda article_id, **kwargs: saved.append((article_id, kwargs)))
+        events = []
+        def fake_model(stage, provider, prompt, **kwargs):
+            events.append((stage, provider, prompt))
+            if stage == "topics-1":
+                raise Blocked("model_json_invalid")
+            return {"topics": [{"title": "Исключительно синтетическая тема номер один",
+                                "angle": "проверка структуры машинного ответа", "sources": []}]}
+        agent.model = fake_model
+        with patch.dict(os.environ, {"EDITORIAL_GROQ_FALLBACK_ONLY": "true"}):
+            result = agent.plan()
+        self.assertEqual(result["title"], "Исключительно синтетическая тема номер один")
+        self.assertEqual([event[0] for event in events],
+                         ["topics-1", "topics-json-retry-1"])
+        self.assertEqual(len(saved), 1)
+
+    def test_three_channels_still_frozen_in_normal_schedule(self):
+        cfg = cycle_settings("daily")
+        self.assertFalse(cfg["schedule"]["enabled"])
+        self.assertEqual(cfg["articles_per_channel"]["cinema"], 0)
+        self.assertEqual(cfg["daily_calls"]["openrouter"], 10)
+
 if __name__ == "__main__":
     unittest.main()
