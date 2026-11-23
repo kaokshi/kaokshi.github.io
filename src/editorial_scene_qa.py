@@ -213,7 +213,8 @@ def judge(card, image, image_sha, clip, *, duplicate=False, quality=None, clip_g
     started = monotonic()
     report = {"schema": SCHEMA, "scene_card": card, "scene_card_sha256": digest(json_bytes(card)),
               "article_id": card["article_id"], "section_id": card["section_id"],
-              "source_text_sha256": card["source_text_sha256"], "image_sha256": image_sha, "clip": clip,
+              "source_text_sha256": card["source_text_sha256"], "image_sha256": image_sha,
+              "pixel_input_sha256": image_sha, "clip": clip,
               "scene_match": "unverified", "atmosphere_match": {"clip_topic_score": clip.get("topic")},
               "visual_quality": quality or {}, "duplicate": duplicate, "vision": None,
               "confirmed": [], "absent": [], "uncertain": [], "contradictions": [], "reasons": [],
@@ -272,7 +273,7 @@ def judge(card, image, image_sha, clip, *, duplicate=False, quality=None, clip_g
 def current_report(path, card, sha):
     row = read_json(path)
     if (row and row.get("schema") == SCHEMA and row.get("scene_card_sha256") == digest(json_bytes(card))
-            and row.get("image_sha256") == sha):
+            and row.get("image_sha256") == row.get("pixel_input_sha256") == sha):
         return row
     return None
 
@@ -359,9 +360,37 @@ def accepted_for(row, card, *, is_cover):
     report = row.get("image_qa") or {}
     return bool(card and report.get("schema") == SCHEMA and report.get("status") == "accepted"
                 and report.get("scene_card_sha256") == digest(json_bytes(card))
-                and report.get("image_sha256") == row.get("sha256")
+                and report.get("image_sha256") == report.get("pixel_input_sha256") == row.get("sha256")
                 and row.get("is_cover") is is_cover
                 and type(is_cover) is bool)
+
+
+def verified_model_evidence(report):
+    """Check that the saved model output supports the accepted scene."""
+    from .editorial_visual_matching import CLIP
+
+    card = report.get("scene_card")
+    clip = report.get("clip") or {}
+    vision = report.get("vision") or {}
+    blip = (vision.get("models") or {}).get("blip") or {}
+    if (not card or not report.get("image_sha256") or report.get("pixel_input_sha256") != report["image_sha256"]
+            or clip.get("model") != "@".join(CLIP) or type(clip.get("passed")) is not bool
+            or blip.get("model") != list(MODELS["blip"])):
+        return False
+    answers = blip.get("answers")
+    observations = blip.get("observations") or {}
+    if (not isinstance(answers, list) or not all(isinstance(answer, str) for answer in answers)
+            or not all(isinstance(observations.get(key), str)
+                       for key in ("place", "objects_and_people", "action"))):
+        return False
+    checked = judge(
+        card, None, report["image_sha256"], dict(clip), quality=report.get("visual_quality"),
+        vision=lambda card, image: inspect_pixels(
+            card, image, ask=lambda *_: [*answers, observations["place"],
+                                         observations["objects_and_people"], observations["action"]]),
+    )
+    return (checked["status"] == "accepted" and checked["vision"]["findings"] == vision.get("findings")
+            and report.get("scene_match") == "matched" and not report.get("duplicate"))
 
 
 def require_packet_rows(rows, source_sha, *, article_id=None, article=None):
@@ -383,7 +412,7 @@ def require_packet_rows(rows, source_sha, *, article_id=None, article=None):
                 or card["source_text_sha256"] != source_sha
                 or card["section_id"] != row.get("section")
                 or (article_id is not None and card.get("article_id") != article_id)
-                or not evidence.get("vision") or evidence.get("duplicate")
+                or not verified_model_evidence(evidence)
                 or not evidence.get("policy") or evidence.get("visual_quality", {}).get("passed") is not True):
             raise Blocked("image_review_required_before_packaging")
 

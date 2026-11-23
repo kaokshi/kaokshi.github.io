@@ -302,7 +302,7 @@ jobs:
       - name: Install QA, document and visual tools
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_VALIDATE_KLEIN == 'true'
         run: |
-          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0' 'torchvision==0.26.0'
           python -m pip install -r requirements-production.txt
           if [ "$EDITORIAL_EFFECTIVE_COMMAND" != health ]; then
             aiw-ru models install modernbert lightgbm transformer || echo "::warning::One or more local detectors could not be installed"

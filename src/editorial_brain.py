@@ -23,7 +23,7 @@ from .editorial_groq_budget import forecast
 from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
-from .editorial_package import package, zip_packet
+from .editorial_package import final_visual_gate, package, zip_packet
 from .editorial_subscription import CHANNELS as SUBSCRIPTION_CHANNELS
 from .editorial_providers import Blocked, MODELS, ProviderError, gemini_limit, gemini_model, gemini_text, klein, text_call
 from .editorial_review import RULES, canonical, improves, parse_article, qa, source_context, sources, structural_checks
@@ -1050,13 +1050,13 @@ class Article:
             review = self.memory.folder / "review" / self.id
             saved = read_json(review / "Статус и проверки.json")
             if saved and saved.get("text_sha256") == existing.get("text_sha256"):
-                rows = saved.get("images", [])
                 try:
-                    scene_qa.require_packet_rows(rows, saved["text_sha256"], article_id=self.id)
-                    scene_qa.require_ready_rows(rows)
-                    intact = all(digest((review / "images" / row["file"]).read_bytes()) == row["sha256"]
-                                 for row in rows)
-                    if intact and saved.get("layout_status") == "verified":
+                    final_visual_gate(
+                        saved.get("visual_article"), saved.get("images", []), saved["text_sha256"], self.id,
+                        lambda name: (review / "images" / name).read_bytes(),
+                        encoded=((review / "Статья.html").read_bytes(), (review / "Статья.docx").read_bytes()),
+                    )
+                    if saved.get("layout_status") == "verified":
                         return existing["status"]
                 except (Blocked, OSError):
                     pass

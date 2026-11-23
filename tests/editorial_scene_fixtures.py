@@ -1,5 +1,6 @@
 """Synthetic visual evidence used only to test storage and document boundaries."""
 from src import editorial_scene_qa as qa
+from src.editorial_visual_matching import CLIP
 
 
 def proposal(evidence):
@@ -12,9 +13,14 @@ def proposal(evidence):
 def certify(row, article_id, is_cover, text_sha, section_text="Synthetic section"):
     card = row.pop("fixture_card", None) or qa.make_card(
         article_id, row["section"], text_sha, section_text, proposal(section_text[:25]))
-    result = qa.judge(card, object(), row["sha256"], {"passed": True, "topic": .25},
-                      quality={"passed": True}, vision=lambda *_: {
-                          "findings": [{"role": "required", "element": "fixture", "status": "present"}]})
+    def fixture_answers(_, image, questions):
+        roles, _ = qa.questions_for(card)
+        votes = ["no" if role == "forbidden" else "yes" for role, _ in roles]
+        return [answer for vote in votes for answer in (vote, vote)] + [
+            "Synthetic setting", "Synthetic object", "Synthetic action"]
+
+    result = qa.judge(card, object(), row["sha256"], {"model": "@".join(CLIP), "passed": True, "topic": .25},
+                      quality={"passed": True}, vision=lambda c, im: qa.inspect_pixels(c, im, ask=fixture_answers))
     result["policy"] = {"fixture": True}
     row.update(image_qa=result, is_cover=is_cover)
     return row

@@ -204,6 +204,7 @@ class ImageIndex:
         else:
             image.save(buffer, format="JPEG", quality=89, optimize=True)
             rendered = buffer.getvalue()
+        image, contrast = decode_candidate(rendered)
         raw_sha, sha, phash = digest(raw), digest(rendered), str(imagehash.phash(image))
         previous = qa.candidate_report_path(path, sha, digest(qa.json_bytes(card)))
         decision = qa.current_report(previous, card, sha)

@@ -17,6 +17,7 @@ from src.editorial_images import ImageIndex, generated, generated_scene, select_
 from src.editorial_offline_review_pack import require_audited_bundle
 from src.editorial_memory import Memory, StorageError, digest, json_bytes
 from src.editorial_providers import Blocked
+from tests.editorial_scene_fixtures import certify
 
 SOURCE = "A maintenance room held a steel lever and a switch."
 PROPOSAL = {"scene_type": "object", "location": "a maintenance room", "time_of_day": "",
@@ -38,6 +39,20 @@ def vision(*states):
 
 
 class SceneTests(unittest.TestCase):
+    def test_packet_requires_current_model_evidence_for_every_channel(self):
+        for channel in ("legends-01", "science-01", "cinema-01"):
+            sha = digest(SOURCE)
+            row = certify({"section": 1, "sha256": "fixture"}, channel, False, sha, SOURCE)
+            qa.require_packet_rows([row], sha, article_id=channel)
+            for field in ("pixel_input_sha256", "clip"):
+                broken = deepcopy(row)
+                broken["image_qa"].pop(field)
+                with self.assertRaisesRegex(Blocked, "image_review_required_before_packaging"):
+                    qa.require_packet_rows([broken], sha, article_id=channel)
+            row["image_qa"]["vision"]["models"]["blip"]["answers"][:2] = ["no", "no"]
+            with self.assertRaisesRegex(Blocked, "image_review_required_before_packaging"):
+                qa.require_packet_rows([row], sha, article_id=channel)
+
     def test_literal_evidence_and_version_binding(self):
         value = card()
         self.assertEqual(value["section_text_sha256"], digest(SOURCE))
