@@ -1,0 +1,98 @@
+name: One-time three-channel autonomous agent test
+on:
+  push:
+    branches:
+      - assistant/agent-three-channel-probe-20261123
+    paths:
+      - .github/workflows/editorial-three-channel-once.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  agent-only-test:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.ref == 'refs/heads/assistant/agent-three-channel-probe-20261123'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    env:
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      EDITORIAL_GROQ_FREE_ONLY: 'true'
+      EDITORIAL_CF_FREE_ONLY: 'true'
+      EDITORIAL_GROQ_FALLBACK_ONLY: 'true'
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      OMP_NUM_THREADS: '2'
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_XET: '1'
+      EDITORIAL_VALIDATION_REF: assistant/agent-three-channel-probe-20261123
+      EDITORIAL_STATE_DIR: ${{ runner.temp }}/editorial-agent-only-20261123
+      EDITORIAL_SEALED_DIR: ${{ runner.temp }}/editorial-three-sealed-20261123
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fail closed on publication and non-agent content
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          cfg = json.loads(Path("config/editorial_production.json").read_text(encoding="utf-8"))
+          site = json.loads(Path("config/site.json").read_text(encoding="utf-8"))
+          assert site["publication_enabled"] is False
+          assert cfg["schedule"]["enabled"] is False
+          assert cfg["schedule"]["owner_approved"] is False
+          assert cfg["schedule"]["groq_free_only"] is True
+          assert cfg["schedule"]["klein_free_only"] is True
+          assert cfg["articles_per_channel"] == {"legends": 1, "science": 1, "cinema": 0}
+          assert "Content authorship boundary" in Path("AGENTS.md").read_text(encoding="utf-8")
+          if not os.environ.get("EDITORIAL_STATE_KEY_HEX") or not os.environ.get("OPENROUTER_API_KEY"):
+              raise SystemExit("encrypted_storage_or_free_text_provider_secret_missing")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as out:
+              out.write("EDITORIAL_REVIEW_PUBLIC_KEY=" + cfg["schedule"]["owner_public_key"] + "\n")
+          print("Agent-only and publication freeze preflight passed; no content generated here.")
+          PY
+      - name: Install verified encryption dependency
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Confirm zero-cost OpenRouter route before generating anything
+        run: python -m src.editorial_free_fallback --github-env "$GITHUB_ENV"
+      - name: Install configured QA and document dependencies
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
+          python -m pip install -r requirements-production.txt
+          aiw-ru models install modernbert lightgbm transformer || echo "::warning::Local detector model installation incomplete; QA must block incomplete results"
+      - name: Generate one article per channel using project agents only
+        id: generator
+        env:
+          GITHUB_ACTIONS: 'true'
+        run: |
+          umask 077
+          TZ=Europe/Moscow date +%F > "$RUNNER_TEMP/editorial-moscow-day"
+          day="$(cat "$RUNNER_TEMP/editorial-moscow-day")"
+          python -m src.editorial_brain daily --date "$day" \
+            --encrypted-mode --validate-cinema --validation-window 90 \
+            --local-state "$EDITORIAL_STATE_DIR"
+      - name: Seal all available generated state with owner encryption
+        if: always()
+        env:
+          GITHUB_ACTIONS: 'true'
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-moscow-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-moscow-day")"
+            python -m src.editorial_delivery seal \
+              --root "$EDITORIAL_STATE_DIR" --date "$day" --output "$EDITORIAL_SEALED_DIR"
+          fi
+      - name: Upload only encrypted agent-generated review materials
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-three-agent-only-20261123
+          path: |
+            ${{ env.EDITORIAL_SEALED_DIR }}/checkpoint.enc
+            ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
+          if-no-files-found: warn
+          retention-days: 14
