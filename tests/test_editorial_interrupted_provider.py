@@ -15,8 +15,8 @@ class InterruptedProviderTests(unittest.TestCase):
         root = Path(self.tmp.name)
         self.memory = Memory(root, "2026-11-23",
                              datetime.now(timezone.utc) + timedelta(hours=1),
-                             {"daily_calls": {"groq": 5, "openrouter": 5, "klein": 5},
-                              "per_article_calls": {"groq": 3, "openrouter": 3, "klein": 3}})
+                             {"daily_calls": {"groq": 5, "secondary_fixture": 5, "klein": 5},
+                              "per_article_calls": {"groq": 3, "secondary_fixture": 3, "klein": 3}})
 
     def test_completed_task_checkpoint_integrity(self):
         inputs = {"prompt": "контроль"}
@@ -24,29 +24,29 @@ class InterruptedProviderTests(unittest.TestCase):
         answer = {"text": "исходный результат"}
         self.memory.data["tasks"][task_id] = {
             "id": task_id, "article": "science-01", "operation": "draft",
-            "executor": "openrouter", "attempts": 1,
+            "executor": "secondary_fixture", "attempts": 1,
             "status": "completed", "result": answer,
             "result_sha256": digest(json_bytes(answer)),
         }
         invoked = []
-        self.assertEqual(self.memory.task("science-01", "draft", "openrouter", inputs,
+        self.assertEqual(self.memory.task("science-01", "draft", "secondary_fixture", inputs,
                                            lambda _: invoked.append(1)), answer)
         self.assertEqual(invoked, [])
         self.memory.data["tasks"][task_id]["result"] = {"text": "поврежденный результат"}
         with self.assertRaisesRegex(Blocked, "completed_task_result_integrity_failed"):
-            self.memory.task("science-01", "draft", "openrouter", inputs,
+            self.memory.task("science-01", "draft", "secondary_fixture", inputs,
                              lambda _: invoked.append(1))
         self.assertEqual(invoked, [])
 
-    def test_unknown_openrouter_request_never_repeated(self):
+    def test_unknown_secondary_fixture_request_never_repeated(self):
         self.memory.data["calls"].append({
             "task": "science-01.draft.abc", "article": "science-01",
-            "provider": "openrouter", "status": "reserved", "at": "2026-11-23T00:00:00+00:00"})
+            "provider": "secondary_fixture", "status": "reserved", "at": "2026-11-23T00:00:00+00:00"})
         self.memory.save()
         invoked = []
         with self.assertRaisesRegex(ProviderError, "previous_provider_request_outcome_unknown"):
             self.memory.call("science-01.draft.abc", "science-01",
-                             "openrouter", lambda: invoked.append(1))
+                             "secondary_fixture", lambda: invoked.append(1))
         self.assertEqual(invoked, [])
         self.assertEqual(len(self.memory.data["calls"]), 1)
 
@@ -64,7 +64,7 @@ class InterruptedProviderTests(unittest.TestCase):
         answer = {"text": "проверенный результат"}
         calls = []
         first = self.memory.call("science-01.draft.abc", "science-01",
-                                 "openrouter", lambda: (calls.append(1), answer)[1])
+                                 "secondary_fixture", lambda: (calls.append(1), answer)[1])
         self.assertEqual(first, answer)
         self.assertEqual(self.memory.response("science-01.draft.abc"), answer)
         # The response() checkpoint is consumed before call(), so no second
