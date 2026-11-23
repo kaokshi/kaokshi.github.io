@@ -97,6 +97,12 @@ class Article:
     def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
         if tokens is None:
             tokens = 3700
+        if provider == "routerai":
+            if stage not in ("full-edit", "full-edit-retry"):
+                raise Blocked("routerai_is_independent_editor_only")
+            if (not self.config.get("routerai_editor", {}).get("enabled") or
+                    os.environ.get("EDITORIAL_ROUTERAI_EDITOR_ALLOWED") != "true"):
+                raise Blocked("routerai_spend_guard_not_ready")
         if provider == "gemini":
             if stage not in ("full-edit", "full-edit-retry"):
                 raise Blocked("gemini_is_independent_editor_only")
@@ -329,7 +335,8 @@ class Article:
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
         author = "groq"
-        editor = "gemini" if self.config.get("gemini_quota_guard", {}).get("automated_generation_enabled") else None
+        editor = ("routerai" if self.config.get("routerai_editor", {}).get("enabled") else
+                  "gemini" if self.config.get("gemini_quota_guard", {}).get("automated_generation_enabled") else None)
         raw = self.model("draft", author, brief, metadata={"topic": self.title})
         self.memory.article(self.id, draft_provider=author, independent_editor_provider=editor)
         self.current = self.remember_version(raw)
