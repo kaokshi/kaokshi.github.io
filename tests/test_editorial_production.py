@@ -69,9 +69,10 @@ class ProductionTests(unittest.TestCase):
                     "sources": ["https://nps.gov/a", "https://usgs.gov/b"]}]})
             elif "Верни JSON" in prompt and "subject" in prompt:
                 text = json.dumps({"subject": "water and environmental detail",
-                    "images": [{"section": i, "kind": "photo" if channel == "science" and i % 2 else "illustration",
+                    "images": [{"section": 1 if i < 2 else i,
+                                "kind": "photo" if channel == "science" and i % 2 else "illustration",
                                 "subject": f"distinct subject {i}", "brief": f"Detailed scene description {i}",
-                                "query": "hot spring photograph"} for i in range(1, 8)]})
+                                "query": "hot spring photograph"} for i in range(8)]})
             elif "Проверь конкретные недостатки" in prompt:
                 text = json.dumps(verdict(channel))
             else:
@@ -86,7 +87,7 @@ class ProductionTests(unittest.TestCase):
 
         def asset(scene, subject, path, *_):
             content = io.BytesIO()
-            shade = scene["section"] * 28 + (7 if scene["kind"] == "photo" else 0)
+            shade = (sum(scene["subject"].encode("utf-8")) * 3) % 220
             Image.new("RGB", (580, 490), (shade, 10, 220)).save(content, "JPEG")
             raw = content.getvalue()
             write(path, raw)
@@ -111,7 +112,7 @@ class ProductionTests(unittest.TestCase):
                                  ["created", "assigned", "running", "validating", "completed"])
             packet = root / result["day"] / "review"
             science = packet / "science-01"
-            self.assertEqual(len(Document(science / "Статья.docx").inline_shapes), 7)
+            self.assertEqual(len(Document(science / "Статья.docx").inline_shapes), 8)
             self.assertEqual(digest((science / "Текст для SHA-256.txt").read_bytes()),
                              state["articles"]["science-01"]["text_sha256"])
             report = read_json(science / "Статус и проверки.json")
