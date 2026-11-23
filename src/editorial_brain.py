@@ -441,6 +441,7 @@ class Article:
                 "addressed_issues": before["report"]["issues"], "candidate_issues": after["report"]["issues"]}
 
     def revise(self, brief):
+        from .editorial_alt_models import enabled as alternative_test
         limit = self.escalation["agent_revision_limit"]
         seen = {self.current["text_sha256"], *(row["after"] for row in self.attempts if "after" in row)}
         for attempt in range(1, limit + 1):
