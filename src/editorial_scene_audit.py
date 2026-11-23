@@ -201,9 +201,12 @@ def main(day, *, legacy=False):
         push_private_main(args, env)
         if not legacy:
             results = read_json(output)
-            assert sum(len(article["images"]) for article in results["articles"].values()) == 23
-            print(json.dumps({"private_report_saved": True,
+            images = [row for article in results["articles"].values() for row in article["images"]]
+            pixel_checks = sum(bool(image.get("vision")) for image in images)
+            print(json.dumps({"private_report_saved": True, "pixel_checks": pixel_checks,
                               "elapsed_seconds": results["elapsed_seconds"], "klein_calls": 0}), flush=True)
+            if pixel_checks != 23 or len(images) != 23:
+                raise Blocked("audit_did_not_complete_all_23_pixel_checks")
 
 
 if __name__ == "__main__":

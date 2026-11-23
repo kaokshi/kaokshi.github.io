@@ -123,9 +123,11 @@ def nasa_photos(query):
 def clip_model():
     try:
         from transformers import CLIPModel, CLIPProcessor
-        model_id = "openai/clip-vit-base-patch32"
-        processor = CLIPProcessor.from_pretrained(model_id, use_fast=False)
-        return model_id, processor, CLIPModel.from_pretrained(model_id).eval()
+        from .editorial_visual_matching import CLIP
+
+        model_id, revision = CLIP
+        processor = CLIPProcessor.from_pretrained(model_id, revision=revision, use_fast=False)
+        return model_id + "@" + revision, processor, CLIPModel.from_pretrained(model_id, revision=revision).eval()
     except (ImportError, OSError, ValueError, RuntimeError) as exc:
         raise Blocked("visual_matcher_unavailable_" + type(exc).__name__) from None
 

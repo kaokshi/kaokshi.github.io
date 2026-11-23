@@ -37,7 +37,8 @@ must_not_have перечисляет только явные видимые пр
 
 
 def make_card(article_id, section, source_sha, section_text, proposal):
-    if not isinstance(proposal, dict) or proposal.get("scene_type") not in TYPES:
+    if (not isinstance(proposal, dict) or not isinstance(proposal.get("scene_type"), str)
+            or proposal["scene_type"] not in TYPES):
         raise Blocked("scene_card_type_invalid")
     card = {k: proposal.get(k) for k in (*SECTION_FIELDS, *LIST_FIELDS, "scene_type", "evidence_spans")}
     for name in SECTION_FIELDS:
@@ -180,6 +181,8 @@ def judge(card, image, image_sha, clip, *, duplicate=False, quality=None, clip_g
               "must_have_coverage": None}
     try:
         evidence = vision(card, image)
+        if not evidence.get("findings"):
+            raise ValueError("vision_evidence_missing")
     except Exception as exc:
         # A model/configuration/network failure must leave a trace and cannot approve an image.
         report.update(status="provider_unavailable", reasons=["vision_unavailable_" + type(exc).__name__])
