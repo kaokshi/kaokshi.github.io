@@ -15,7 +15,7 @@ from .editorial_gemini_guard import MODEL as GEMINI
 GROQ = "openai/gpt-oss-120b"
 KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
 ROUTERAI_SONNET = "anthropic/claude-sonnet-5.5"
-ROUTERAI_REVIEWER = "deepseek/deepseek-v3.2"
+ROUTERAI_REVIEWER = "deepseek/deepseek-v4-pro-0813"
 MODELS = {"groq": GROQ, "gemini": GEMINI, "routerai": ROUTERAI_SONNET, "routerai_review": ROUTERAI_REVIEWER, "klein": KLEIN}
 USER_AGENT = "ZenEditorial/1.0 (+https://github.com/kaokshi/kaokshi.github.io)"
 
