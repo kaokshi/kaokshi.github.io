@@ -108,13 +108,13 @@
   "routerai_editor": {
     "model": "anthropic/claude-sonnet-5.5",
     "enabled": false,
-    "daily_spend_cap_rub": 40,
-    "monthly_spend_cap_rub": 1200,
+    "daily_spend_cap_rub": 100,
+    "monthly_spend_cap_rub": 3000,
     "max_calls_per_article": 2,
     "max_calls_per_cycle": 4,
     "require_balance_preflight": true,
     "status": "claude_drafter_deepseek_v4_pro_0813_reviewer_payment_guard_pending",
-    "note": "Claude Sonnet 5.5 drafts, DeepSeek V4 Pro 0813 independently edits. Paid calls disabled until verified read-only balance, durable shared daily/monthly spend reservation and owner-approved cap.",
+    "note": "One shared 100 RUB/day and 3000 RUB/30-days TARGET for Claude Sonnet author plus DeepSeek V4 Pro reviewer, not yet enforced. Never enable API calls without tested shared durable budget reservation, balance check, and actual spend reconciliation. Real provider charges may differ from quoted catalogue.",
     "primary_model": "anthropic/claude-sonnet-5.5",
     "review_model": "deepseek/deepseek-v4-pro-0813",
     "roles": "claude_primary_deepseek_independent_reviewer"
