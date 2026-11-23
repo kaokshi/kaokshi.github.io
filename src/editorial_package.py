@@ -8,6 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from .editorial_memory import digest, write, write_json
 from .editorial_review import canonical
+from .editorial_scene_qa import require_packet_rows
 from .editorial_images import select_cover
 from .editorial_layout import layout_issues
 from .editorial_subscription import approved_url, channel_from_folder, split_cta
@@ -20,14 +21,18 @@ class ArticleHTML(HTMLParser):
         self.pending = None
         self.lines = []
         self.images = []
+        self.placement = []
 
     def handle_starttag(self, tag, attrs):
         if tag == "main":
             self.inside = True
         if self.inside and tag in {"h2", "p"}:
+            self.placement.append(tag)
             self.pending = []
         if self.inside and tag == "img":
-            self.images.append(dict(attrs).get("src"))
+            image = dict(attrs).get("src")
+            self.images.append(image)
+            self.placement.append(image)
 
     def handle_endtag(self, tag):
         if tag in {"h2", "p"} and self.pending is not None:
@@ -70,6 +75,7 @@ def package(folder, title, version, report, images, image_folder, summary):
     from docx import Document
     from docx.shared import Inches
 
+    require_packet_rows(images, report["text_sha256"], article_id=folder.name)
     folder.mkdir(parents=True, exist_ok=True)
     document = Document()
     document.add_heading(title, 0)
@@ -99,9 +105,15 @@ def package(folder, title, version, report, images, image_folder, summary):
     channel = channel_from_folder(folder)
     link = approved_url(channel) if channel else None
     linked_cta = False
+    placements, doc_placements, markdown_placements = [], [], []
+    doc_start = len(document.paragraphs)
+    markdown_start = len(lines)
 
     def paragraph(value, heading=False, last_cta=False, section_number=None):
         nonlocal linked_cta
+        placements.append("h2" if heading else "p")
+        doc_placements.append("h2" if heading else "p")
+        markdown_placements.append("h2" if heading else "p")
         if heading:
             document.add_heading(value, 2)
             out.append(f'<h2 id="section-{section_number}">{escape(value)}</h2>')
@@ -133,6 +145,9 @@ def package(folder, title, version, report, images, image_folder, summary):
         scene = picture_row["scene"]
         out.append(f'<figure><img src="images/{escape(name, quote=True)}" alt="{escape(scene, quote=True)}"></figure>')
         lines.append(f"![{scene}](images/{name})")
+        placements.append(f"images/{name}")
+        doc_placements.append(picture_row["sha256"])
+        markdown_placements.append(f"images/{name}")
 
     # Dzen screenshot structure: title -> contents -> the best cover -> intro.
     # An image immediately follows every bold section heading, before its prose.
@@ -149,6 +164,8 @@ def package(folder, title, version, report, images, image_folder, summary):
             paragraph(value, last_cta=(number == len(article["sections"])
                                        and index == len(section["paragraphs"]) - 1))
     out.append("</main>")
+    doc_end = len(document.paragraphs)
+    markdown_end = len(lines)
     evidence = report["facts"]["evidence"]
     if evidence:
         out.append("<aside><h2>Научные источники</h2><ul>")
@@ -202,6 +219,22 @@ def package(folder, title, version, report, images, image_folder, summary):
             or digest(doc_text) != report["text_sha256"] or image_refs != checker.images
             or len(reopened.inline_shapes) != len(images)):
         raise ValueError("document_roundtrip_failed")
+    actual_doc_positions = []
+    for paragraph_node in reopened.paragraphs[doc_start:doc_end]:
+        images_xml = paragraph_node._p.xpath(".//a:blip")
+        if images_xml:
+            image_relation = images_xml[0].get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+            actual_doc_positions.append(digest(reopened.part.related_parts[image_relation].blob))
+        else:
+            actual_doc_positions.append("h2" if paragraph_node.style.name == "Heading 2" else "p")
+    markdown = "\n\n".join(lines) + "\n"
+    rendered_md = markdown.strip().split("\n\n")[markdown_start:markdown_end]
+    md_positions = [
+        block.rsplit("](", 1)[1][:-1] if block.startswith("![") and "](" in block
+        else "h2" if block.startswith("**") and block.endswith("**") else "p" for block in rendered_md
+    ]
+    if checker.placement != placements or actual_doc_positions != doc_placements or md_positions != markdown_placements:
+        raise ValueError("document_image_placement_mismatch")
     with ZipFile(io.BytesIO(word)) as archive:
         embedded = Counter(digest(archive.read(name)) for name in archive.namelist()
                            if name.startswith("word/media/"))
@@ -209,7 +242,7 @@ def package(folder, title, version, report, images, image_folder, summary):
         raise ValueError("docx_image_sha_mismatch")
     write(folder / "Статья.html", html.encode("utf-8"))
     write(folder / "Статья.docx", word)
-    write(folder / "Статья.md", ("\n\n".join(lines) + "\n").encode("utf-8"))
+    write(folder / "Статья.md", markdown.encode("utf-8"))
     write(folder / "Текст для SHA-256.txt", original.encode("utf-8"))
     write_json(folder / "Статус и проверки.json", {**summary,
                "layout_status": "verified" if not problems else "layout_blocked",
@@ -221,6 +254,16 @@ def package(folder, title, version, report, images, image_folder, summary):
                "text_sha256": report["text_sha256"], "document_roundtrip": "completed",
                "article_checks": {k: v for k, v in report.items() if k != "article"},
                "images": [{k: v for k, v in row.items() if k != "image_embedding"} for row in ordered]})
+    visual_checks = [row["image_qa"] for row in ordered if "image_qa" in row]
+    if visual_checks:
+        write_json(folder / "image_qa.json", {"source_text_sha256": report["text_sha256"],
+                                            "images": visual_checks})
+    else:
+        (folder / "image_qa.json").unlink(missing_ok=True)
+    accepted_names = {row["file"] for row in ordered}
+    for path in (folder / "images").glob("*"):
+        if path.is_file() and path.name not in accepted_names:
+            path.unlink()
     versions = folder / "Версии"
     versions.mkdir(exist_ok=True)
     for row in version:

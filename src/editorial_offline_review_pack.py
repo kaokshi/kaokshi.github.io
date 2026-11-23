@@ -16,10 +16,10 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from PIL import Image
 from docx import Document
 from docx.shared import Inches, Pt
-from markdown_it import MarkdownIt
 
 from .editorial_chat_plaintext import approval, checked_day, connect, run
 from .editorial_providers import Blocked
+from .editorial_scene_qa import SCHEMA
 
 CHANNELS = ("legends-01", "cinema-01", "science-01")
 TITLES = {
@@ -34,6 +34,8 @@ BAD_EXTERNAL_IMAGE = re.compile(r"!\[[^\]\n]*\]\((?:https?://|/)", re.I)
 
 
 def text_to_html(title, raw):
+    from markdown_it import MarkdownIt
+
     renderer = MarkdownIt("commonmark", {"html": False, "linkify": False})
     inner = renderer.render(raw)
     return ("""<!doctype html><html lang="ru"><head><meta charset="utf-8">
@@ -80,6 +82,41 @@ def write_docx(raw, folder, output):
     doc.save(output)
 
 
+def require_audited_bundle(base):
+    from .editorial_memory import digest, json_bytes, read_json
+    from .editorial_scene_audit import input_sections
+
+    evidence = read_json(base / "image-qa-audit-v2" / "image_qa.json")
+    if not evidence or evidence.get("schema") != SCHEMA:
+        raise Blocked("offline_bundle_requires_current_image_audit")
+    for channel in CHANNELS:
+        folder = base / channel
+        markdown = (folder / FILE_NAME).read_text(encoding="utf-8")
+        sections, slots = input_sections(markdown)
+        if "**Оглавление**" not in markdown.splitlines() and "## Оглавление" not in markdown.splitlines():
+            raise Blocked("offline_bundle_missing_contents_" + channel)
+        article = evidence.get("articles", {}).get(channel, {})
+        source = digest("\n\n".join(sections.values()))
+        rows = article.get("images", [])
+        entries = {row["section_id"]: row for row in rows}
+        if (article.get("source_text_sha256") != source
+                or set(entries) != set(slots) or len(rows) != len(slots)):
+            raise Blocked("offline_bundle_image_audit_text_or_slots_mismatch_" + channel)
+        for section, slot in slots.items():
+            row = entries[section]
+            card = row.get("scene_card")
+            path = folder / "illustrations" / f"{slot}.jpg"
+            if (not card or row.get("status") != "accepted" or row.get("slot") != slot
+                    or row.get("schema") != SCHEMA or row.get("source_text_sha256") != source
+                    or card.get("article_id") != channel or card.get("section_id") != section
+                    or card.get("section_text_sha256") != digest(sections[section])
+                    or card.get("source_text_sha256") != source
+                    or row.get("scene_card_sha256") != digest(json_bytes(card))
+                    or not row.get("vision") or row.get("duplicate") or not row.get("policy")
+                    or row.get("image_sha256") != digest(path.read_bytes())):
+                raise Blocked("offline_bundle_image_review_required_" + channel)
+
+
 def package(day, token):
     approval()
     checked_day(day)
@@ -90,6 +127,7 @@ def package(day, token):
         repo=path/"private"
         git,env=connect(token,repo)
         base=repo/"editorial-chat-review"/day
+        require_audited_bundle(base)
         zipfile=base/OUTPUT
         summary=[]
         with ZipFile(zipfile,"w",ZIP_DEFLATED,compresslevel=7) as archive:
@@ -137,6 +175,7 @@ def package(day, token):
                 summary.append({"channel":channel,"images":len(images),
                                 "document":True,"html":True,
                                 "offline_relative_images":True})
+            archive.write(base / "image-qa-audit-v2" / "image_qa.json", arcname="image_qa.json")
             archive.writestr("НАЧНИТЕ_ЗДЕСЬ.txt",
                 "Редакция Дзен — тестовые статьи для личного согласования.\n\n"
                 "Откройте файл «Открыть статью.html» в каждой папке или "

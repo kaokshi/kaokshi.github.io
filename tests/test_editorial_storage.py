@@ -23,11 +23,14 @@ from src.editorial_groq_ledger import archive_document, collection
 from src.editorial_memory import digest, read_json, write_json
 from src.editorial_package import ArticleHTML, package
 from src.editorial_providers import Blocked
+from tests.editorial_scene_fixtures import certify
 from src.editorial_review import canonical, parse_article
 
 
 DAY = "2026-11-22"
-FIXTURE = parse_article("**Проверка восстановления**\n" + "Контрольный текст. " * 230 + "Подпишитесь.")
+FIXTURE = parse_article("Тест восстановления.\n\n" + "\n\n".join(
+    f"**Проверка восстановления {n}**\n\n" + "Контрольный текст. " * 40 for n in range(1, 7))
+    + "Подпишитесь.")
 ARTICLE_IDS = ("legends-01", "science-01")
 
 
@@ -41,9 +44,10 @@ def build_fixture(root):
             name = f"{i}.jpg"
             file = image_folder / name
             Image.new("RGB", (80, 60), (i * 20, 70, 90)).save(file)
-            images.append({"file": name, "section": 1, "cover_score": i,
-                           "scene": "Контрольная иллюстрация", "kind": "generated",
-                           "sha256": digest(file.read_bytes())})
+            row = {"file": name, "section": max(i, 1), "cover_score": i,
+                   "scene": "Контрольная иллюстрация", "kind": "generated",
+                   "sha256": digest(file.read_bytes())}
+            images.append(certify(row, article_id, i == 0, digest(canonical(FIXTURE))))
         package(memory.folder / "review" / article_id, article_id, [],
                 {"article": FIXTURE, "text_sha256": digest(canonical(FIXTURE)), "facts": {"evidence": []}},
                 images, image_folder, {"status": "rights_review_pending"})

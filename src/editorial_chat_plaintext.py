@@ -19,6 +19,7 @@ from tempfile import TemporaryDirectory
 
 from .editorial_memory import digest
 from .editorial_providers import Blocked
+from .editorial_scene_qa import require_packet_rows
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_REPO = "kaokshi/zen-editorial-review"
@@ -93,7 +94,7 @@ def inputs(root, day, *, ready_only=False):
         if not folder.is_dir() or folder.is_symlink():
             continue
         names = ("Статья.docx", "Статья.html", "Статья.md",
-                 "Текст для SHA-256.txt", "Статус и проверки.json", "SHA256SUMS.txt")
+                 "Текст для SHA-256.txt", "Статус и проверки.json", "SHA256SUMS.txt", "image_qa.json")
         checks = folder / "Статус и проверки.json"
         manifest = folder / "SHA256SUMS.txt"
         if not (checks.is_file() and manifest.is_file()):
@@ -118,6 +119,9 @@ def inputs(root, day, *, ready_only=False):
         source = (folder / "Текст для SHA-256.txt").read_bytes()
         if digest(source) != report.get("text_sha256"):
             raise Blocked("private_review_canonical_sha_mismatch")
+        require_packet_rows(rows, report["text_sha256"], article_id=channel)
+        if ready_only and (report.get("layout_status") != "verified" or not 7 <= len(rows) <= 8):
+            raise Blocked("private_review_visual_layout_incomplete")
         expected = {}
         for line in manifest.read_text(encoding="utf-8").splitlines():
             parts = line.split("  ", 1)

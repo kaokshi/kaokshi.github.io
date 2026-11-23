@@ -14,6 +14,7 @@ from src.editorial_layout import arrange, layout_issues
 from src.editorial_memory import digest
 from src.editorial_package import package
 from src.editorial_providers import Blocked
+from tests.editorial_scene_fixtures import certify
 from src.editorial_review import canonical, parse_article, structural_checks
 
 
@@ -81,6 +82,8 @@ class LayoutTests(unittest.TestCase):
             report = {"article": article, "text_sha256": digest(canonical(article)),
                       "facts": {"evidence": []}}
             dest = root / "legends-01"
+            for row in images:
+                certify(row, dest.name, row["file"] == "picture-2.jpg", report["text_sha256"])
             package(dest, "Окно на чердаке", [], report, images, source,
                     {"status": "rights_review_pending"})
 
@@ -141,6 +144,8 @@ class LayoutTests(unittest.TestCase):
             report = {"article": article, "text_sha256": digest(canonical(article)),
                       "facts": {"evidence": []}}
             folder = root / "science-01"
+            for row in images:
+                certify(row, folder.name, row["file"] == "picture-2.jpg", report["text_sha256"])
             package(folder, "Тест фото", [], report, images, source, {})
             checks = json.loads((folder / "Статус и проверки.json").read_text(encoding="utf-8"))
             self.assertEqual(checks["subscription_link_status"], "linked")

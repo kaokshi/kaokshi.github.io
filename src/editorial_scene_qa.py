@@ -30,7 +30,8 @@ characters и optional_details, и с time_of_day, если заполнено; 
 Выбирай ОДИН видимый момент: не совмещай события разных абзацев, эпох или мест. Проверяемы только
 предметы, место, персонажи, действия и отношения в кадре. Не выдумывай обязательных деталей.
 must_not_have перечисляет только явные видимые противоречия выбранной сцене и может быть пустым.
-Кадр фильма подтверждай видимым отличием эпизода; лицо актёра и название фильма проверяются по источнику.
+Кадр фильма подтверждай видимым отличием эпизода. В полях для визуальных вопросов опиши внешность и
+действия без имени; идентичность актёра, персонажа и фильма отдельно проверяется по источнику.
 Для науки учитывай видимые пространственные связи и направление механизма. Никаких вымышленных этикеток.
 """
 
@@ -299,3 +300,18 @@ def accepted_for(row, card, *, is_cover):
                 and report.get("image_sha256") == row.get("sha256")
                 and row.get("is_cover") is is_cover
                 and type(is_cover) is bool)
+
+
+def require_packet_rows(rows, source_sha, *, article_id=None):
+    """Defend the packaging and delivery boundaries independently of generation."""
+    for row in rows:
+        evidence = row.get("image_qa") or {}
+        card = evidence.get("scene_card")
+        if (not accepted_for(row, card, is_cover=row.get("is_cover"))
+                or evidence.get("source_text_sha256") != source_sha
+                or card["source_text_sha256"] != source_sha
+                or card["section_id"] != row.get("section")
+                or (article_id is not None and card.get("article_id") != article_id)
+                or not evidence.get("vision") or evidence.get("duplicate")
+                or not evidence.get("policy") or evidence.get("visual_quality", {}).get("passed") is not True):
+            raise Blocked("image_review_required_before_packaging")

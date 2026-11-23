@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import fcntl
 
 from . import editorial_cinema as cinema
+from . import editorial_scene_qa as scene_qa
 from .editorial_alt_models import gemini_pilot, groq_gemini_klein_pilot, groq_ovh_klein_pilot, ovh_finalize, ovh_recover, ovh_trial, without_openrouter
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
@@ -867,20 +868,34 @@ class Article:
                   '"subject":"English concrete scene or subject","brief":"English detailed visual brief",'
                   '"query":"English search phrase"}]}.\n'
                   + self.current["raw"])
+        # Give the planner exactly the canonical text used to validate literal
+        # evidence spans, even when the original Markdown wraps paragraphs.
+        source_sha = self.current["text_sha256"]
+        prompt = (prompt.removesuffix(self.current["raw"]) + scene_qa.CARD_RULES
+                  + "\nПервый из двух кадров первого раздела — обложка. "
+                  "Выбери для неё самый показательный отдельный момент, отличный от кадра раздела. "
+                  + "\nРАЗДЕЛЫ:\n" + json.dumps(
+                      {i: "\n".join([section["heading"], *section["paragraphs"]])
+                       for i, section in enumerate(article["sections"], 1)}, ensure_ascii=False))
+        def check_plan(result, *, sourced=False):
+            validate_plan(result, count, self.channel, self.config, sourced_illustrations=sourced)
+            return scene_qa.attach_cards(result, self.id, article, source_sha)
+
         plan = None
         last = None
         if os.environ.get("EDITORIAL_IMAGE_RECOVERY_ONLY") == "true":
-            # Reuse the existing model-created image plan, never ask Groq again.
+            # Reuse a completed plan only if every card is grounded in this exact text.
             with self.memory.lock:
                 cached = next((
-                    row["result"] for row in self.memory.data["tasks"].values()
-                    if row["article"] == self.id and row["operation"] == "image-plan-1"
+                    row["result"] for row in reversed(list(self.memory.data["tasks"].values()))
+                    if row["article"] == self.id and row["operation"].startswith("image-plan-")
                     and row["status"] == "completed" and isinstance(row.get("result"), dict)
+                    and row["inputs"].get("text_sha256") == source_sha
+                    and row["inputs"].get("scene_qa_schema") == scene_qa.SCHEMA
                 ), None)
             if cached is None:
-                raise Blocked("image_recovery_missing_original_plan")
-            plan = json_reply(cached)
-            validate_plan(plan, count, self.channel, self.config)
+                raise Blocked("image_recovery_missing_grounded_original_plan")
+            plan = check_plan(json_reply(cached))
         providers = () if plan is not None else (("groq", "kilo") if without_openrouter() else (
             ("groq",) if alternative_test() else ("groq", "openrouter")))
         if ovh_trial():
@@ -911,16 +926,22 @@ class Article:
             try:
                 plan = self.model(f"image-plan-{attempt}", provider,
                                   prompt + (f"\nИсправь: {last}." if last else ""),
-                                  validate=lambda x: validate_plan(x, count, self.channel, self.config,
-                                                                   sourced_illustrations=sourced_illustrations),
-                                  metadata={"text_sha256": self.current["text_sha256"]},
-                                  tokens=1800 if groq_gemini_klein_pilot() else 6000 if alternative_test() else (2800 if provider == "groq" else 5500))
+                                  validate=lambda x: check_plan(x, sourced=sourced_illustrations),
+                                  metadata={"text_sha256": source_sha, "scene_qa_schema": scene_qa.SCHEMA},
+                                  tokens=3400)
                 break
             except Blocked as exc:
                 last = exc
         if plan is None:
             raise last
-        scenes = plan["images"]
+        scenes = check_plan(plan, sourced=sourced_illustrations)["images"]
+        cover = next(i for i, scene in enumerate(scenes) if scene["section"] == 1)
+        for i, scene in enumerate(scenes):
+            scene["is_cover"] = i == cover
+            scene["channel"] = self.channel
+            if self.film:
+                scene["film"] = self.film["film"]
+                scene["spoilers"] = self.film["spoilers"]
         if pilot:
             if sum(scene["kind"] == "illustration" for scene in scenes) != 2:
                 raise Blocked("image_plan_requires_two_klein_illustrations")
@@ -931,12 +952,20 @@ class Article:
                 continue
             path = self.folder / "images" / f"{self.current['text_sha256'][:12]}-{index:02d}.jpg"
             existing = read_json(path.with_suffix(".json"))
-            if (existing and path.is_file() and digest(path.read_bytes()) == existing["sha256"]
-                    and (not sourced_illustrations or existing["rights_status"] != "rights_review_pending")
-                    and existing["section"] == scene["section"] and existing["scene"] == scene["subject"]):
-                self.pictures.append(existing)
-                continue
             try:
+                if existing and path.is_file() and digest(path.read_bytes()) == existing["sha256"]:
+                    if scene_qa.accepted_for(existing, scene["scene_card"], is_cover=scene["is_cover"]):
+                        self.pictures.append(existing)
+                        continue
+                    try:
+                        self.pictures.append(self.image_index.save(
+                            path.read_bytes(), existing, scene, plan["subject"], path, preserve=True))
+                        continue
+                    except scene_qa.ImageQAError as exc:
+                        if exc.args[0]["status"] == "provider_unavailable":
+                            raise Blocked("image_review_required_provider_unavailable") from None
+                    except (OSError, ValueError):
+                        pass
                 if self.film:
                     executor = "public-film-stills"
                     fn = lambda _, s=scene, p=path: cinema.stills(
@@ -946,7 +975,7 @@ class Article:
                     # In the mixed-media science pilot, try traceable NASA photos after
                     # Commons; NASA rights are explicitly left pending for owner review.
                     # Only the sourced-illustration route requires Commons license metadata.
-                    options = {"verified_only": True} if sourced_illustrations else {}
+                    options = {"verified_only": True} if self.channel == "science" or sourced_illustrations else {}
                     fn = lambda _, s=scene, p=path: photo(s, plan["subject"], p, self.image_index, **options)
                 else:
                     executor = "klein"
@@ -958,10 +987,13 @@ class Article:
                                    fn, minimum_seconds=155)
                 if not path.is_file() or digest(path.read_bytes()) != result["sha256"]:
                     raise Blocked("stored_image_unavailable_or_sha_mismatch")
+                if not scene_qa.accepted_for(result, scene["scene_card"], is_cover=scene["is_cover"]):
+                    raise Blocked("image_review_required_stale_or_unverified")
                 self.pictures.append(result)
             except Blocked as exc:
                 self.blockers.append(f"image_{index:02d}: {exc}")
-                if str(exc) == "production_deadline" or str(exc).startswith("visual_matcher_unavailable"):
+                if str(exc) == "production_deadline" or str(exc).startswith((
+                        "visual_matcher_unavailable", "image_review_required_provider_unavailable")):
                     break
         if len(self.pictures) != len(plan["images"]):
             self.blockers.append("incomplete_image_plan")
@@ -1054,6 +1086,11 @@ class Article:
                 minimum=self.config["minimum_images"], maximum=self.config["maximum_images"])
             if visual_issues:
                 self.blockers.extend(visual_issues)
+            if any(not scene_qa.accepted_for(
+                    row, (row.get("image_qa") or {}).get("scene_card"), is_cover=row.get("is_cover"))
+                    or (row.get("image_qa") or {}).get("source_text_sha256") != self.current["text_sha256"]
+                    for row in self.pictures):
+                self.blockers.append("image_review_required_stale_or_unverified")
             summary["layout_status"] = "layout_blocked" if visual_issues else "verified"
             summary["layout_issues"] = visual_issues
             pending_rights = any(row["rights_status"] == "rights_review_pending" for row in self.pictures)
@@ -1068,7 +1105,8 @@ class Article:
                 self.task("review-package", "docx-html-export",
                           {"text_sha256": report["text_sha256"], "checks_sha256": digest(
                               json.dumps(report, sort_keys=True, ensure_ascii=False)),
-                           "image_sha256": [row["sha256"] for row in self.pictures], "status": status},
+                           "image_sha256": [row["sha256"] for row in self.pictures],
+                           "scene_qa_schema": scene_qa.SCHEMA, "status": status},
                           lambda _: package(folder, self.title,
                                             sorted((self.folder / "versions").glob("*")), report,
                                             self.pictures, self.folder / "images", summary), minimum_seconds=-300)

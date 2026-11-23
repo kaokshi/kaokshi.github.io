@@ -16,6 +16,7 @@ from src import (editorial_brain as brain, editorial_cinema, editorial_delivery,
 from src.editorial_learning import CATEGORIES, evaluate_cases
 from src.editorial_memory import Memory, digest, read_json, write
 from src.editorial_providers import Blocked, ProviderError
+from tests.editorial_scene_fixtures import certify, proposal
 from src.editorial_review import CTA, fact_evidence, parse_article, structural_checks
 
 
@@ -72,7 +73,9 @@ class ProductionTests(unittest.TestCase):
                     "images": [{"section": 1 if i < 2 else i,
                                 "kind": "photo" if channel == "science" and i % 2 else "illustration",
                                 "subject": f"distinct subject {i}", "brief": f"Detailed scene description {i}",
-                                "query": "hot spring photograph"} for i in range(8)]})
+                                "query": "hot spring photograph",
+                                "scene_card": proposal(parse_article(draft(channel))["sections"][
+                                    0 if i < 2 else i - 1]["heading"])} for i in range(8)]})
             elif "Проверь конкретные недостатки" in prompt:
                 text = json.dumps(verdict(channel))
             else:
@@ -85,16 +88,18 @@ class ProductionTests(unittest.TestCase):
                     **{key: {"status": "completed"} for key in ("model_a", "grammar", "editorial")},
                     "facts": {"status": "completed", "evidence": []}}
 
-        def asset(scene, subject, path, *_):
+        def asset(scene, subject, path, *_, **options):
             content = io.BytesIO()
             shade = (sum(scene["subject"].encode("utf-8")) * 3) % 220
             Image.new("RGB", (580, 490), (shade, 10, 220)).save(content, "JPEG")
             raw = content.getvalue()
             write(path, raw)
-            return {"kind": scene["kind"], "section": scene["section"], "file": path.name,
-                    "scene": scene["subject"], "cover_score": 1.0, "sha256": digest(raw),
-                    "rights_status": "rights_review_pending",
-                    "source_page": "https://commons.wikimedia.org/wiki/File:Example"}
+            card = scene["scene_card"]
+            return certify({"kind": scene["kind"], "section": scene["section"], "file": path.name,
+                            "fixture_card": card, "scene": scene["subject"],
+                            "cover_score": 1.0, "sha256": digest(raw), "rights_status": "rights_review_pending",
+                            "source_page": "https://commons.wikimedia.org/wiki/File:Example"},
+                           card["article_id"], scene["is_cover"], card["source_text_sha256"])
 
         with TemporaryDirectory() as directory, patch.object(brain, "text_call", model), \
                 patch.object(brain, "qa", inspections), patch.object(brain, "photo", asset), \
@@ -109,7 +114,8 @@ class ProductionTests(unittest.TestCase):
                                 for task in state["tasks"].values()))
             for task in state["tasks"].values():
                 self.assertEqual([x["status"] for x in task["events"]],
-                                 ["created", "assigned", "running", "validating", "completed"])
+                                 ["created", "assigned", "running", "validating", "completed"],
+                                 (task["operation"], task["executor"], task.get("error")))
             packet = root / result["day"] / "review"
             science = packet / "science-01"
             self.assertEqual(len(Document(science / "Статья.docx").inline_shapes), 8)
@@ -179,7 +185,9 @@ class ProductionTests(unittest.TestCase):
         class Index:
             class memory:
                 time_left = staticmethod(lambda: 1000)
-        scene = {"subject": "Truman in Seahaven"}
+        source = "Synthetic still location"
+        scene = {"subject": "Truman in Seahaven", "scene_card": brain.scene_qa.make_card(
+            "cinema-01", 1, digest(source), source, proposal(source))}
         with patch.object(editorial_cinema, "commons_stills", return_value=[]):
             with self.assertRaisesRegex(Blocked, "film_scene_still_not_found"):
                 editorial_cinema.stills(scene, "Truman Show", None, Index(), details["film"], {})

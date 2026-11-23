@@ -9,6 +9,7 @@ from threading import Lock
 from urllib.parse import quote, urlencode
 
 from . import editorial_commons_images as commons
+from . import editorial_scene_qa as qa
 from .editorial_memory import digest, read_json, write, write_json
 from .editorial_providers import KLEIN, Blocked, ProviderError, klein, request
 
@@ -185,21 +186,36 @@ class ImageIndex:
             except (OSError, ValueError):
                 continue
 
-    def save(self, raw, metadata, scene, subject, path):
+    def save(self, raw, metadata, scene, subject, path, *, preserve=False):
         import imagehash
         image, contrast = decode_candidate(raw)
-        model, scores, embedding = similarity(image, [scene["subject"], subject,
+        card = scene.get("scene_card")
+        if not card:
+            raise Blocked("image_scene_card_required")
+        scene_caption = ", ".join([card["location"], *card["must_have"]])
+        model, scores, embedding = similarity(image, [scene_caption, subject,
                                             "an unrelated image with no connection with this topic"])
-        if scores[0] < .19 or scores[0] <= scores[2] + .015:
-            raise ValueError("image_scene_match_below_threshold")
+        clip = {"model": model, "scene": scores[0], "topic": scores[1], "unrelated": scores[2],
+                "passed": scores[0] >= .19 and scores[0] > scores[2] + .015}
         quality = (min(1, image.width / 1200) * .3
                    + min(1, contrast / 60) * .25
                    + max(0, 1 - abs(image.width / image.height - 1.5)) * .45)
         image.thumbnail((1440, 1200))
         buffer = io.BytesIO()
-        image.save(buffer, format="JPEG", quality=89, optimize=True)
-        rendered = buffer.getvalue()
+        if preserve:
+            rendered = raw
+        else:
+            image.save(buffer, format="JPEG", quality=89, optimize=True)
+            rendered = buffer.getvalue()
         raw_sha, sha, phash = digest(raw), digest(rendered), str(imagehash.phash(image))
+        previous = path.parent / "image-qa" / path.stem / (sha + ".json")
+        decision = qa.current_report(previous, card, sha)
+        # Source and duplicate checks may change independently of image pixels.
+        if not decision or decision["status"] != "accepted":
+            decision = qa.judge(card, image, sha, clip, quality={
+                "passed": True, "size": list(image.size), "contrast": round(contrast, 3)})
+        qa.apply_channel_policy(decision, scene["channel"], metadata,
+                                film=scene.get("film"), spoilers=scene.get("spoilers", False))
         with self.memory.lock:
             hashes = list(self.archive)
             vectors = []
@@ -210,16 +226,26 @@ class ImageIndex:
                                    (row["original_sha256"], row["perceptual_hash"])])
                     if row.get("match_model") == model and row.get("image_embedding"):
                         vectors.append(row["image_embedding"])
-            if any(previous in (sha, raw_sha) or (int(phash, 16) ^ int(near, 16)).bit_count() <= 6
-                   for previous, near in hashes):
-                raise ValueError("image_duplicate")
-            if any(sum(a * b for a, b in zip(embedding, previous)) > .965 for previous in vectors):
-                raise ValueError("image_semantically_near_duplicate")
+            identical = any(previous in (sha, raw_sha) or (int(phash, 16) ^ int(near, 16)).bit_count() <= 6
+                            for previous, near in hashes)
+            near_duplicate = any(sum(a * b for a, b in zip(embedding, previous)) > .965 for previous in vectors)
+            decision.update(generations=metadata.get("generation", 0),
+                            requests=metadata.get("generation", 0),
+                            duplicate=identical or near_duplicate)
+            if decision["duplicate"]:
+                decision["status"] = "rejected"
+                if "image_duplicate" not in decision["reasons"]:
+                    decision["reasons"].append("image_duplicate")
+            qa.report_candidate(path, decision)
+            if decision["status"] != "accepted":
+                raise qa.ImageQAError(decision)
             row = {**metadata, "file": path.name, "sha256": sha, "original_sha256": raw_sha,
                    "perceptual_hash": phash, "size": list(image.size), "match_model": model, "image_embedding": embedding,
                    "scene_similarity": scores[0], "topic_similarity": scores[1],
                    "cover_score": round(scores[1] * 2 + scores[0] * .3 + quality * .3, 4),
                    "section": scene["section"], "scene": scene["subject"]}
+            row["image_qa"] = decision
+            row["is_cover"] = scene["is_cover"]
             write(path, rendered)
             write_json(path.with_suffix(".json"), row)
             self.memory.save()
@@ -227,6 +253,8 @@ class ImageIndex:
 
 
 def photo(scene, subject, path, index, *, experimental=False, verified_only=False):
+    if not scene.get("scene_card"):
+        raise Blocked("image_scene_card_required")
     if experimental:
         from .editorial_image_experiment import ranked_photo
 
@@ -250,6 +278,11 @@ def photo(scene, subject, path, index, *, experimental=False, verified_only=Fals
                     raw = request(row["asset_url"], row.pop("domains"), timeout=10)
                     row["availability"] = "downloaded"
                     return index.save(raw, row, scene, subject, path)
+                except qa.ImageQAError as exc:
+                    decision = exc.args[0]
+                    if decision["status"] == "provider_unavailable":
+                        raise Blocked("image_review_required_provider_unavailable") from None
+                    errors.append(decision["status"])
                 except (ValueError, OSError, ProviderError) as exc:
                     errors.append(str(exc) if isinstance(exc, ProviderError) else type(exc).__name__)
         except (ProviderError, ValueError, OSError) as exc:
@@ -259,35 +292,76 @@ def photo(scene, subject, path, index, *, experimental=False, verified_only=Fals
 
 
 def generated(scene, subject, path, index, task, article, channel):
+    if not scene.get("scene_card"):
+        raise Blocked("image_scene_card_required")
     warm_visual_matcher()
     style = ("Cinematic realistic urban mystery, restrained color grading and atmospheric lighting."
              if channel == "legends" else
              "Modern moderately stylized science editorial illustration with a coherent muted palette. "
              "Explanatory concept art with accurate geometry where applicable. Do not mimic documentary "
              "evidence, scientific measurements or labeled diagrams.")
-    for attempt in range(2):
-        if index.memory.time_left() < 150:
-            raise Blocked("production_deadline")
-        prompt = f"{scene['brief']} Depict {scene['subject']}. {style} Landscape. No text or watermark."
-        if attempt:
-            prompt += " Isolate the main subject in a clear composition with distinct foreground and background."
-        raw, params = index.memory.call(task, article, "klein", lambda: klein(prompt))
+    return generated_scene(scene, subject, path, index, task, article, channel, style)
+
+
+def generated_scene(scene, subject, path, index, task, article, channel, style):
+    card = scene["scene_card"]
+    base = f"{qa.visual_prompt(card)} {style} Landscape. No text or watermark."
+    prompt = base
+    for attempt in range(1, 4):
+        stem = path.parent / "image-qa" / path.stem / f"klein-{attempt}"
+        blob, checkpoint = stem.with_suffix(".candidate"), stem.with_suffix(".request.json")
+        saved = read_json(checkpoint)
+        if saved and saved.get("prompt") == prompt and blob.is_file() and digest(blob.read_bytes()) == saved["sha256"]:
+            raw, params = blob.read_bytes(), saved["parameters"]
+        else:
+            if index.memory.time_left() < 150:
+                raise Blocked("production_deadline")
+            if not qa.allocation(index.memory, article):
+                break
+            def create():
+                candidate, parameters = klein(prompt)
+                write(blob, candidate)
+                write_json(checkpoint, {"prompt": prompt, "parameters": parameters, "sha256": digest(candidate)})
+                return candidate, parameters
+
+            raw, params = index.memory.call(f"{task}.candidate-{attempt}", article, "klein", create)
         try:
             return index.save(raw, {"kind": "illustration", "source": "Cloudflare Workers AI",
-                                    "model": KLEIN, "prompt": prompt, "parameters": params,
+                                    "model": KLEIN, "prompt": prompt, "parameters": params, "generation": attempt,
                                     "rights_status": "rights_review_pending",
                                     "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
                                     "label": "ИИ-иллюстрация" if channel != "legends" else None},
                               scene, subject, path)
-        except (OSError, ValueError):
-            if attempt:
-                raise Blocked("generated_image_quality_or_match_failed") from None
-    raise AssertionError("unreachable image attempt")
+        except qa.ImageQAError as exc:
+            row = exc.args[0]
+            if row["status"] in {"needs_review", "provider_unavailable"}:
+                raise Blocked("image_review_required_" + row["status"]) from None
+            details = []
+            if row["absent"]:
+                details.append("Clearly show these missing items: " + ", ".join(row["absent"]))
+            if row["contradictions"]:
+                details.append("Exclude these conflicting items: " + ", ".join(row["contradictions"]))
+            if row["duplicate"]:
+                details.append("Use a distinct viewpoint and composition from other images.")
+            if not row["clip"]["passed"]:
+                details.append("Frame the setting and main subject prominently.")
+            prompt = base + " Corrections: " + ". ".join(details)
+        except (ValueError, OSError) as exc:
+            qa.report_candidate(path, {"image_sha256": digest(raw), "status": "rejected",
+                                       "schema": qa.SCHEMA, "scene_card": card, "generations": attempt,
+                                       "requests": attempt, "reasons": ["invalid_image_" + type(exc).__name__]})
+            prompt = base + " Ensure clean, readable, high-contrast framing."
+    if scene.get("query"):
+        return photo({**scene, "kind": "photo"}, subject, path, index, verified_only=True)
+    raise Blocked("image_review_required_no_verified_candidate")
 
 
 def select_cover(rows):
     populated = Counter(row["section"] for row in rows)
     eligible = [row for row in rows if row["section"] == 1 or populated[row["section"]] > 1]
+    if any("is_cover" in row for row in rows):
+        covers = [row for row in rows if row.get("is_cover") is True]
+        return covers[0]["file"] if len(covers) == 1 else None
     if not eligible:
         return None
     return max(eligible, key=lambda row: (row["cover_score"], row["sha256"]))["file"]

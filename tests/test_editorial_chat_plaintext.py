@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from src.editorial_memory import digest
+from tests.editorial_scene_fixtures import certify
 from src.editorial_providers import Blocked
 from src.editorial_chat_plaintext import (
     PRIVATE_REPO, approval, checked_day, cleanup, inputs, prune_directory, publish,
@@ -26,7 +27,8 @@ class PrivateChatReviewTests(unittest.TestCase):
         }
         payloads["Статус и проверки.json"] = json.dumps({
             "text_sha256": digest(payloads["Текст для SHA-256.txt"]),
-            "images": [{"file": "fixture.jpg", "sha256": digest(b"FAKE-IMAGE-TEST")}],
+            "images": [certify({"file": "fixture.jpg", "section": 1, "sha256": digest(b"FAKE-IMAGE-TEST")},
+                               "science-01", True, digest(payloads["Текст для SHA-256.txt"]))],
             "status": "partial_review_pending",
             "publication_authorized": False,
         }).encode()

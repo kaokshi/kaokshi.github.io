@@ -5,6 +5,7 @@ import json
 import re
 from urllib.parse import urlencode, urlsplit
 
+from . import editorial_scene_qa as scene_qa
 from .editorial_commons_images import search as commons_search
 from .editorial_memory import digest
 from .editorial_no_repeat import normalize
@@ -139,6 +140,8 @@ def commons_stills(scene, film):
 
 
 def stills(scene, subject, path, index, film, rights_registry, downloader=request):
+    if not scene.get("scene_card"):
+        raise Blocked("image_scene_card_required")
     record = rights_registry.get(film["qid"], {})
     assets = set()
     planned = set(normalize(scene["subject"]).split())
@@ -179,6 +182,9 @@ def stills(scene, subject, path, index, film, rights_registry, downloader=reques
                         "rights_status": "permission_verified" if permitted else "rights_review_pending"}
             metadata.pop("sha256", None)
             return index.save(raw, metadata, scene, subject, path)
+        except scene_qa.ImageQAError as exc:
+            if exc.args[0]["status"] == "provider_unavailable":
+                raise Blocked("image_review_required_provider_unavailable") from None
         except (ValueError, OSError, ProviderError):
             continue
     raise Blocked("film_scene_still_not_found")
