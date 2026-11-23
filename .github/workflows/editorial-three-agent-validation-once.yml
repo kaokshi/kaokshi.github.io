@@ -81,6 +81,11 @@ jobs:
       - name: Generate 1 science, 1 legends, 1 isolated cinema article with PROJECT AGENT ONLY
         id: generate
         timeout-minutes: 125
+        env:
+          # Encrypted-mode agent must never see private Git write credentials;
+          # delivery gets the secret only in its separate follow-up step.
+          EDITORIAL_PRIVATE_TOKEN: ''
+          EDITORIAL_PRIVATE_REPOSITORY: ''
         run: |
           umask 077
           TZ=Europe/Moscow date +%F > "$RUNNER_TEMP/editorial-day"
