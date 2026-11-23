@@ -80,7 +80,16 @@ def _metadata(title):
     if "creativecommons.org/" not in license_url:
         raise Blocked("science_commons_license_url_not_verified")
     url = row.get("thumburl") or row.get("url")
-    if not url or not url.startswith("https://upload.wikimedia.org/"):
+    # Some Commons versions return a different HTTPS image locator or omit
+    # iiurlwidth URLs. The *file page* and attribution were already verified.
+    # Resolve that exact verified file through Commons's official redirect,
+    # never through an arbitrary third-party image host.
+    from urllib.parse import urlsplit
+    if not isinstance(url, str) or urlsplit(url).scheme != "https" or (
+            urlsplit(url).hostname not in COMMONS_HOSTS):
+        url = ("https://commons.wikimedia.org/wiki/Special:Redirect/file/"
+               + quote(title.replace(" ", "_"), safe="") + "?width=1400")
+    if urlsplit(url).hostname not in COMMONS_HOSTS:
         raise Blocked("science_commons_image_url_invalid")
     page = "https://commons.wikimedia.org/wiki/File:" + quote(title.replace(" ", "_"), safe="()")
     return {"url": url, "title": title, "license": license_name,
