@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "owner_approved": true,
+  "repository": "kaokshi/zen-editorial-review",
+  "retention_days": 7,
+  "scope": "only_agent_generated_review_files",
+  "publication_authorized": false,
+  "git_history_may_retain_deleted_content": true
+}
