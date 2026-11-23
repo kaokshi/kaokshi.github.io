@@ -10,6 +10,11 @@ from email.utils import format_datetime
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
+if __package__:
+    from .editorial_length import check_html_length
+else:
+    from editorial_length import check_html_length
+
 BASE = Path(__file__).resolve().parents[1]
 OUT = BASE / "site"
 ARTICLES = BASE / "content" / "articles"
@@ -105,11 +110,8 @@ def read_posts(now):
         # Publication is still separately forbidden before an explicit project launch.
         if post.get("ai_editorial_escalation_unresolved") is True:
             continue
-        article_length = len(re.sub(r"\s", "", strip_tags(post.get("body_html", ""))))
-        exception_reason = post.get("length_exception_reason")
-        if not 3000 <= article_length <= 7000:
-            continue
-        if article_length > 6000 and (not isinstance(exception_reason, str) or not exception_reason.strip()):
+        _, length_issue = check_html_length(post.get("body_html", ""), post.get("length_exception_reason"))
+        if length_issue:
             continue
         images = post.get("image_files", [])
         if len(images) < 7 or any(not (BASE / f).is_file() for f in images):

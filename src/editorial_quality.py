@@ -14,10 +14,14 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-from editorial_ai_check import extract_text, ROOT, CONTENT
+if __package__:
+    from .editorial_ai_check import extract_text, ROOT, CONTENT
+    from .editorial_length import check_html_length
+else:
+    from editorial_ai_check import extract_text, ROOT, CONTENT
+    from editorial_length import check_html_length
 
 CHANNELS = {"cinema", "legends", "science"}
-MIN_CHARS = 3000
 STOPWORDS = {"который", "которая", "которые", "потому", "однако", "сейчас", "только", "после", "перед", "через", "когда", "потом", "снова", "можно", "очень", "этого", "также"}
 CLICHES = ("не просто", "на самом деле", "стоит отметить", "важно понимать",
            "в современном мире", "таким образом", "в заключение", "погрузимся в")
@@ -99,15 +103,15 @@ def inspect_article(path):
     article = json.loads(path.read_text(encoding="utf-8"))
     channel = article.get("channel")
     text = extract_text(article.get("body_html", ""))
-    chars = len(re.sub(r"\s", "", text))
+    chars, length_issue = check_html_length(article.get("body_html", ""), article.get("length_exception_reason"))
     imgs = article.get("image_files") or []
     sources = article.get("image_sources") or []
     photo_refs = [item.get("file") for item in sources if isinstance(item, dict)]
     problems = []
     if channel not in CHANNELS:
         problems.append("unknown_channel")
-    if chars < MIN_CHARS:
-        problems.append("short_article")
+    if length_issue:
+        problems.append("short_article" if length_issue == "short_text" else length_issue)
     if len(imgs) < 7:
         problems.append("fewer_than_seven_images")
     if len(set(imgs)) != len(imgs):

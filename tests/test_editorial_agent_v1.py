@@ -32,19 +32,21 @@ class AgentTests(unittest.TestCase):
         a,r=data()
         self.assertEqual(agent.route(a,r,substantive_issues=[])["decision"],
                          "high_index_without_verified_defect_owner_review")
-    def test_two_agents_then_chatgpt_then_owner(self):
-        a,r=data("Итог третьей редакции")
-        first=hashlib.sha256(b"first").hexdigest()
-        second=hashlib.sha256(b"second").hexdigest()
-        current=agent.article_digest(a)
-        history=[attempt("agent",first,second),attempt("agent",second,current)]
-        x=agent.route(a,r,history,["Факт расходится с источником"])
-        self.assertEqual(x["decision"],"chatgpt_one_revision_handoff")
-        next_a,next_r=data("Итог четвертой редакции")
-        next_hash=agent.article_digest(next_a)
-        history.append(attempt("assistant",current,next_hash))
-        x=agent.route(next_a,next_r,history,["Факт всё ещё неверен"])
-        self.assertEqual(x["decision"],"owner_review_final")
+    def test_five_agents_then_two_chatgpt_attempts_then_owner(self):
+        a, report = data("Текст после пяти исправлений")
+        digests = [hashlib.sha256(str(i).encode()).hexdigest() for i in range(5)]
+        digests.append(agent.article_digest(a))
+        history = [attempt("agent", before, after) for before, after in zip(digests, digests[1:])]
+        x = agent.route(a, report, history, ["Факт расходится с источником"])
+        self.assertEqual(x["decision"], "assistant_handoff_pending")
+        self.assertEqual(x["next_assistant_attempt"], 1)
+        for i in (1, 2):
+            next_a, next_report = data(f"Текст после исправления ChatGPT {i}")
+            history.append(attempt("assistant", agent.article_digest(a), agent.article_digest(next_a)))
+            a, report = next_a, next_report
+            x = agent.route(a, report, history, ["Факт всё ещё неверен"])
+            self.assertEqual(x["decision"], "assistant_handoff_pending" if i == 1 else "owner_review_final")
+
     def test_unmodified_attempt_rejected(self):
         a,r=data()
         h=agent.article_digest(a)

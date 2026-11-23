@@ -1,0 +1,34 @@
+[
+  {
+    "title": "Почему у кометы два хвоста и куда они направлены",
+    "angle": "Как нагрев ядра, солнечный ветер и давление излучения формируют разные хвосты. Отличай знаменитые фотографии комет от концептуальной визуализации движения частиц.",
+    "sources": [
+      "https://science.nasa.gov/solar-system/comets/",
+      "https://www.esa.int/Science_Exploration/Space_Science/Rosetta/Comets_-_An_Introduction"
+    ]
+  },
+  {
+    "title": "Как наблюдения за астероидами превращаются в прогноз сближения",
+    "angle": "Как астрономы находят движущуюся точку, уточняют орбиту и отличают расчёт вероятности от прогноза столкновения.",
+    "sources": [
+      "https://science.nasa.gov/solar-system/asteroids/",
+      "https://www.esa.int/Space_Safety/Planetary_Defence"
+    ]
+  },
+  {
+    "title": "Как капли воды строят каменные колонны в пещерах",
+    "angle": "Объясни путь воды сквозь породы, осаждение минералов и различия между сталактитами, сталагмитами и колоннами.",
+    "sources": [
+      "https://www.nps.gov/subjects/caves/speleothems.htm",
+      "https://www.usgs.gov/special-topics/water-science-school/science/groundwater-what-groundwater"
+    ]
+  },
+  {
+    "title": "Что происходит с кораллом, когда тёплая вода лишает его цвета",
+    "angle": "Объясни симбиоз, поведение полипа в условиях стресса и разницу между обесцвечиванием и гибелью.",
+    "sources": [
+      "https://oceanservice.noaa.gov/facts/coral_bleach.html",
+      "https://oceanservice.noaa.gov/education/tutorial_corals/coral05_distribution.html"
+    ]
+  }
+]

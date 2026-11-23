@@ -1,0 +1,402 @@
+name: Editorial production
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/editorial-production.yml'
+      - 'src/editorial_*.py'
+      - 'src/movie_autonomous_research.py'
+      - 'tests/test_editorial_*.py'
+      - 'config/*editorial*'
+      - 'config/ai_revision_policy.json'
+      - 'requirements-production.txt'
+  # GitHub Actions production schedules are intentionally not installed while
+  # the existing ChatGPT Automations run at 08:00 and 11:00 MSK.
+  # Add cron only in an explicit owner-approved rollout after deduplication.
+  workflow_dispatch:
+    inputs:
+      command:
+        type: choice
+        options: [health, daily, retry, review, status, audit, learn, quota, storage-test, cinema-test]
+        default: health
+      day:
+        description: Moscow date (YYYY-MM-DD)
+        default: ''
+        type: string
+      isolated_validation:
+        description: Run a manual end-to-end validation with a separate artifact namespace or private repository.
+        default: false
+        type: boolean
+      verify_quota:
+        description: Allow one bounded Groq quota probe on an unverified UTC day.
+        default: false
+        type: boolean
+      validate_cinema:
+        description: Include one test film in the encrypted isolated daily or retry run.
+        default: false
+        type: boolean
+      validate_klein:
+        description: Run one free real Klein image and semantic validation in isolated health mode.
+        default: false
+        type: boolean
+      validation_label:
+        description: Optional isolated test label for a new diagnostic cycle (lowercase letters and digits).
+        default: ''
+        type: string
+      validation_public_key:
+        description: Optional raw X25519 public key (64 hex characters) for the isolated test.
+        default: ''
+        type: string
+      validation_free_accounts_confirmed:
+        description: Owner has confirmed Groq and Cloudflare reject calls above their free quotas.
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  regression:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-quality.txt 'python-docx==1.2.0' 'cryptography>=44,<48'
+      - run: python -m unittest discover -s tests -v
+  production:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    concurrency:
+      group: editorial-production-private
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 165
+    env:
+      EDITORIAL_COMMAND: ${{ github.event_name == 'schedule' && 'scheduled' || inputs.command }}
+      EDITORIAL_DAY: ${{ inputs.day }}
+      EDITORIAL_ISOLATED_VALIDATION: ${{ inputs.isolated_validation && 'true' || 'false' }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      EDITORIAL_VALIDATE_CINEMA: ${{ inputs.validate_cinema && 'true' || 'false' }}
+      EDITORIAL_VALIDATE_KLEIN: ${{ inputs.isolated_validation && inputs.validate_klein && 'true' || 'false' }}
+      EDITORIAL_VALIDATION_LABEL: ${{ inputs.isolated_validation && inputs.validation_label || '' }}
+      EDITORIAL_TEST_PUBLIC_KEY: ${{ inputs.isolated_validation && inputs.validation_public_key || '' }}
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      EDITORIAL_TEST_FREE_ONLY: ${{ inputs.isolated_validation && inputs.validation_free_accounts_confirmed && 'true' || 'false' }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      TOKENIZERS_PARALLELISM: 'false'
+      OMP_NUM_THREADS: '2'
+      HF_HUB_DISABLE_XET: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements-editorial.txt
+            requirements-quality.txt
+            requirements-production.txt
+      - name: Resolve reviewed schedule and activation
+        env:
+          EDITORIAL_CRON: ${{ github.event.schedule }}
+        run: python -m src.editorial_schedule --github-env "$GITHUB_ENV"
+      - name: Resolve Moscow date and storage mode
+        if: env.EDITORIAL_EFFECTIVE_COMMAND != 'skip'
+        run: |
+          if [ "$EDITORIAL_VALIDATE_CINEMA" = true ] &&
+            { [ "$EDITORIAL_ISOLATED_VALIDATION" != true ] ||
+              { [ "$EDITORIAL_EFFECTIVE_COMMAND" != daily ] && [ "$EDITORIAL_EFFECTIVE_COMMAND" != retry ]; }; }; then
+            echo "::error::Cinema generation requires an encrypted isolated daily or retry run"
+            exit 2
+          fi
+          day="${EDITORIAL_DAY:-$(TZ=Europe/Moscow date +%F)}"
+          if ! [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::Invalid Moscow date"
+            exit 2
+          fi
+          repository="$EDITORIAL_DAILY_REPOSITORY"
+          suffix=
+          if [ "$EDITORIAL_ISOLATED_VALIDATION" = true ]; then
+            repository=""
+            suffix="validation-"
+            if [ "$EDITORIAL_VALIDATE_CINEMA" = true ]; then suffix="validation-cinema-"; fi
+            if [ -n "$EDITORIAL_VALIDATION_LABEL" ]; then
+              if ! [[ "$EDITORIAL_VALIDATION_LABEL" =~ ^[a-z0-9]{1,18}$ ]]; then
+                echo "::error::Invalid isolated validation label"
+                exit 2
+              fi
+              suffix="$suffix$EDITORIAL_VALIDATION_LABEL-"
+            fi
+          fi
+          if [ -n "$repository" ]; then
+            mode=private
+          else
+            mode=encrypted
+            echo 'EDITORIAL_PRIVATE_TOKEN=' >> "$GITHUB_ENV"
+          fi
+          {
+            echo "EDITORIAL_MOSCOW_DAY=$day"
+            echo "EDITORIAL_MODE=$mode"
+            echo "EDITORIAL_PRIVATE_REPOSITORY=$repository"
+            echo "EDITORIAL_NAMESPACE=$suffix"
+            echo "EDITORIAL_STATE_DIR=$RUNNER_TEMP/editorial-state"
+            echo "EDITORIAL_SEALED_DIR=$RUNNER_TEMP/editorial-sealed"
+            echo "EDITORIAL_QUOTA_DIR=$RUNNER_TEMP/editorial-quota"
+          } >> "$GITHUB_ENV"
+      - name: Install storage and review utilities
+        if: env.EDITORIAL_EFFECTIVE_COMMAND != 'skip'
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Verify production storage credentials and visibility before provider calls
+        if: env.EDITORIAL_MODE == 'private' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'review')
+        run: |
+          python - <<'PYTHON'
+          import os
+          from src.editorial_delivery import owner_key, state_key
+          assert os.environ.get("EDITORIAL_PRIVATE_TOKEN"), "storage_configuration_pending: missing private token"
+          assert state_key(), "storage_configuration_pending: missing state key"
+          owner_key()
+          PYTHON
+          visibility="$(GH_TOKEN="$EDITORIAL_PRIVATE_TOKEN" gh api "repos/$EDITORIAL_PRIVATE_REPOSITORY" --jq '.visibility')"
+          test "$visibility" = private
+      - name: Inspect shared Groq quota status without model calls
+        id: quota
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'quota'
+        run: python -m src.editorial_quota status
+      - name: Reserve the single bounded Groq quota probe
+        id: reserve_probe
+        if: >-
+          steps.quota.outputs.state == 'unverified' &&
+          env.EDITORIAL_GROQ_FREE_ONLY == 'true' &&
+          ((github.event_name == 'schedule' && env.EDITORIAL_EFFECTIVE_COMMAND == 'daily') ||
+          (inputs.isolated_validation && inputs.verify_quota && env.EDITORIAL_EFFECTIVE_COMMAND == 'quota'))
+        run: |
+          mkdir -p "$EDITORIAL_QUOTA_DIR"
+          history="$EDITORIAL_QUOTA_DIR/probe-history.json"
+          python -m src.editorial_groq_ledger collect --file "$history"
+          EDITORIAL_QUOTA_PROBE_HISTORY="$history" python -m src.editorial_quota check-probe
+          echo "EDITORIAL_QUOTA_PROBE_HISTORY=$history" >> "$GITHUB_ENV"
+          printf '%s\n' attempted > "$EDITORIAL_QUOTA_DIR/attempted.txt"
+      - name: Record the quota probe reservation before contacting Groq
+        id: upload_reservation
+        if: steps.reserve_probe.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-groq-attempted-${{ steps.quota.outputs.day }}
+          path: ${{ env.EDITORIAL_QUOTA_DIR }}/attempted.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Verify restored Groq capacity with one short free request
+        id: probe
+        if: steps.upload_reservation.outcome == 'success'
+        env:
+          EDITORIAL_QUOTA_PROBE_RESERVED: 'true'
+        run: python -m src.editorial_quota probe --markers "$EDITORIAL_QUOTA_DIR"
+      - name: Publish the successful quota marker
+        if: steps.probe.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-groq-ready-${{ steps.quota.outputs.day }}
+          path: ${{ env.EDITORIAL_QUOTA_DIR }}/ready.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Require observed free capacity before a full run
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
+        env:
+          QUOTA_STATE: ${{ steps.quota.outputs.state }}
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          if [ "$QUOTA_STATE" != ready ] && [ "$PROBE_OUTCOME" != success ]; then
+            echo "::error::Groq capacity is blocked or unverified. Full production was gated before provider calls."
+            exit 2
+          fi
+      - name: Restore sanitized Groq accounting
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
+        run: |
+          mkdir -p "$EDITORIAL_QUOTA_DIR"
+          ledger="$EDITORIAL_QUOTA_DIR/prior.json"
+          python -m src.editorial_groq_ledger collect --file "$ledger"
+          echo "EDITORIAL_GROQ_LEDGER=$ledger" >> "$GITHUB_ENV"
+          echo "EDITORIAL_GROQ_CURRENT_PROBE=$EDITORIAL_QUOTA_DIR/probe.json" >> "$GITHUB_ENV"
+      - name: Reserve the remaining Groq envelope before production
+        id: reserve_groq
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
+        run: python -m src.editorial_groq_ledger reserve --prior "$EDITORIAL_GROQ_LEDGER" --file "$EDITORIAL_QUOTA_DIR/reservation.json"
+      - name: Save the Groq envelope in case the runner is interrupted
+        if: steps.reserve_groq.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-groq-ledger-reservation-${{ steps.quota.outputs.day }}-${{ github.run_attempt }}
+          path: ${{ env.EDITORIAL_QUOTA_DIR }}/reservation.json
+          if-no-files-found: error
+          retention-days: 15
+      - name: Verify an existing cinema title and spoiler guard with public sources
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'cinema-test'
+        timeout-minutes: 3
+        run: |
+          python - <<'PYTHON'
+          import json
+          from src.editorial_brain import settings
+          from src.editorial_cinema import evidence
+          assert settings()["articles_per_channel"]["cinema"] == 0
+          check = evidence({"film_title": "Шоу Трумана", "original_title": "The Truman Show",
+                            "year": 1998, "qid": "Q214801", "format": "retelling", "spoilers": True,
+                            "sources": ["https://www.rogerebert.com/reviews/the-truman-show-1998",
+                                        "https://www.paramount.com/movies/the-truman-show",
+                                        "https://www.rottentomatoes.com/m/truman_show"]}, {})
+          assert check["film"]["imdb_id"] == "tt0120382"
+          assert check["film"]["title_ru"] == "Шоу Трумана"
+          assert check["format"] == "review" and check["spoilers"] is False
+          print(json.dumps({"status": "film_identity_verified", "qid": check["film"]["qid"],
+                            "released": check["film"]["release_dates"], "format": check["format"],
+                            "source_count": len(check["records"]), "cinema_scheduled": False,
+                            "film_still_rights": "not_verified", "publication_authorized": False}))
+          PYTHON
+      - name: Exercise package recovery in separate processes without providers
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'storage-test'
+        run: |
+          python -m pip install -r requirements-quality.txt 'python-docx==1.2.0'
+          python -m unittest discover -s tests -p test_editorial_storage.py -v
+          PYTHONPATH=. python tests/test_editorial_storage.py seal "$RUNNER_TEMP/editorial-storage-fixture"
+      - name: Upload encrypted synthetic fixture for an independent runner
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'storage-test'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-storage-fixture
+          path: |
+            ${{ runner.temp }}/editorial-storage-fixture/*.enc
+            ${{ runner.temp }}/editorial-storage-fixture/groq-synthetic.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Check the existing encrypted review at delivery time
+        if: env.EDITORIAL_MODE == 'encrypted' && env.EDITORIAL_EFFECTIVE_COMMAND == 'review'
+        run: python -m src.editorial_delivery reference --date "$EDITORIAL_MOSCOW_DAY"
+      - name: Restore the authenticated state checkpoint
+        if: env.EDITORIAL_MODE == 'encrypted' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'learn' || env.EDITORIAL_EFFECTIVE_COMMAND == 'audit' || env.EDITORIAL_EFFECTIVE_COMMAND == 'status')
+        run: |
+          umask 077
+          mkdir -p "$EDITORIAL_STATE_DIR"
+          if [ "$EDITORIAL_EFFECTIVE_COMMAND" = daily ] || [ "$EDITORIAL_EFFECTIVE_COMMAND" = retry ]; then
+            python -c 'from src.editorial_delivery import owner_key; owner_key()'
+          fi
+          python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" \
+            --date "$EDITORIAL_MOSCOW_DAY" --cycle-command "$EDITORIAL_EFFECTIVE_COMMAND"
+      - name: Install QA, document and visual tools
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_VALIDATE_KLEIN == 'true'
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
+          python -m pip install -r requirements-production.txt
+          if [ "$EDITORIAL_EFFECTIVE_COMMAND" != health ]; then
+            aiw-ru models install modernbert lightgbm transformer || echo "::warning::One or more local detectors could not be installed"
+          fi
+      - name: Execute editorial command
+        id: command
+        env:
+          EDITORIAL_LEARNING_PR_TOKEN: ${{ env.EDITORIAL_EFFECTIVE_COMMAND == 'learn' && secrets.EDITORIAL_LEARNING_PR_TOKEN || '' }}
+        timeout-minutes: 145
+        if: >-
+          env.EDITORIAL_EFFECTIVE_COMMAND != 'skip' && env.EDITORIAL_EFFECTIVE_COMMAND != 'quota' &&
+          env.EDITORIAL_EFFECTIVE_COMMAND != 'storage-test' && env.EDITORIAL_EFFECTIVE_COMMAND != 'cinema-test' &&
+          (env.EDITORIAL_MODE != 'encrypted' || env.EDITORIAL_EFFECTIVE_COMMAND != 'review')
+        run: |
+          args=("$EDITORIAL_EFFECTIVE_COMMAND" --date "$EDITORIAL_MOSCOW_DAY")
+          if [ "$EDITORIAL_VALIDATE_KLEIN" = true ]; then args+=(--validate-klein); fi
+          if [ "$EDITORIAL_EFFECTIVE_COMMAND" != health ]; then
+            args+=(--local-state "$EDITORIAL_STATE_DIR")
+            if [ "$EDITORIAL_MODE" = encrypted ]; then args+=(--encrypted-mode); fi
+          fi
+          if [ "$EDITORIAL_ISOLATED_VALIDATION" = true ] &&
+            { [ "$EDITORIAL_EFFECTIVE_COMMAND" = daily ] || [ "$EDITORIAL_EFFECTIVE_COMMAND" = retry ]; }; then
+            args+=(--validation-window 120)
+            if [ "$EDITORIAL_VALIDATE_CINEMA" = true ]; then args+=(--validate-cinema); fi
+          fi
+          python -m src.editorial_brain "${args[@]}"
+      - name: Record a confirmed daily Groq stop without publishing editorial data
+        if: always() && steps.command.outcome != 'skipped' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry')
+        run: python -m src.editorial_quota record --state "$EDITORIAL_STATE_DIR" --markers "$EDITORIAL_QUOTA_DIR"
+      - name: Publish the daily Groq stop marker
+        if: always() && steps.quota.outputs.day != '' && (steps.probe.outcome == 'failure' || steps.command.outcome == 'failure')
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-groq-blocked-${{ steps.quota.outputs.day }}
+          path: ${{ env.EDITORIAL_QUOTA_DIR }}/blocked.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Publish the unclassified Groq stop marker
+        if: always() && steps.quota.outputs.day != '' && (steps.probe.outcome == 'failure' || steps.command.outcome == 'failure')
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-groq-paused-${{ steps.quota.outputs.day }}
+          path: ${{ env.EDITORIAL_QUOTA_DIR }}/paused.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Settle the Groq envelope with sanitized measurements
+        id: settle_groq
+        if: always() && (steps.command.outcome != 'skipped' && steps.reserve_groq.outcome == 'success' || steps.probe.outcome == 'success' || steps.probe.outcome == 'failure')
+        run: |
+          if [ "${{ steps.reserve_groq.outcome }}" = success ] && [ ! -d "$EDITORIAL_STATE_DIR" ]; then
+            exit 1
+          fi
+          python -m src.editorial_groq_ledger finish --state "$EDITORIAL_STATE_DIR" \
+            --probe-file "$EDITORIAL_QUOTA_DIR/probe.json" --file "$EDITORIAL_QUOTA_DIR/usage.json"
+      - name: Store only sanitized Groq accounting
+        if: always() && steps.settle_groq.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-groq-ledger-usage-${{ steps.quota.outputs.day }}-${{ github.run_attempt }}
+          path: ${{ env.EDITORIAL_QUOTA_DIR }}/usage.json
+          if-no-files-found: error
+          retention-days: 15
+      - name: Seal new checkpoints and available review material
+        if: always() && steps.command.outcome != 'skipped' && env.EDITORIAL_MODE == 'encrypted' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'learn')
+        run: |
+          umask 077
+          python -m src.editorial_delivery seal --root "$EDITORIAL_STATE_DIR" \
+            --date "$EDITORIAL_MOSCOW_DAY" --output "$EDITORIAL_SEALED_DIR"
+      - name: Store only the encrypted state checkpoint
+        if: always() && env.EDITORIAL_MODE == 'encrypted' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'learn')
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-state-${{ env.EDITORIAL_NAMESPACE }}${{ env.EDITORIAL_MOSCOW_DAY }}
+          path: ${{ env.EDITORIAL_SEALED_DIR }}/checkpoint.enc
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Store only the encrypted owner review package
+        if: always() && env.EDITORIAL_MODE == 'encrypted' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry')
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-review-${{ env.EDITORIAL_NAMESPACE }}${{ env.EDITORIAL_MOSCOW_DAY }}
+          path: ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
+          if-no-files-found: ignore
+          retention-days: 14
+
+  storage-restore:
+    if: github.event_name == 'workflow_dispatch' && inputs.command == 'storage-test'
+    needs: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: editorial-storage-fixture
+          path: ${{ runner.temp }}/editorial-storage-fixture
+      - name: Restore package and settle synthetic Groq accounting on the second runner
+        run: |
+          python -m pip install -r requirements-quality.txt 'python-docx==1.2.0' 'cryptography>=44,<48'
+          PYTHONPATH=. python tests/test_editorial_storage.py restore "$RUNNER_TEMP/editorial-storage-fixture"

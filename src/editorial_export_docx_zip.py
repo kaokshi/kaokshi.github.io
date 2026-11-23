@@ -17,6 +17,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.style import WD_STYLE_TYPE
 
 from editorial_ai_check import extract_text
+from editorial_length import check_length
 
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT / "editorial-word-export"
@@ -35,8 +36,9 @@ def export_article(channel, slug, target):
     if a.get("publication_authorized") is not False or a.get("release_hold") is not True:
         raise ValueError("Refusing to export article with altered publication safety flags")
     body=extract_text(a.get("body_html",""))
-    if len(re.sub(r"\s","",body))<3000:
-        raise ValueError("Article less than 3000 non-space characters")
+    length, issue = check_length(body, a.get("length_exception_reason"))
+    if issue:
+        raise ValueError(f"{slug}: {issue} ({length})")
     doc=Document()
     sec=doc.sections[0]
     sec.top_margin=Cm(2.1); sec.bottom_margin=Cm(2.1)
@@ -73,7 +75,8 @@ def export_article(channel, slug, target):
     return {"slug":slug,"title":a["title"],"channel":channel,
             "source_sha256":hashlib.sha256(src.read_bytes()).hexdigest(),
             "docx_sha256":hashlib.sha256(target.read_bytes()).hexdigest(),
-            "character_count_without_spaces":len(re.sub(r"\s","",body)),
+            "character_count_without_spaces":length,
+            "length_exception_reason":a.get("length_exception_reason"),
             "paragraph_count":len(paragraphs),"images_count":len(a.get("image_files",[])),
             "publication_authorized":False}
 

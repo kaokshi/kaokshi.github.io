@@ -38,8 +38,8 @@
     "require_regression_tests": true,
     "rollback_on_quality_regression": true,
     "never_change_model_a_threshold_80_without_owner_approval": true,
-    "max_agent_edits_per_article": 2,
-    "max_chatgpt_edits_per_article": 1
+    "max_agent_edits_per_article": 5,
+    "max_chatgpt_edits_per_article": 2
   },
   "publication": {
     "cannot_change_publication_enabled": true,
@@ -47,5 +47,5 @@
     "cannot_unpause_cinema": true,
     "cannot_approve_articles_automatically": true
   },
-  "implementation_status": "configuration_and_guidelines_only_learner_runtime_not_implemented"
+  "implementation_status": "verified_case_analysis_and_holdout_comparison_available"
 }

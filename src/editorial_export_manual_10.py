@@ -16,6 +16,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm, Pt
 from editorial_ai_check import extract_text
+from editorial_length import check_length
 
 ROOT=Path(__file__).resolve().parents[1]
 OUTPUT=ROOT/"editorial-manual-launch-10"
@@ -53,9 +54,9 @@ def make_one(channel,slug,place):
         raise ValueError("Expected owner-review draft")
     paras=clean_paragraphs(a.get("body_html",""))
     body="\n".join(paras)
-    n=len(re.sub(r"\s","",body))
-    if n<3000:
-        raise ValueError(f"{slug} too short: {n}")
+    n, issue = check_length(body, a.get("length_exception_reason"))
+    if issue:
+        raise ValueError(f"{slug}: {issue} ({n})")
     doc=Document()
     sec=doc.sections[0]
     sec.top_margin=Cm(2.2)

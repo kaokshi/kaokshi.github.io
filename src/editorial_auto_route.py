@@ -12,7 +12,8 @@ import json
 from pathlib import Path
 import re
 
-from editorial_ai_check import ROOT, CONTENT, extract_text
+from editorial_ai_check import ROOT, CONTENT
+from editorial_length import check_html_length
 
 ACTIVE_CHANNELS = frozenset({"legends", "science"})
 PAUSED_CHANNELS = frozenset({"cinema"})
@@ -30,6 +31,8 @@ def digest_article(article):
     fields = {name: article.get(name) for name in (
         "channel", "slug", "title", "body_html", "image_files", "image_sources",
         "rights_basis", "claims", "source_docx")}
+    if "length_exception_reason" in article:
+        fields["length_exception_reason"] = article["length_exception_reason"]
     fields["image_content_sha256"] = {
         name: (hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
                if isinstance(name, str) and (ROOT / name).is_file() else "MISSING")
@@ -63,16 +66,9 @@ def decide(article, evidence):
         blockers.append("not_a_new_auto_release_candidate")
     if article.get("release_hold") is True or article.get("status") in {"rejected", "published"}:
         blockers.append("explicit_release_hold_or_terminal_status")
-    text = extract_text(article.get("body_html", ""))
-    length_no_whitespace = len(re.sub(r"\s", "", text))
-    if length_no_whitespace < 3000:
-        blockers.append("short_text")
-    elif length_no_whitespace > 7000:
-        blockers.append("long_text")
-    elif length_no_whitespace > 6000:
-        exception_reason = article.get("length_exception_reason")
-        if not isinstance(exception_reason, str) or not exception_reason.strip():
-            blockers.append("length_exception_reason_missing")
+    _, length_issue = check_html_length(article.get("body_html", ""), article.get("length_exception_reason"))
+    if length_issue:
+        blockers.append(length_issue)
     imgs = article.get("image_files") or []
     if len(imgs) < 7 or len(set(imgs)) != len(imgs):
         blockers.append("images_count_or_duplicate")

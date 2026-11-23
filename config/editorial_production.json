@@ -1,0 +1,82 @@
+{
+  "timezone": "Europe/Moscow",
+  "start": "08:00",
+  "production_stop": "10:48",
+  "delivery": "11:00",
+  "articles_per_channel": {
+    "legends": 1,
+    "science": 1,
+    "cinema": 0
+  },
+  "per_article_calls": {
+    "groq": 17,
+    "openrouter": 5,
+    "klein": 12
+  },
+  "daily_calls": {
+    "groq": 34,
+    "openrouter": 10,
+    "klein": 20
+  },
+  "minimum_images": 7,
+  "maximum_images": 8,
+  "learning_min_cases": 20,
+  "science_source_domains": [
+    "nasa.gov",
+    "noaa.gov",
+    "usgs.gov",
+    "esa.int",
+    "smithsonianmag.com",
+    "si.edu",
+    "whoi.edu",
+    "nsf.gov",
+    "esawebb.org",
+    "noirlab.edu",
+    "nature.com",
+    "pnas.org",
+    "nps.gov",
+    "usda.gov",
+    "metoffice.gov.uk",
+    "bas.ac.uk",
+    "nhm.ac.uk",
+    "nationalgeographic.org",
+    "amnh.org",
+    "eso.org",
+    "fws.gov",
+    "inaturalist.org",
+    "eol.org"
+  ],
+  "schedule": {
+    "enabled": false,
+    "owner_approved": false,
+    "successful_validation_run": null,
+    "owner_access_verified": false,
+    "legacy_automation_retired": false,
+    "private_repository": null,
+    "owner_public_key": null,
+    "groq_free_only": true,
+    "klein_free_only": true
+  },
+  "groq_quota_last_known_block": {
+    "utc_day": "2026-11-22",
+    "run_id": 45032321936
+  },
+  "groq_budget": {
+    "daily_tokens": 50000,
+    "repair_reserve_tokens": 15000,
+    "experimental_daily_tokens": 25000,
+    "target_daily_tokens": [
+      10000,
+      25000
+    ],
+    "organization_limits": {},
+    "forecast_tokens": {
+      "topics": 2100,
+      "draft": 4500,
+      "editorial-audit": 4300,
+      "image-plan": 2400,
+      "repair": 4700
+    },
+    "forecast_non_groq_seconds": 1200
+  }
+}
