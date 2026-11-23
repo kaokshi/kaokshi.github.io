@@ -96,7 +96,8 @@ class FreeQuotaSafetyTests(unittest.TestCase):
             self.assertEqual(url, "https://openrouter.ai/api/v1/key")
             return json.dumps({"data": {"free_model_daily_requests":
                                        {"remaining": 40, "limit": 50, "used": 10}}}).encode()
-        self.assertEqual(free_remaining(fetch=fake), 40)
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "local-fake-key"}):
+            self.assertEqual(free_remaining(fetch=fake), 40)
         self.assertEqual(require_free_envelope(36, reader=lambda: 40), 40)
         with self.assertRaisesRegex(Blocked, "insufficient"):
             require_free_envelope(36, reader=lambda: 30)
