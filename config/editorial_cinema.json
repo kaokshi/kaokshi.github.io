@@ -1,1 +1,81 @@
-{}
+{
+  "Q3404003": {
+    "film_title": "Prisoners",
+    "year": 2013,
+    "source_note": "Owner-authorized private film-still pilot only; public image pages are references, not licenses. Do not publish automatically.",
+    "stills": [
+      {
+        "year": 2013,
+        "original_title": "Prisoners",
+        "scene": "Keller Dover Hugh Jackman standing in dark jacket during office confrontation",
+        "source_page": "https://www.jpc.de/jpcng/movie/detail/-/art/prisoners/hnum/12236539",
+        "asset_url": "https://media1.jpc.de/image/w1155/misc/4/4061229534413.jpg",
+        "rights_status": "rights_review_pending",
+        "source": "JPC movie scene photograph"
+      },
+      {
+        "year": 2013,
+        "original_title": "Prisoners",
+        "scene": "Keller Dover Hugh Jackman outside car windshield in the winter suburb",
+        "source_page": "https://www.jpc.de/jpcng/movie/detail/-/art/prisoners/hnum/12236539",
+        "asset_url": "https://media1.jpc.de/image/w2400/misc/2/4061229534413.jpg",
+        "rights_status": "rights_review_pending",
+        "source": "JPC movie scene photograph"
+      },
+      {
+        "year": 2013,
+        "original_title": "Prisoners",
+        "scene": "Detective Loki Jake Gyllenhaal investigating a dark doorway with flashlight",
+        "source_page": "https://www.imdb.com/title/tt1392214/mediaviewer/rm3472743936/",
+        "asset_url": "https://m.media-amazon.com/images/M/MV5BMTk4MjM1MTgwNF5BMl5BanBnXkFtZTgwMzk0MjcxMDE%40._V1_FMjpg_UX1000_.jpg",
+        "rights_status": "rights_review_pending",
+        "source": "IMDb film still"
+      },
+      {
+        "year": 2013,
+        "original_title": "Prisoners",
+        "scene": "Keller Dover Hugh Jackman walking with family on quiet suburban street",
+        "source_page": "https://www.imdb.com/title/tt1392214/mediaviewer/rm4110278144/",
+        "asset_url": "https://m.media-amazon.com/images/M/MV5BMjMxMzkwMjYzOV5BMl5BanBnXkFtZTgwNzY0MjcxMDE%40._V1_.jpg",
+        "rights_status": "rights_review_pending",
+        "source": "IMDb film still"
+      },
+      {
+        "year": 2013,
+        "original_title": "Prisoners",
+        "scene": "Keller Dover Hugh Jackman confronting Alex Jones Paul Dano by police vehicle",
+        "source_page": "https://www.imdb.com/title/tt1392214/mediaviewer/rm3405635072/",
+        "asset_url": "https://m.media-amazon.com/images/M/MV5BMTQ0MzkyOTcyNl5BMl5BanBnXkFtZTgwOTk0MjcxMDE%40._V1_.jpg",
+        "rights_status": "rights_review_pending",
+        "source": "IMDb film still"
+      },
+      {
+        "year": 2013,
+        "original_title": "Prisoners",
+        "scene": "Detective Loki Jake Gyllenhaal interior scene with Franklin Birch Terrence Howard",
+        "source_page": "https://lisathatcher.com.au/2013/10/07/prisoners-denis-villeneuve-misses-his-one-shot-film-review/",
+        "asset_url": "https://lisathatcher.com.au/wp-content/uploads/2013/10/prisoners-movie-review-powerful-and-intense-thriller-header-2.jpg",
+        "rights_status": "rights_review_pending",
+        "source": "Film review scene photograph"
+      },
+      {
+        "year": 2013,
+        "original_title": "Prisoners",
+        "scene": "Alex Jones Paul Dano and Melissa Leo near police microphones outside town",
+        "source_page": "https://cinema.uol.com.br/album/2013/10/16/os-suspeitos-2013.htm",
+        "asset_url": "https://conteudo.imguol.com.br/c/entretenimento/2013/10/16/cena-de-os-suspeitos-de-denis-villeneuve-1381956797206_786x525.jpg",
+        "rights_status": "rights_review_pending",
+        "source": "UOL film scene photograph"
+      },
+      {
+        "year": 2013,
+        "original_title": "Prisoners",
+        "scene": "Hugh Jackman Keller Dover talking urgently on rainy suburban street with teenager",
+        "source_page": "https://www.allocine.fr/film/fichefilm-180887/photos/detail/?cmediafile=21038122",
+        "asset_url": "https://fr.web.img5.acsta.net/r_1280_720/pictures/210/381/21038122_20130909125616911.jpg",
+        "rights_status": "rights_review_pending",
+        "source": "AlloCine film still"
+      }
+    ]
+  }
+}
