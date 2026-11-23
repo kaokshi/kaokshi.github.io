@@ -131,7 +131,9 @@ class Article:
 
         def send(task, ceiling):
             if provider == "gemini":
-                callback = lambda: gemini_text(prompt, min(ceiling, 8192), response_json=validate is not None)
+                callback = lambda: gemini_text(prompt, min(ceiling, 8192),
+                                               response_json=validate is not None,
+                                               fallback_model=stage.endswith("-retry"))
             else:
                 callback = lambda: text_call(provider, prompt, ceiling)
             if provider == "groq":
@@ -162,7 +164,10 @@ class Article:
                     sleep(delay)
                 return send(task, tokens)
 
-        inputs = {"model": gemini_model() if provider == "gemini" else MODELS[provider], "prompt_version": PROMPT_VERSION,
+        inputs = {"model": ("gemini-3.6-flash" if provider == "gemini" and
+                            stage.endswith("-retry") and gemini_model() == "gemini-3.5-flash"
+                            else gemini_model()) if provider == "gemini" else MODELS[provider],
+                  "prompt_version": PROMPT_VERSION,
                   "prompt_sha256": digest(prompt), **(metadata or {})}
         if isinstance(self.memory, Memory) and self.memory.retry:
             with self.memory.lock:
@@ -593,9 +598,28 @@ class Article:
                 " с жирными заголовками и призыв подписаться в конце."
                 " Не выдумывай сцены фильма и цитаты. Верни только полный текст."
                 "\\nЧЕРНОВИК:\\n" + original_raw)
-            edited = self.model("full-edit", "gemini", edit_prompt,
-                                tokens=6200,
-                                metadata={"source_sha256": original["text_sha256"]})
+            try:
+                edited = self.model("full-edit", "gemini", edit_prompt,
+                                    tokens=6200,
+                                    metadata={"source_sha256": original["text_sha256"]})
+            except Blocked as exc:
+                # A 503 or timeout is a transient Google outage, not exhaustion
+                # of the account's daily calls. Retry once as a NEW saved task
+                # with a separately charged request to the direct 3.6 endpoint.
+                # Never repeat auth/quota/invalid-output failures automatically.
+                retryable = {"http_503_transient", "http_502_transient",
+                             "http_504_transient", "connection_timeout"}
+                if str(exc) not in retryable:
+                    raise
+                with self.memory.lock:
+                    used = sum(row["article"] == self.id and
+                               row["provider"] == "gemini" for row in self.memory.data["calls"])
+                if used >= self.config["per_article_calls"]["gemini"]:
+                    raise
+                edited = self.model("full-edit-retry", "gemini", edit_prompt,
+                                    tokens=6200,
+                                    metadata={"source_sha256": original["text_sha256"],
+                                              "fallback_reason": str(exc)})
             self.current = self.inspect(self.remember_version(edited), original)
             self.attempts.append({"role": "independent_edit", "provider": "gemini",
                                   "status": "accepted_after_qa",
