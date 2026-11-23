@@ -29,7 +29,12 @@ LICENSES = {
 
 def validate_plan(plan, section_count, channel, settings):
     blocks = plan.get("images")
-    if not isinstance(blocks, list) or not settings["minimum_images"] <= len(blocks) <= settings["maximum_images"]:
+    # Each story has one independent cover immediately after the contents, then
+    # exactly one distinct illustration immediately below every section heading.
+    if not 6 <= section_count <= 7:
+        raise Blocked("image_plan_layout_requires_six_or_seven_sections")
+    if (not isinstance(blocks, list) or len(blocks) != section_count + 1
+            or not settings["minimum_images"] <= len(blocks) <= settings["maximum_images"]):
         raise Blocked("image_plan_count")
     subject = plan.get("subject")
     if not isinstance(subject, str) or not subject.strip() or len(subject) > 240:
@@ -55,6 +60,9 @@ def validate_plan(plan, section_count, channel, settings):
         sections.add(section)
         descriptions.add(brief)
         kinds.add(kind)
+    distribution = Counter(row["section"] for row in blocks)
+    if distribution[1] != 2 or any(distribution[i] != 1 for i in range(2, section_count + 1)):
+        raise Blocked("image_plan_layout_distribution")
     if len(sections) != section_count or (channel == "science" and len(kinds) != 2):
         raise Blocked("image_plan_missing_section_or_medium")
 
