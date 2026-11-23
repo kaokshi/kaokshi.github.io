@@ -81,16 +81,24 @@ def cards_and_selections(base):
     return selected, pending
 
 
+def receipt_path(path):
+    return path.with_name(path.name + ".receipt.json") if path.suffix == ".json" else path.with_suffix(".json")
+
+
 def recover_or_call(memory, operation, provider, callback, path):
     if path.is_file():
-        return path.read_bytes()
+        receipt = read_json(receipt_path(path))
+        raw = path.read_bytes()
+        if not receipt or receipt.get("sha256") != digest(raw):
+            raise Blocked("final_repair_saved_response_sha_mismatch")
+        return raw
     if any(row["task"] == operation for row in memory.data["calls"]):
         raise Blocked("final_repair_previous_request_preserved_no_resend")
 
     def capture():
         raw, metadata = callback()
         write(path, raw)
-        write_json(path.with_suffix(".json"), {"sha256": digest(raw), **metadata})
+        write_json(receipt_path(path), {"sha256": digest(raw), **metadata})
         return raw, metadata
 
     raw, _ = memory.call(operation, "legends-01", provider, capture)
@@ -103,11 +111,13 @@ def run_repairs(base, sync, *, generate=False):
     config = settings()
     # Four different targets at most, once per target. Prior unresolved requests
     # live in their original checkpoints and are never replayed by this workflow.
-    config["daily_calls"].update(klein=min(config["daily_calls"]["klein"], 4), groq=1)
-    config["per_article_calls"].update(klein=min(config["per_article_calls"]["klein"], 4), groq=1)
+    prior_composition_collision = read_json(work / "groq-compositions.json") or {}
+    prior_groq = int(set(prior_composition_collision) == {"model", "sha256", "usage"})
+    config["daily_calls"].update(klein=min(config["daily_calls"]["klein"], 4), groq=1 + prior_groq)
+    config["per_article_calls"].update(klein=min(config["per_article_calls"]["klein"], 4), groq=1 + prior_groq)
     memory = Memory(work / "ledger", DAY, datetime.now(timezone.utc) + timedelta(minutes=24), config,
                     private_git=SimpleNamespace(checkpoint=lambda: sync("Persist historical repair reservation or receipt")))
-    descriptions = work / "groq-compositions.json"
+    descriptions = work / ("groq-compositions-recovered.json" if prior_groq else "groq-compositions.json")
     if generate and not descriptions.is_file():
         grouped = {slot: {"scene": card, "section": section} for (channel, slot), (card, section, _)
                    in pending.items() if channel == "legends-01"}
@@ -129,7 +139,8 @@ def run_repairs(base, sync, *, generate=False):
 
         # The raw response is stored separately from the reservation ledger and
         # restored from the same private branch on a subsequent workflow.
-        recover_or_call(memory, "historical-compositions-v1", "groq", compose, descriptions)
+        operation = "historical-composition-collision-recovery" if prior_groq else "historical-compositions-v1"
+        recover_or_call(memory, operation, "groq", compose, descriptions)
 
     compositions = read_json(descriptions) or {}
     all_hashes = [(key, *image_hashes(path)) for key, (path, _, _) in selected.items()]
