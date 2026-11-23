@@ -125,8 +125,12 @@ def run_repairs(base, sync, *, generate=False):
     selected, pending = cards_and_selections(base)
     work = base / WORK
     config = settings()
-    # Four different targets at most, once per target. Prior unresolved requests
-    # live in their original checkpoints and are never replayed by this workflow.
+    # Four first candidates and at most two independently confirmed corrections.
+    # Prior unresolved requests are never replayed by this workflow.
+    corrections_requested = {slot for (channel, slot), (_, _, entry) in pending.items()
+                             if channel == "legends-01" and entry.get("replacement")}
+    if not corrections_requested <= {"01", "08"}:
+        raise Blocked("historical_visual_correction_scope_invalid")
     prior_composition_collision = read_json(work / "groq-compositions.json") or {}
     prior_groq = int(set(prior_composition_collision) == {"model", "sha256", "usage"})
     # A 400 response to the old strict JSON API request permits a corrected
@@ -144,7 +148,8 @@ def run_repairs(base, sync, *, generate=False):
         and row["status"] == "failed" and row.get("error") == "connection_timeout" for row in prior_attempts)
     groq_limit = 1 + prior_groq + int(corrected_transport)
     for limits in (config["daily_calls"], config["per_article_calls"]):
-        limits.update(klein=min(limits["klein"], 4), groq=groq_limit, gemini=int(use_gemini), kilo=int(use_kilo))
+        limits.update(klein=min(limits["klein"], 4 + len(corrections_requested)),
+                      groq=groq_limit, gemini=int(use_gemini), kilo=int(use_kilo))
     memory = Memory(work / "ledger", DAY, datetime.now(timezone.utc) + timedelta(minutes=24), config,
                     private_git=SimpleNamespace(checkpoint=lambda: sync("Persist historical repair reservation or receipt")))
     descriptions = work / ("groq-compositions-recovered.json" if prior_groq else "groq-compositions.json")
@@ -208,12 +213,30 @@ def run_repairs(base, sync, *, generate=False):
         path = work / "candidates" / channel / f"{slot}.jpg"
         try:
             if channel == "legends-01":
+                operation = f"historical-standalone-v1-{slot}"
+                focus = ""
+                if slot in corrections_requested:
+                    review = entry["replacement"]
+                    prior_receipt = read_json(path.with_suffix(".json")) or {}
+                    if (not path.is_file() or review.get("confirmed_wrong") is not True
+                            or digest(path.read_bytes()) != prior_receipt.get("sha256")
+                            or prior_receipt["sha256"] != review.get("previous_image_sha256")
+                            or review.get("missing_requirement") not in card["must_have"]
+                            or not review.get("finding")):
+                        raise Blocked("historical_visual_correction_requires_confirmed_mismatch")
+                    path = work / "corrections" / channel / f"{slot}.jpg"
+                    operation = f"historical-confirmed-scene-correction-v1-{slot}"
+                    focus = ("The following required relationship must be immediately clear from the pixels: "
+                             + review["missing_requirement"] + ". Establish this relationship before the background. ")
                 if generate and not path.is_file():
                     scene = {**card, "visual_description": compositions[slot]}
-                    prompt = (qa.visual_prompt(scene) + " Cinematic urban legend illustration. "
+                    if focus:
+                        # The failed composition remains archived. Give the original
+                        # grounded requirements priority over its conflicting layout.
+                        scene["visual_description"] = "Use one grounded moment. " + focus
+                    prompt = (focus + qa.visual_prompt(scene) + " Cinematic urban legend illustration. "
                               "A single coherent, plausible scene in landscape format. No text or watermark.")
-                    recover_or_call(memory, f"historical-standalone-v1-{slot}", "klein",
-                                    lambda: klein(prompt), path)
+                    recover_or_call(memory, operation, "klein", lambda: klein(prompt), path)
                 if not path.is_file():
                     raise Blocked("final_repair_saved_legend_candidate_missing")
                 meta = {"kind": "illustration", "model": KLEIN, "rights_status": "rights_review_pending"}
