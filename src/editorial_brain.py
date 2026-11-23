@@ -245,6 +245,33 @@ class Article:
         existing = self.memory.data["articles"].get(self.id, {})
         if existing.get("title"):
             return existing["topic_plan"]
+        if (self.channel == "cinema" and groq_gemini_klein_pilot()
+                and os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true"):
+            # A validated factual film selection replaces wasteful trial-and-error
+            # theme calls. All actual article prose is still produced only by Groq.
+            selected = {
+                "title": "«Пленницы» (2013): обзор без спойлеров",
+                "angle": "Как тревожная семейная история раскрывает конфликт "
+                         "между отчаянием, законом и моральным выбором",
+                "film_title": "Пленницы", "year": 2013, "format": "review",
+                "spoilers": False,
+                "sources": [
+                    "https://www.rottentomatoes.com/m/prisoners_2013",
+                    "https://www.rogerebert.com/reviews/prisoners-2013",
+                    "https://www.theguardian.com/film/2013/sep/26/prisoners-review",
+                ],
+            }
+            if topic_duplicate_reason(self.channel, selected["title"], history):
+                raise Blocked("unique_topic_or_verifiable_sources_missing")
+            checked = self.task(
+                "film-evidence", "wikidata-and-film-sources",
+                {"plan": selected, "research_version": "independent-reviews-20261123"},
+                lambda _: cinema.evidence(selected, self.cinema_registry),
+                minimum_seconds=125)
+            topic = {**selected, **checked}
+            self.memory.article(self.id, title=selected["title"],
+                                topic_plan=topic, channel=self.channel)
+            return topic
         if self.channel == "science":
             seed = self.source_seed(history)
             if seed:
@@ -1203,6 +1230,12 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
                                    "groq": 6, "gemini": 4,
                                    "klein": 16, "openrouter": 0,
                                    "ovh": 0, "ovh-gptoss": 0, "kilo": 0}}
+            if os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true":
+                cfg["articles_per_channel"] = {"cinema": 1}
+                cfg["per_article_calls"]["groq"] = 2
+                cfg["daily_calls"]["groq"] = 2
+                cfg["daily_calls"]["gemini"] = 2
+                cfg["daily_calls"]["klein"] = 8
         else:
             if without_openrouter():
                 raise Blocked("openrouter_required_after_ovh_removal")
