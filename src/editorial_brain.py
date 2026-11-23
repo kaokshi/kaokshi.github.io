@@ -611,31 +611,52 @@ class Article:
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
         if groq_gemini_klein_pilot():
-            # Economical pilot: one Groq draft, one Gemini full edit and one
-            # independent Gemini QA. Save the original before editing to ensure
-            # a failed API request never destroys the draft or spends it again.
+            # The same metered Gemini response edits *and* audits the text.
+            # This avoids consuming one separate model call for a redundant
+            # second pass. All cited evidence is checked again by local QA.
             original_raw = self.model("draft", "groq", brief, tokens=3000,
                                       metadata={"topic": self.title})
             original = self.remember_version(original_raw)
             self.current = original
             self.memory.article(self.id, draft_provider="groq",
                                 independent_editor_provider="gemini")
+            audit_context = source_context(self.records, chars_per_source=2600)
             edit_prompt = (
-                brief + "\nТы редактор. Исправь композицию, логику и язык."
-                " Сохрани все достоверные факты, сюжет и сильное вступление."
-                " Оставь 3000–6000 знаков без пробелов, шесть или семь разделов"
-                " с жирными заголовками и призыв подписаться в конце."
-                " Не выдумывай сцены фильма и цитаты. Верни только полный текст."
-                "\nЧЕРНОВИК:\n" + original_raw)
+                brief + "\nТы независимый редактор и фактчекер. "
+                "Верни ОДИН JSON-объект с ключами article, issues, claims. "
+                "article — полный связный исправленный текст на русском, 3000–6000 "
+                "символов без пробелов, 6 или 7 разделов с жирными заголовками, "
+                "без пометок для изображений и с финальным приглашением подписаться. "
+                "issues — массив конкретных оставшихся ошибок; если ошибок нет, []. "
+                "claims — для кино список проверяемых фактов именно из article. "
+                "Каждый элемент: claim (дословная фраза статьи), source (S1, S2...), "
+                "quote (точный отрывок источника), verdict (supported или unsupported). "
+                "Не придумывай цитаты, сцены, источники и персонажей; если текст "
+                "невозможно подтвердить, убери утверждение либо отметь unsupported. "
+                "Для вымышленной мистической истории claims оставь пустым массивом. "
+                "Сохраняй характерные детали автора, избегай шаблонов, повторов и "
+                "канцелярита. Не вставляй текст вне JSON. "
+                "\nДОКУМЕНТЫ ДЛЯ ПРОВЕРКИ:\n" + audit_context +
+                "\nИСХОДНЫЙ ЧЕРНОВИК:\n" + original_raw)
+            def check_edit(result):
+                article = result.get("article")
+                if not isinstance(article, str) or not article.strip():
+                    raise Blocked("gemini_combined_article_missing")
+                if not isinstance(result.get("issues"), list) or not isinstance(
+                        result.get("claims"), list):
+                    raise Blocked("gemini_combined_audit_missing")
+                if any(not isinstance(x, str) for x in result["issues"]):
+                    raise Blocked("gemini_combined_issues_invalid")
+                parsed = parse_article(article)
+                if not 6 <= len(parsed["sections"]) <= 7:
+                    raise Blocked("gemini_combined_section_count_invalid")
             try:
-                edited = self.model("full-edit", "gemini", edit_prompt,
-                                    tokens=6200,
-                                    metadata={"source_sha256": original["text_sha256"]})
+                verdict = self.model("full-edit-with-audit", "gemini", edit_prompt,
+                                     validate=check_edit, tokens=6800,
+                                     metadata={"source_sha256": original["text_sha256"]})
             except Blocked as exc:
-                # A 503 or timeout is a transient Google outage, not exhaustion
-                # of the account's daily calls. Retry once as a NEW saved task
-                # with a separately charged request to the direct 3.6 endpoint.
-                # Never repeat auth/quota/invalid-output failures automatically.
+                # Retry once, as a separately charged task, only for transient
+                # failures. A second request cannot circumvent quotas or auth.
                 retryable = {"http_503_transient", "http_502_transient",
                              "http_504_transient", "connection_timeout", "connection_failed"}
                 if str(exc) not in retryable:
@@ -645,13 +666,18 @@ class Article:
                                row["provider"] == "gemini" for row in self.memory.data["calls"])
                 if used >= self.config["per_article_calls"]["gemini"]:
                     raise
-                edited = self.model("full-edit-retry", "gemini", edit_prompt,
-                                    tokens=6200,
-                                    metadata={"source_sha256": original["text_sha256"],
-                                              "fallback_reason": str(exc)})
-            self.current = self.inspect(self.remember_version(edited), original)
+                sleep(min(8, 2 ** used))
+                verdict = self.model("full-edit-with-audit-retry", "gemini",
+                                     edit_prompt, validate=check_edit, tokens=6800,
+                                     metadata={"source_sha256": original["text_sha256"],
+                                               "fallback_reason": str(exc)})
+            edited = verdict["article"]
+            self.current = self.inspect(self.remember_version(edited), original,
+                                        submitted_audit=verdict)
             self.attempts.append({"role": "independent_edit", "provider": "gemini",
-                                  "status": "accepted_after_qa",
+                                  "status": "qa_completed" if
+                                  self.current["report"]["editorial"]["status"] == "completed"
+                                  else "qa_incomplete",
                                   "before": original["text_sha256"],
                                   "after": self.current["text_sha256"]})
             return self.current
