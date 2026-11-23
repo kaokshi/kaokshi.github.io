@@ -33,6 +33,21 @@ class RouterAIAdapterTests(unittest.TestCase):
         self.assertEqual(request_body["max_tokens"], 650)
         self.assertNotIn("private-not-for-logs", json.dumps(result))
 
+    def test_deepseek_v4_pro_is_explicitly_selected_for_review(self):
+        data = {"choices": [{
+            "finish_reason": "stop",
+            "message": {"content": "Отредактированный материал"},
+        }], "usage": {"prompt_tokens": 90, "completion_tokens": 30}}
+        with patch.dict(os.environ, {
+            "ROUTERAI_API_KEY": "test-secret",
+            "EDITORIAL_ROUTERAI_EDITOR_ALLOWED": "true",
+        }), patch.object(providers, "request", return_value=json.dumps(data).encode()) as http:
+            output = providers.text_call("routerai_review", "Исправь черновик", 520)
+        self.assertEqual(output["model"], "deepseek/deepseek-v4-pro-0813")
+        body = json.loads(http.call_args.kwargs["data"])
+        self.assertEqual(body["model"], "deepseek/deepseek-v4-pro-0813")
+        self.assertEqual(http.call_args.args[0], "https://routerai.ru/api/v1/chat/completions")
+
     def test_incomplete_response_never_counts_as_complete(self):
         data = {"choices": [
             {"finish_reason": "length", "message": {"content": "Неполный текст"}}]}
