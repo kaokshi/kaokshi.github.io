@@ -13,6 +13,7 @@ from .editorial_providers import Blocked, ProviderError, parse_json, request
 KILO_ID = "kilo-auto/free"
 KILO_URL = "https://ai-gateway.kilo.ai/api/v1"
 OVH_ID = "qwen3-6-35b-a3b"
+OVH_MODEL = "Qwen3.6-35B-A3B"
 OVH_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
 OVH_CATALOG_URL = "https://catalog.endpoints.ai.ovh.net/rest/v1/models_v2"
 _ovh_lock = Lock()
@@ -93,7 +94,7 @@ def generate(provider, prompt, max_tokens=3000):
     if provider == "kilo":
         base, host, model = KILO_URL, "ai-gateway.kilo.ai", KILO_ID
     elif provider == "ovh":
-        base, host, model = OVH_URL, "oai.endpoints.kepler.ai.cloud.ovh.net", OVH_ID
+        base, host, model = OVH_URL, "oai.endpoints.kepler.ai.cloud.ovh.net", OVH_MODEL
     else:
         raise Blocked("invalid_alt_provider")
     if type(max_tokens) is not int or not 1 <= max_tokens <= 7900:
