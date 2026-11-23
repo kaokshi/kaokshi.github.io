@@ -204,13 +204,16 @@ class Article:
                        f"Публичные сигналы интереса: {json.dumps(signals, ensure_ascii=False)}. "
                        f"Недавние релизы: {json.dumps(releases, ensure_ascii=False)}.")
         for shift in range(2):
-            if shift:
+            if shift and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") != "true":
                 with self.memory.lock:
                     projection = groq_plan(self.memory)
                 if (projection["groq_usage"]["accounted_tokens"] >= self.config["groq_budget"]["target_daily_tokens"][1]
                         or not all(projection[key] for key in ("fits_editorial_budget",
                             "fits_observed_organization_headroom", "deadline_estimate_fits"))):
                     raise Blocked("groq_optional_topic_retry_deferred")
+            # When Groq was preflight-blocked and the zero-price OpenRouter
+            # route was separately verified, only the latter's real request
+            # envelope and the common deadline may gate this retry.
             def is_valid(plan):
                 if not isinstance(plan.get("topics"), list):
                     raise Blocked("topic_list_missing")
