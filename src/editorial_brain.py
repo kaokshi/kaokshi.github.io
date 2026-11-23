@@ -116,11 +116,10 @@ class Article:
                     raise
                 return send(task, tokens)
 
-        try:
-            result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
-                                               "prompt_sha256": digest(prompt), **(metadata or {})},
-                               execute, minimum_seconds=130,
-                               validator=(lambda response: validate(json_reply(response))) if validate else None)
+        result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
+                                            "prompt_sha256": digest(prompt), **(metadata or {})},
+                           execute, minimum_seconds=130,
+                           validator=(lambda response: validate(json_reply(response))) if validate else None)
         return json_reply(result) if validate else result["text"]
 
     def source_seed(self, history):
