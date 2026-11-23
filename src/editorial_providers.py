@@ -15,7 +15,8 @@ from .editorial_gemini_guard import MODEL as GEMINI
 GROQ = "openai/gpt-oss-120b"
 KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
 ROUTERAI_SONNET = "anthropic/claude-sonnet-5.5"
-MODELS = {"groq": GROQ, "gemini": GEMINI, "routerai": ROUTERAI_SONNET, "klein": KLEIN}
+ROUTERAI_REVIEWER = "deepseek/deepseek-v3.2"
+MODELS = {"groq": GROQ, "gemini": GEMINI, "routerai": ROUTERAI_SONNET, "routerai_review": ROUTERAI_REVIEWER, "klein": KLEIN}
 USER_AGENT = "ZenEditorial/1.0 (+https://github.com/kaokshi/kaokshi.github.io)"
 
 
@@ -139,8 +140,8 @@ def authorization(name):
 def text_call(provider, prompt, max_tokens=7500):
     if provider == "gemini":
         return gemini_call(prompt, max_tokens)
-    if provider == "routerai":
-        return routerai_call(prompt, max_tokens)
+    if provider in ("routerai", "routerai_review"):
+        return routerai_call(prompt, max_tokens, provider=provider)
     if provider == "groq":
         if os.environ.get("EDITORIAL_GROQ_FREE_ONLY") != "true":
             raise ProviderError("groq_free_account_unconfirmed", stop=True)
@@ -194,14 +195,16 @@ def text_call(provider, prompt, max_tokens=7500):
 
 
 
-def routerai_call(prompt, max_tokens=3700):
-    """Claude Sonnet via RouterAI, explicitly admission-gated (not Anthropic direct)."""
+def routerai_call(prompt, max_tokens=3700, *, provider="routerai"):
+    """Fixed-model RouterAI calls, with explicit preflight. No paid fallback."""
+    if provider not in ("routerai", "routerai_review"):
+        raise ProviderError("routerai_provider_not_allowlisted", stop=True)
     if os.environ.get("EDITORIAL_ROUTERAI_EDITOR_ALLOWED") != "true":
         raise ProviderError("routerai_spend_preflight_required", stop=True)
     if type(max_tokens) is not int or max_tokens < 1 or max_tokens > 4500:
         raise ProviderError("routerai_output_token_limit_invalid", stop=True)
     payload = {
-        "model": ROUTERAI_SONNET,
+        "model": MODELS[provider],
         "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": (
@@ -237,7 +240,7 @@ def routerai_call(prompt, max_tokens=3700):
         raise ProviderError("routerai_empty_visible_content", stop=True)
     usage = response.get("usage")
     usage = {k: v for k, v in usage.items() if type(v) is int and v >= 0} if isinstance(usage, dict) else {}
-    return {"text": content, "model": ROUTERAI_SONNET, "usage": usage}
+    return {"text": content, "model": MODELS[provider], "usage": usage}
 
 def gemini_call(prompt, max_tokens=3700):
     """Generate only with explicit verified-free/editor preflight; no paid fallback."""
