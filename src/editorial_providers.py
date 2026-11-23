@@ -16,7 +16,8 @@ GROQ = "openai/gpt-oss-120b"
 KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
 ROUTERAI_SONNET = "anthropic/claude-sonnet-5.5"
 ROUTERAI_REVIEWER = "deepseek/deepseek-v4-pro-0813"
-MODELS = {"groq": GROQ, "gemini": GEMINI, "routerai": ROUTERAI_SONNET, "routerai_review": ROUTERAI_REVIEWER, "klein": KLEIN}
+ROUTERAI_BRAIN = "qwen/qwen3.6-plus"
+MODELS = {"groq": GROQ, "gemini": GEMINI, "routerai": ROUTERAI_SONNET, "routerai_review": ROUTERAI_REVIEWER, "routerai_brain": ROUTERAI_BRAIN, "klein": KLEIN}
 USER_AGENT = "ZenEditorial/1.0 (+https://github.com/kaokshi/kaokshi.github.io)"
 
 
@@ -140,7 +141,7 @@ def authorization(name):
 def text_call(provider, prompt, max_tokens=7500):
     if provider == "gemini":
         return gemini_call(prompt, max_tokens)
-    if provider in ("routerai", "routerai_review"):
+    if provider in ("routerai", "routerai_review", "routerai_brain"):
         return routerai_call(prompt, max_tokens, provider=provider)
     if provider == "groq":
         if os.environ.get("EDITORIAL_GROQ_FREE_ONLY") != "true":
@@ -197,7 +198,7 @@ def text_call(provider, prompt, max_tokens=7500):
 
 def routerai_call(prompt, max_tokens=3700, *, provider="routerai"):
     """Fixed-model RouterAI calls, with explicit preflight. No paid fallback."""
-    if provider not in ("routerai", "routerai_review"):
+    if provider not in ("routerai", "routerai_review", "routerai_brain"):
         raise ProviderError("routerai_provider_not_allowlisted", stop=True)
     if os.environ.get("EDITORIAL_ROUTERAI_EDITOR_ALLOWED") != "true":
         raise ProviderError("routerai_spend_preflight_required", stop=True)
