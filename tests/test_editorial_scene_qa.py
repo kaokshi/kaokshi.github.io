@@ -1,5 +1,6 @@
 """Synthetic fixture tests for the fail-closed editorial vision route."""
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,7 +15,7 @@ from src import editorial_scene_qa as qa
 from src.editorial_chat_plaintext import push_private_main
 from src.editorial_images import ImageIndex, generated, generated_scene, select_cover
 from src.editorial_offline_review_pack import require_audited_bundle
-from src.editorial_memory import digest, json_bytes
+from src.editorial_memory import Memory, StorageError, digest, json_bytes
 from src.editorial_providers import Blocked
 
 SOURCE = "A maintenance room held a steel lever and a switch."
@@ -192,6 +193,38 @@ class SceneTests(unittest.TestCase):
             self.assertEqual(generated_scene(scene, "theme", path, chooser, "task", "a", "legends", "style"), "saved")
         self.assertEqual(len(calls), 2)
         self.assertEqual(qa.allocation(memory, "a"), 0)
+
+    def test_saved_provider_bytes_survive_checkpoint_failure_and_restart(self):
+        cfg = {"daily_calls": {"klein": 1}, "per_article_calls": {"klein": 1}}
+        stored, recovered = [], []
+
+        def failing_store():
+            stored.append(1)
+            if len(stored) == 2:
+                raise StorageError("fixture_git_timeout_after_provider_response")
+
+        with TemporaryDirectory() as folder, patch("src.editorial_images.klein",
+                                                  return_value=(b"fixture image bytes", {})) as provider:
+            root = Path(folder)
+            deadline = datetime.now(timezone.utc) + timedelta(minutes=10)
+            memory = Memory(root, "2026-11-23", deadline, cfg, SimpleNamespace(checkpoint=failing_store))
+            scene = {"scene_card": card()}
+            path = memory.folder / "synthetic-01" / "images" / "candidate.jpg"
+            index = SimpleNamespace(memory=memory, save=lambda raw, *_: recovered.append(raw))
+            with self.assertRaisesRegex(StorageError, "timeout_after_provider_response"):
+                generated_scene(scene, "subject", path, index, "task", "synthetic-01", "legends", "style")
+            index.memory = Memory(root, "2026-11-23", deadline, cfg)
+            generated_scene(scene, "subject", path, index, "task", "synthetic-01", "legends", "style")
+            provider.assert_called_once()
+            self.assertEqual(recovered, [b"fixture image bytes"])
+            self.assertEqual(index.memory.data["calls"][0]["status"], "responded")
+
+    def test_bad_freeform_description_cannot_override_targeted_answers(self):
+        def assess(*_):
+            return {"findings": vision("present", "present", "absent")(card(), None)["findings"],
+                    "models": {"blip": {"observations": {"place": "an incorrect free-form caption"}}}}
+        result = qa.judge(card(), object(), "image", CLIP, vision=assess)
+        self.assertEqual(result["status"], "accepted")
 
     def test_klein_does_not_generate_again_after_vision_failure(self):
         memory = SimpleNamespace(lock=RLock(), time_left=lambda: 500,

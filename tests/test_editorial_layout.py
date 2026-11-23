@@ -12,7 +12,7 @@ from PIL import Image
 from src.editorial_images import validate_plan
 from src.editorial_layout import arrange, layout_issues
 from src.editorial_memory import digest
-from src.editorial_package import package
+from src.editorial_package import final_visual_gate, package
 from src.editorial_providers import Blocked
 from tests.editorial_scene_fixtures import certify
 from src.editorial_scene_qa import section_text
@@ -156,6 +156,34 @@ class LayoutTests(unittest.TestCase):
             html = (folder / "Статья.html").read_text(encoding="utf-8")
             self.assertIn("https://creativecommons.org/licenses/by/4.0/", html)
             self.assertIn('href="https://dzen.ru/sciencebox"', html)
+
+    def test_final_gate_rechecks_current_sections_local_files_and_html(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            source, images = image_fixture(root)
+            article = article_six()
+            text_sha = digest(canonical(article))
+            for row in images:
+                certify(row, "legends-01", row["file"] == "picture-2.jpg", text_sha,
+                        section_text(article["sections"][row["section"] - 1]))
+            report = {"article": article, "text_sha256": text_sha, "facts": {"evidence": []}}
+            folder = root / "legends-01"
+            ready = {"status": "rights_review_pending"}
+            for _ in range(2):
+                package(folder, "Synthetic article", [], report, images, source, ready)
+            files = lambda name: (source / name).read_bytes()
+            html, docx = ((folder / name).read_bytes() for name in ("Статья.html", "Статья.docx"))
+            final_visual_gate(article, images, text_sha, folder.name, files, encoded=(html, docx))
+            html = html.replace(b'images/picture-2.jpg', b'https://old.example/expired.jpg')
+            with self.assertRaisesRegex(Blocked, "image_placement_mismatch"):
+                final_visual_gate(article, images, text_sha, folder.name, files, encoded=(html, docx))
+            asset = source / "picture-2.jpg"
+            asset.unlink()
+            with self.assertRaisesRegex(Blocked, "file_missing_or_invalid"):
+                final_visual_gate(article, images, text_sha, folder.name, files)
+            article["sections"][0]["paragraphs"].append("Изменение текста раздела.")
+            with self.assertRaisesRegex(Blocked, "stale_image_needs_recheck"):
+                final_visual_gate(article, images, digest(canonical(article)), folder.name, files)
 
     def test_intro_is_valid_before_first_heading(self):
         raw = ("Вступительный абзац.\n\n" +
