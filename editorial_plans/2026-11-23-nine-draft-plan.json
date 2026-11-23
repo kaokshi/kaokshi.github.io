@@ -1,0 +1,115 @@
+{
+  "date": "2026-11-23",
+  "branch": "feature/editorial-drafts-20261123",
+  "state": "PLANNING_ONLY_NOT_READY",
+  "publication_allowed": false,
+  "policy": {
+    "channels": [
+      "legends",
+      "science",
+      "cinema"
+    ],
+    "articles_per_channel": 3,
+    "characters_without_spaces": {
+      "min": 3000,
+      "max": 6000
+    },
+    "images_per_article": "7-8",
+    "model_a": "(ModernBERT + LightGBM + AIW-RU BERT)/3",
+    "review_if_strictly_above": 85,
+    "ai_accent": "independent",
+    "rubert": "replaced",
+    "ai_detection": "not_run",
+    "editorial_checks": "not_run",
+    "image_rights": "unverified",
+    "escalation": "NOT_CONNECTED"
+  },
+  "topics": [
+    {
+      "channel": "legends",
+      "slug": "night-intercom",
+      "title": "Домофон, который звонил в пустую квартиру",
+      "angle": "В доме после расселения остаётся единственная рабочая кнопка, и каждый ночной вызов сообщает деталь, известную лишь жильцам",
+      "fiction": true
+    },
+    {
+      "channel": "legends",
+      "slug": "river-steps",
+      "title": "Ступени под рекой",
+      "angle": "После обмеления реки появляются ступени, ведущие к закрытому входу, а на них лежат вещи людей, ещё не пропавших",
+      "fiction": true
+    },
+    {
+      "channel": "legends",
+      "slug": "lost-and-found",
+      "title": "Бюро находок на последней станции",
+      "angle": "Ночной сотрудник метро получает забытые вещи с датами завтрашнего дня и пытается предотвратить исчезновение пассажира",
+      "fiction": true
+    },
+    {
+      "channel": "science",
+      "slug": "ice-bubbles",
+      "title": "Почему пузырьки застывают во льду слоями",
+      "angle": "Растворённые газы, фронт кристаллизации, температурные условия и различие между озёрным льдом и ледниковым",
+      "sources_to_verify": [
+        "USGS Water Science School",
+        "NSIDC"
+      ],
+      "fact_check": "PENDING"
+    },
+    {
+      "channel": "science",
+      "slug": "cloud-weight",
+      "title": "Сколько весит облако и почему оно не падает",
+      "angle": "Масса водяных капель, объём кучевого облака, скорость оседания и восходящие потоки; избегать ложного объяснения про невесомость",
+      "sources_to_verify": [
+        "USGS Water Science School",
+        "NOAA"
+      ],
+      "fact_check": "PENDING"
+    },
+    {
+      "channel": "science",
+      "slug": "earth-hum",
+      "title": "Почему Земля непрерывно дрожит даже без землетрясений",
+      "angle": "Микросейсмы, океанские волны и чувствительность сейсмометров; не путать с мистическим 'гулом'",
+      "sources_to_verify": [
+        "USGS",
+        "IRIS EarthScope"
+      ],
+      "fact_check": "PENDING"
+    },
+    {
+      "channel": "cinema",
+      "slug": "arrival-2016",
+      "title": "«Прибытие»: как язык меняет историю",
+      "film": "Arrival (2016)",
+      "angle": "Обзор без выдуманных эпизодов; проверить последовательность сюжетных поворотов и трактовку финала",
+      "plot_check": "PENDING"
+    },
+    {
+      "channel": "cinema",
+      "slug": "source-code-2011",
+      "title": "«Исходный код»: восемь минут, которых не хватает",
+      "film": "Source Code (2011)",
+      "angle": "Пересказ с предупреждением о спойлерах; проверить детали механизма и развязки",
+      "plot_check": "PENDING"
+    },
+    {
+      "channel": "cinema",
+      "slug": "moon-2009",
+      "title": "«Луна 2112»: одиночество с чужой памятью",
+      "film": "Moon (2009)",
+      "angle": "Разбор с предупреждением о спойлерах; различить события фильма и авторские интерпретации",
+      "plot_check": "PENDING"
+    }
+  ],
+  "blocking": [
+    "Нет девяти полноценных текстов 3000–6000 знаков без пробелов",
+    "Нет 7–8 иллюстраций с проверенными правами на каждый текст",
+    "Нет подтверждённых фактических и сюжетных проверок",
+    "Нет запусков GitHub quality/AI checks по SHA-256 текстов",
+    "В main текущая config/ai_revision_policy.json содержит порог 80 и старый список активных каналов; исправление только в отдельной ветке после проверки"
+  ],
+  "notes": "План — не готовые статьи. Никаких публикаций, RSS, release flags или merge."
+}
