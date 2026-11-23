@@ -291,6 +291,8 @@ def restore_checkpoint(root, day, command):
 def alternate_checkpoint_prefix(one_article):
     from .editorial_alt_models import groq_gemini_klein_pilot, groq_ovh_klein_pilot
     if groq_gemini_klein_pilot():
+        if os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true":
+            return "cinema-prisoners-groq-gemini35-encrypted"
         return "groq-gemini35-klein-two-channel-encrypted"
     if groq_ovh_klein_pilot():
         return "agent-groq-ovh-klein-encrypted"
@@ -329,8 +331,11 @@ def restore_alt_checkpoint(root, day, run_id):
     run = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}"))
     from .editorial_alt_models import groq_gemini_klein_pilot
     is_new_pilot = groq_gemini_klein_pilot()
-    expected_workflow = (".github/workflows/editorial-groq-gemini-klein-two-channel-once.yml"
-                         if is_new_pilot else ".github/workflows/editorial-alt-three-articles-v4-once.yml")
+    expected_workflow = (
+        ".github/workflows/editorial-cinema-groq-gemini-confirmed-film-once.yml"
+        if is_new_pilot and os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true" else
+        ".github/workflows/editorial-groq-gemini-klein-two-channel-once.yml"
+        if is_new_pilot else ".github/workflows/editorial-alt-three-articles-v4-once.yml")
     if (run["path"] != expected_workflow
             or run["head_repository"]["full_name"] != PUBLIC_REPOSITORY
             or run["head_branch"] != "assistant/kilo-modelscope-openrouter-isolated-20261123"
