@@ -1,0 +1,49 @@
+name: Cloudflare Workers AI quota (read-only)
+on:
+  workflow_dispatch:
+  schedule:
+    # 09:30 Moscow time; scheduling may be delayed by GitHub.
+    - cron: '30 6 * * *'
+  pull_request:
+    paths:
+      - '.github/workflows/cloudflare-quota.yml'
+      - 'src/cloudflare_quota.py'
+      - 'tests/test_cloudflare_quota.py'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p 'test_cloudflare_quota.py' -v
+
+  cloudflare-quota:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run offline quota parser unit tests
+        run: python -m unittest discover -s tests -p 'test_cloudflare_quota.py' -v
+      - name: Verify token and read Workers AI neurons from Cloudflare Analytics
+        env:
+          CLOUDFLARE_QUOTA_TOKEN: ${{ secrets.CLOUDFLARE_QUOTA_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python -m src.cloudflare_quota --output "$RUNNER_TEMP/cloudflare-quota.json"
+      # Do not publish account details, credentials, or raw Cloudflare API responses.
+      # The action summary shows only aggregated daily usage and an approximate remainder.
