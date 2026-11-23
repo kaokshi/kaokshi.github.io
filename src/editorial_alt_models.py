@@ -44,6 +44,9 @@ def candidate_headers(provider):
 def preflight():
     """Verify credentials and free route without consuming generation calls."""
     require_isolated()
+    # Fail before any outgoing request if the required ModelScope token
+    # has not been connected by the owner in GitHub Actions Secrets.
+    mh = candidate_headers("modelscope")
     # The Kilo explicit free model is verified against the live model catalog.
     kh = candidate_headers("kilo")
     catalog = parse_json(request(KILO_URL + "/models", ("ai-gateway.kilo.ai",), headers=kh))
@@ -65,7 +68,6 @@ def preflight():
         except (InvalidOperation, ValueError, TypeError):
             raise Blocked("kilo_price_invalid") from None
     # ModelScope's official free API-Inference requires the user's account token.
-    mh = candidate_headers("modelscope")
     result = parse_json(request(MODELSCOPE_URL + "/models",
                                 ("api-inference.modelscope.cn",), headers=mh))
     models = result.get("data", []) if isinstance(result, dict) else []
