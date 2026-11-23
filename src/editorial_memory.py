@@ -213,8 +213,12 @@ class Memory:
             task["events"].append(event)
             if os.environ.get("GITHUB_ACTIONS") == "true" and status in {
                     "running", "completed", "blocked", "failed", "retry_pending"}:
-                print(json.dumps({**event, "operation": task["operation"], "article": task["article"],
-                                  "executor": task["executor"], "attempt": task["attempts"]}), flush=True)
+                from .editorial_chat_status import code
+                details = {**event, "operation": task["operation"], "article": task["article"],
+                           "executor": task["executor"], "attempt": task["attempts"]}
+                if status in {"blocked", "failed", "retry_pending"}:
+                    details["reason_code"] = code(task.get("error"))
+                print(json.dumps(details), flush=True)
             if status in {"completed", "failed", "blocked"}:
                 task["used_calls"] = sum(call["task"] == task["id"] for call in self.data["calls"])
             self.save(durable)
