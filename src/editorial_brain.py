@@ -151,7 +151,9 @@ class Article:
                 return send(task, tokens)
             except ProviderError as exc:
                 # Never shrink a required article merely to fit a provider window.
-                if isolated_edit or exc.retry_after is None:
+                # Gemini retries must be separate persisted, quota-counted tasks.
+                # A silent resend inside one reservation understates real API use.
+                if isolated_edit or provider == "gemini" or exc.retry_after is None:
                     raise
                 if ovh_trial() and not ((ovh_recover() or groq_ovh_klein_pilot())
                                         and exc.telemetry.get("http_status") == 429):
@@ -619,12 +621,12 @@ class Article:
             self.memory.article(self.id, draft_provider="groq",
                                 independent_editor_provider="gemini")
             edit_prompt = (
-                brief + "\\nТы редактор. Исправь композицию, логику и язык."
+                brief + "\nТы редактор. Исправь композицию, логику и язык."
                 " Сохрани все достоверные факты, сюжет и сильное вступление."
                 " Оставь 3000–6000 знаков без пробелов, шесть или семь разделов"
                 " с жирными заголовками и призыв подписаться в конце."
                 " Не выдумывай сцены фильма и цитаты. Верни только полный текст."
-                "\\nЧЕРНОВИК:\\n" + original_raw)
+                "\nЧЕРНОВИК:\n" + original_raw)
             try:
                 edited = self.model("full-edit", "gemini", edit_prompt,
                                     tokens=6200,
@@ -635,7 +637,7 @@ class Article:
                 # with a separately charged request to the direct 3.6 endpoint.
                 # Never repeat auth/quota/invalid-output failures automatically.
                 retryable = {"http_503_transient", "http_502_transient",
-                             "http_504_transient", "connection_timeout"}
+                             "http_504_transient", "connection_timeout", "connection_failed"}
                 if str(exc) not in retryable:
                     raise
                 with self.memory.lock:
