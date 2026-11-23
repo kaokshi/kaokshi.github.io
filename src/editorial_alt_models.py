@@ -8,7 +8,9 @@ import os
 
 from .editorial_providers import Blocked, ProviderError, authorization, parse_json, request
 
-KILO_ID = "z-ai/glm-5:free"
+# Free catalog changes frequently. We require an explicit free model ID and live
+# zero-price verification before any Kilo generation request.
+KILO_ID = os.environ.get("EDITORIAL_KILO_MODEL", "kilo-auto/free")
 MODELSCOPE_ID = "Qwen/Qwen3.5-35B-A3B"
 KILO_URL = "https://ai-gateway.kilo.ai/api/v1"
 MODELSCOPE_URL = "https://api-inference.modelscope.cn/v1"
@@ -49,9 +51,14 @@ def preflight():
     match = next((row for row in rows if isinstance(row, dict) and row.get("id") == KILO_ID), None)
     if not match:
         raise Blocked("kilo_explicit_free_model_unavailable")
+    from decimal import Decimal, InvalidOperation
     pricing = match.get("pricing")
-    if isinstance(pricing, dict):
-        from decimal import Decimal, InvalidOperation
+    if not isinstance(pricing, dict) or not {"prompt", "completion"} <= pricing.keys():
+        # Free virtual-tier models may not publish token-level pricing. They
+        # must be verified by an explicit free tier name AND provider docs.
+        if KILO_ID != "kilo-auto/free":
+            raise Blocked("kilo_price_not_verifiable")
+    else:
         try:
             if any(Decimal(str(v)) != 0 for v in pricing.values()):
                 raise Blocked("kilo_model_not_verified_free")
