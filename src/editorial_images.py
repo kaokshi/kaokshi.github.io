@@ -316,6 +316,8 @@ def generated_scene(scene, subject, path, index, task, article, channel, style):
         if saved and saved.get("prompt") == prompt and blob.is_file() and digest(blob.read_bytes()) == saved["sha256"]:
             raw, params = blob.read_bytes(), saved["parameters"]
         else:
+            if saved is not None or blob.exists():
+                raise Blocked("klein_saved_candidate_needs_recovery")
             if index.memory.time_left() < 150:
                 raise Blocked("production_deadline")
             if not qa.allocation(index.memory, article):

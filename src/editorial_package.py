@@ -22,6 +22,7 @@ class ArticleHTML(HTMLParser):
         self.pending = None
         self.lines = []
         self.images = []
+        self.all_images = []
         self.placement = []
 
     def handle_starttag(self, tag, attrs):
@@ -30,10 +31,12 @@ class ArticleHTML(HTMLParser):
         if self.inside and tag in {"h2", "p"}:
             self.placement.append(tag)
             self.pending = []
-        if self.inside and tag == "img":
+        if tag == "img":
             image = dict(attrs).get("src")
-            self.images.append(image)
-            self.placement.append(image)
+            self.all_images.append(image)
+            if self.inside:
+                self.images.append(image)
+                self.placement.append(image)
 
     def handle_endtag(self, tag):
         if tag in {"h2", "p"} and self.pending is not None:
@@ -72,15 +75,84 @@ def add_word_hyperlink(paragraph, label, url):
     paragraph._p.append(hyperlink)
 
 
+def final_visual_gate(article, rows, source_sha, article_id, read_asset, *, encoded=None):
+    """Validate the actual text, files and final documents at every ready boundary."""
+    from PIL import Image
+
+    if not article or digest(canonical(article)) != source_sha:
+        raise Blocked("stale_image_needs_recheck")
+    require_packet_rows(rows, source_sha, article_id=article_id, article=article)
+    require_ready_rows(rows)
+    if layout_issues(article, rows):
+        raise Blocked("review_visual_layout_incomplete")
+    hero = next(row for row in rows if row["is_cover"])
+    ordered = [hero, *sorted((row for row in rows if not row["is_cover"]), key=lambda row: row["section"])]
+    for row in ordered:
+        from pathlib import PurePosixPath
+        name = row["file"]
+        if PurePosixPath(name).name != name or "\\" in name or not name:
+            raise Blocked("invalid_review_asset_name")
+        try:
+            raw = read_asset(name)
+            if digest(raw) != row["sha256"]:
+                raise Blocked("review_image_sha_mismatch")
+            with Image.open(io.BytesIO(raw)) as image:
+                image.verify()
+        except (OSError, ValueError, KeyError):
+            raise Blocked("review_image_file_missing_or_invalid") from None
+    if encoded:
+        _verify_exported_visual_order(article, ordered, encoded)
+
+
+def _verify_exported_visual_order(article, ordered, encoded):
+    from docx import Document
+
+    html, word = encoded
+    expected_html, expected_word = [f'images/{ordered[0]["file"]}'], [ordered[0]["sha256"]]
+    expected_html.extend("p" for _ in article["intro"])
+    expected_word.extend("p" for _ in article["intro"])
+    for section, picture in zip(article["sections"], ordered[1:], strict=True):
+        expected_html.extend(("h2", f'images/{picture["file"]}'))
+        expected_word.extend(("h2", picture["sha256"]))
+        for _ in section["paragraphs"]:
+            expected_html.append("p")
+            expected_word.append("p")
+    checker = ArticleHTML()
+    try:
+        checker.feed(html.decode("utf-8"))
+        doc = Document(io.BytesIO(word))
+        actual_word, body = [], []
+        for p in doc.paragraphs:
+            matches = p._p.xpath(".//a:blip")
+            if matches:
+                for image in matches:
+                    rel = image.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+                    actual_word.append(digest(doc.part.related_parts[rel].blob))
+            elif p.text and p.style.name in {"Heading 2", "Normal"}:
+                actual_word.append("h2" if p.style.name == "Heading 2" else "p")
+                body.append(p.text)
+    except Exception as exc:
+        raise Blocked("review_document_unreadable_" + type(exc).__name__) from None
+    if (checker.placement != expected_html or checker.all_images != checker.images
+            or actual_word != expected_word or len(doc.inline_shapes) != len(ordered)
+            or "\n".join(checker.lines) != canonical(article)
+            or "\n".join(body) != canonical(article)):
+        raise Blocked("review_document_image_placement_mismatch")
+
+
 def package(folder, title, version, report, images, image_folder, summary):
     from docx import Document
     from docx.shared import Inches
 
-    require_packet_rows(images, report["text_sha256"], article_id=folder.name)
+    article = report["article"]
+    ready = summary.get("status") in {"review_pending", "rights_review_pending"}
+    require_packet_rows(images, report["text_sha256"], article_id=folder.name, article=article)
+    if ready:
+        final_visual_gate(article, images, report["text_sha256"], folder.name,
+                          lambda name: (image_folder / name).read_bytes())
     folder.mkdir(parents=True, exist_ok=True)
     document = Document()
     document.add_heading(title, 0)
-    article = report["article"]
     problems = layout_issues(article, images)
     if summary.get("status") in {"review_pending", "rights_review_pending"}:
         require_ready_rows(images)
@@ -245,6 +317,8 @@ def package(folder, title, version, report, images, image_folder, summary):
                            if name.startswith("word/media/"))
     if embedded != Counter(row["sha256"] for row in ordered):
         raise ValueError("docx_image_sha_mismatch")
+    if ready:
+        _verify_exported_visual_order(article, ordered, (html.encode("utf-8"), word))
     write(folder / "Статья.html", html.encode("utf-8"))
     write(folder / "Статья.docx", word)
     write(folder / "Статья.md", markdown.encode("utf-8"))
@@ -257,6 +331,7 @@ def package(folder, title, version, report, images, image_folder, summary):
                "subscription_url": link if linked_cta else None,
                "cover": cover,
                "text_sha256": report["text_sha256"], "document_roundtrip": "completed",
+               "visual_article": article,
                "article_checks": {k: v for k, v in report.items() if k != "article"},
                "images": [{k: v for k, v in row.items() if k != "image_embedding"} for row in ordered]})
     visual_checks = [row["image_qa"] for row in ordered if "image_qa" in row]

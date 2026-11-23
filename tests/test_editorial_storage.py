@@ -24,6 +24,7 @@ from src.editorial_memory import digest, read_json, write_json
 from src.editorial_package import ArticleHTML, package
 from src.editorial_providers import Blocked
 from tests.editorial_scene_fixtures import certify
+from src.editorial_scene_qa import section_text
 from src.editorial_review import canonical, parse_article
 
 
@@ -47,7 +48,8 @@ def build_fixture(root):
             row = {"file": name, "section": max(i, 1), "cover_score": i,
                    "scene": "Контрольная иллюстрация", "kind": "generated",
                    "sha256": digest(file.read_bytes())}
-            images.append(certify(row, article_id, i == 0, digest(canonical(FIXTURE))))
+            images.append(certify(row, article_id, i == 0, digest(canonical(FIXTURE)),
+                                  section_text(FIXTURE["sections"][row["section"] - 1])))
         package(memory.folder / "review" / article_id, article_id, [],
                 {"article": FIXTURE, "text_sha256": digest(canonical(FIXTURE)), "facts": {"evidence": []}},
                 images, image_folder, {"status": "rights_review_pending"})

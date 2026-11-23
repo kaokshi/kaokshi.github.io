@@ -879,7 +879,7 @@ class Article:
                        for i, section in enumerate(article["sections"], 1)}, ensure_ascii=False))
         def check_plan(result, *, sourced=False):
             validate_plan(result, count, self.channel, self.config, sourced_illustrations=sourced)
-            return scene_qa.attach_cards(result, self.id, article, source_sha)
+            return scene_qa.attach_cards(result, self.id, article, source_sha, article_title=self.title)
 
         plan = None
         last = None
@@ -1332,6 +1332,11 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
                                    "groq": 6, "gemini": 4,
                                    "klein": 16, "openrouter": 0,
                                    "ovh": 0, "ovh-gptoss": 0, "kilo": 0}}
+            if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+                if not validate_cinema:
+                    raise Blocked("release_trio_requires_isolated_cinema_validation")
+                cfg["articles_per_channel"]["science"] = 1
+                cfg["daily_calls"].update(groq=9, gemini=6, klein=18)
             if os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true":
                 cfg["articles_per_channel"] = {"cinema": 1}
                 cfg["per_article_calls"]["groq"] = 2

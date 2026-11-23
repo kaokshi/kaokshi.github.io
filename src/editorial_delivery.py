@@ -15,7 +15,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from .editorial_encrypted_review import MAX_INPUT, decrypt, encrypt
 from .editorial_length import check_length
 from .editorial_memory import PrivateGit, StorageError, digest, read_json, write
-from .editorial_scene_qa import require_packet_rows, require_ready_rows
+from .editorial_scene_qa import require_packet_rows
 from .editorial_providers import Blocked
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -215,9 +215,12 @@ def verify_review(data, *, allow_incomplete=False):
                 raise Blocked("review_article_length_invalid: " + length_issue)
             require_packet_rows(report["images"], report["text_sha256"], article_id=article)
             if not allow_incomplete or report.get("status") in {"review_pending", "rights_review_pending"}:
-                require_ready_rows(report["images"])
-                if report.get("layout_status") != "verified":
-                    raise Blocked("review_visual_layout_incomplete")
+                from .editorial_package import final_visual_gate
+
+                final_visual_gate(report.get("visual_article"), report["images"], report["text_sha256"], article,
+                                  lambda name: archive.read(f"{article}/images/{name}"),
+                                  encoded=(archive.read(article + "/Статья.html"),
+                                           archive.read(article + "/Статья.docx")))
             assets = {name for name in verified if "/images/" in name}
             by_name = {article + "/images/" + row["file"]: row["sha256"] for row in report["images"]}
             if (assets != by_name.keys() or len(by_name) != len(report["images"])

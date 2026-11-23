@@ -314,7 +314,9 @@ class Memory:
             # before a response is saved. Never send an untraceable duplicate on retry.
             # A persisted "responded" call is reused by Article.model -> response().
             if any(row["task"] == task_id and row["provider"] == provider
-                   and row["status"] == "reserved" for row in self.data["calls"]):
+                   and (row["status"] == "reserved" or
+                        (provider == "klein" and row["status"] == "responded"))
+                   for row in self.data["calls"]):
                 raise ProviderError("previous_provider_request_outcome_unknown", stop=True)
             if provider == "gemini":
                 cooldown = gemini_cooldown_seconds(self.data["calls"])
@@ -359,7 +361,9 @@ class Memory:
                     reservation.update(answer.get("telemetry", {}))
                 # Persist the completed response before downstream validation.
                 reservation["answer"] = answer
-                self.save()
+            # Image providers return bytes in a tuple. The callback has already
+            # spooled them; persist the receipt and bytes together before QA.
+            self.save()
         return answer
 
     def response(self, task_id):

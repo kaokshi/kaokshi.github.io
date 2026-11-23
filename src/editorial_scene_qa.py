@@ -30,6 +30,9 @@ characters и optional_details, и с time_of_day, если заполнено; 
 Выбирай ОДИН видимый момент: не совмещай события разных абзацев, эпох или мест. Проверяемы только
 предметы, место, персонажи, действия и отношения в кадре. Не выдумывай обязательных деталей.
 must_not_have перечисляет только явные видимые противоречия выбранной сцене и может быть пустым.
+Для трудно различимого места можно добавить location_cues (2–4 разных видимых признака места),
+обоснованных цитатой location без дополнительных сюжетных фактов. Для кино о свете и операторской
+работе выбирай соответствующую наблюдаемую среду без обязательного героя.
 Кадр фильма подтверждай видимым отличием эпизода. В полях для визуальных вопросов опиши внешность и
 действия без имени; идентичность актёра, персонажа и фильма отдельно проверяется по источнику.
 Для науки учитывай видимые пространственные связи и направление механизма. Никаких вымышленных этикеток.
@@ -64,17 +67,30 @@ def make_card(article_id, section, source_sha, section_text, proposal):
         raise Blocked("scene_card_evidence_not_in_section")
     if {item.casefold() for item in grounded} & {item.casefold() for item in card["must_not_have"]}:
         raise Blocked("scene_card_self_contradictory")
+    cues = proposal.get("location_cues", [])
+    if (not isinstance(cues, list) or (cues and not 2 <= len(cues) <= 4)
+            or any(not isinstance(x, str) or not 3 <= len(x.strip()) <= 140 for x in cues)
+            or len({x.strip().casefold() for x in cues}) != len(cues)
+            or {x.strip().casefold() for x in cues} & {x.casefold() for x in (*grounded, *card["must_not_have"])}):
+        raise Blocked("scene_card_location_cues_invalid")
+    if cues:
+        card["location_cues"] = [x.strip() for x in cues]
     return {**card, "article_id": article_id, "section_id": section,
             "section_text_sha256": digest(section_text), "source_text_sha256": source_sha}
 
 
-def attach_cards(plan, article_id, article, source_sha):
+def section_text(section):
+    return "\n".join([section["heading"], *section["paragraphs"]])
+
+
+def attach_cards(plan, article_id, article, source_sha, *, article_title=None):
     rows = []
     for scene in plan["images"]:
         section = article["sections"][scene["section"] - 1]
-        source = "\n".join([section["heading"], *section["paragraphs"]])
-        rows.append({**scene, "scene_card": make_card(
-            article_id, scene["section"], source_sha, source, scene.get("scene_card"))})
+        card = make_card(article_id, scene["section"], source_sha, section_text(section), scene.get("scene_card"))
+        if article_title:
+            card.update(article_title=article_title, section_title=section["heading"])
+        rows.append({**scene, "scene_card": card})
     return {**plan, "images": rows}
 
 
@@ -132,7 +148,9 @@ def binary_answer(answer):
 
 def questions_for(card):
     rows = [("setting", card["location"]), *(("required", item) for item in
-            dict.fromkeys([*card["must_have"], *card["characters"]]) if item != card["location"]),
+            dict.fromkeys([*card["must_have"], *card["characters"], card["time_of_day"]])
+            if item and item != card["location"]),
+            *(("location_cue", item) for item in card.get("location_cues", [])),
             *(("forbidden", item) for item in card["must_not_have"])]
     statements = [question for role, item in rows for question in (
         f"Is this {item}?" if role == "setting" else f"Is there {item} in the image?",
@@ -189,10 +207,19 @@ def judge(card, image, image_sha, clip, *, duplicate=False, quality=None, clip_g
     else:
         report["vision"] = evidence
         rows = evidence["findings"]
-        required = [r for r in rows if r["role"] != "forbidden"]
+        cues = [r for r in rows if r["role"] == "location_cue"]
+        required = [dict(r) for r in rows if r["role"] in {"setting", "required"}]
+        setting = next((r for r in required if r["role"] == "setting"), None)
+        if setting and len(cues) >= 2 and setting["status"] != "present":
+            if all(r["status"] == "present" for r in cues):
+                setting["status"] = "present"
+                report["setting_evidence"] = "independent_observable_cues"
+            elif any(r["status"] != "absent" for r in cues):
+                setting["status"] = "uncertain"
         report["confirmed"] = [r["element"] for r in required if r["status"] == "present"]
         report["absent"] = [r["element"] for r in required if r["status"] == "absent"]
-        report["uncertain"] = [r["element"] for r in rows if r["status"] == "uncertain"]
+        report["uncertain"] = [r["element"] for r in [*required, *(p for p in rows if p["role"] == "forbidden")]
+                               if r["status"] == "uncertain"]
         report["contradictions"] = [r["element"] for r in rows
                                     if r["role"] == "forbidden" and r["status"] == "present"]
         report["must_have_coverage"] = {"confirmed": len(report["confirmed"]), "required": len(required)}
@@ -208,7 +235,7 @@ def judge(card, image, image_sha, clip, *, duplicate=False, quality=None, clip_g
         if duplicate:
             reasons.append("image_duplicate")
         if clip_gate and not clip["passed"]:
-            reasons.append("clip_prefilter_rejected")
+            report["clip"]["decision_weight"] = "advisory_low_similarity"
         if quality and quality.get("passed") is False:
             reasons.append("image_quality_failed")
         if any(r != "visual_evidence_uncertain" for r in reasons):
@@ -312,11 +339,20 @@ def accepted_for(row, card, *, is_cover):
                 and type(is_cover) is bool)
 
 
-def require_packet_rows(rows, source_sha, *, article_id=None):
+def require_packet_rows(rows, source_sha, *, article_id=None, article=None):
     """Defend the packaging and delivery boundaries independently of generation."""
     for row in rows:
         evidence = row.get("image_qa") or {}
         card = evidence.get("scene_card")
+        if card and (card.get("source_text_sha256") != source_sha or
+                     evidence.get("source_text_sha256") != source_sha):
+            raise Blocked("stale_image_needs_recheck")
+        if article is not None and card:
+            number = row.get("section")
+            sections = article["sections"]
+            if (type(number) is not int or not 1 <= number <= len(sections)
+                    or card.get("section_text_sha256") != digest(section_text(sections[number - 1]))):
+                raise Blocked("stale_image_needs_recheck")
         if (not accepted_for(row, card, is_cover=row.get("is_cover"))
                 or evidence.get("source_text_sha256") != source_sha
                 or card["source_text_sha256"] != source_sha
