@@ -926,6 +926,9 @@ class Article:
                 raise Blocked("image_plan_requires_two_klein_illustrations")
             scenes = sorted(scenes, key=lambda scene: scene["kind"] != "illustration")
         for index, scene in enumerate(scenes, 1):
+            if self.film and not self.film["spoilers"] and cinema.spoiler_risk(scene):
+                self.blockers.append(f"image_{index:02d}: spoiler_scene_prohibited")
+                continue
             path = self.folder / "images" / f"{self.current['text_sha256'][:12]}-{index:02d}.jpg"
             existing = read_json(path.with_suffix(".json"))
             if (existing and path.is_file() and digest(path.read_bytes()) == existing["sha256"]
