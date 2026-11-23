@@ -69,6 +69,32 @@ class SubscriptionTests(unittest.TestCase):
             self.assertIn("[За гранью очевидного](" + test_url + ")",
                           (folder / "Статья.md").read_text(encoding="utf-8"))
 
+    def test_all_three_channels_get_the_correct_real_link(self):
+        cases = {
+            "science": ("За гранью очевидного", "https://dzen.ru/sciencebox"),
+            "legends": ("Легенды тёмных улиц", "https://dzen.ru/darklegends"),
+            "cinema": ("Кадр за Кадром", "https://dzen.ru/kadrzkadr"),
+        }
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for channel, (name, url) in cases.items():
+                with self.subTest(channel=channel):
+                    folder = root / (channel + "-01")
+                    final = "Подписывайтесь на «" + name + "», чтобы не пропустить новые материалы."
+                    article = {"intro": [], "sections": [
+                        {"heading": "Завершение", "paragraphs": [final]}]}
+                    canonical_text = canonical(article)
+                    report = {"article": article, "text_sha256": digest(canonical_text),
+                              "facts": {"evidence": []}}
+                    package(folder, "Тест", [], report, [], root, {})
+                    html = (folder / "Статья.html").read_text(encoding="utf-8")
+                    self.assertIn('<a href="' + url + '">' + name + '</a>', html)
+                    doc = Document(folder / "Статья.docx")
+                    self.assertEqual(doc.paragraphs[-1].text, final)
+                    self.assertEqual([h.address for h in doc.paragraphs[-1].hyperlinks], [url])
+                    self.assertEqual((folder / "Текст для SHA-256.txt").read_text(encoding="utf-8"),
+                                     canonical_text)
+
     def test_missing_url_keeps_text_and_flags_pending(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
