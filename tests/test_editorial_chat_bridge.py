@@ -32,7 +32,7 @@ class ChatStatusTests(unittest.TestCase):
                 "two": {"article": "cinema-01", "status": "blocked",
                         "operation": "film-evidence", "error": "PRIVATE-URL-WITH-TEXT"},
             },
-            "calls": [{"provider": "retired_provider", "answer": {"text": "SENSITIVE-PROSE-NO-EXPORT"}}],
+            "calls": [{"provider": "groq", "answer": {"text": "SENSITIVE-PROSE-NO-EXPORT"}}],
             "private_key": "SENSITIVE-KEY-NO-EXPORT",
         }
 
@@ -45,7 +45,7 @@ class ChatStatusTests(unittest.TestCase):
                          "editorial-audit")
         self.assertEqual(report["articles"]["cinema-01"]["failed_tasks"][0]["code"],
                          "unclassified_block")
-        self.assertEqual(report["provider_calls"]["retired_provider"], 1)
+        self.assertEqual(report["provider_calls"]["groq"], 1)
         self.assertEqual(report["ready_count"], 0)
         self.assertFalse(report["contents_included"])
 
