@@ -113,10 +113,10 @@
     "max_calls_per_article": 2,
     "max_calls_per_cycle": 4,
     "require_balance_preflight": true,
-    "status": "models_configured_paid_calls_disabled_pending_durable_spend_guard",
-    "note": "Sonnet writes draft; DeepSeek independently rewrites/edits; Groq is kept for topic/QA/recovery until the new scheme is validated. Disabled until verified balance, costs, durable reservations, and authorized test.",
+    "status": "claude_drafter_deepseek_v4_pro_0813_reviewer_payment_guard_pending",
+    "note": "Claude Sonnet 5.5 drafts, DeepSeek V4 Pro 0813 independently edits. Paid calls disabled until verified read-only balance, durable shared daily/monthly spend reservation and owner-approved cap.",
     "primary_model": "anthropic/claude-sonnet-5.5",
-    "review_model": "deepseek/deepseek-v3.2",
+    "review_model": "deepseek/deepseek-v4-pro-0813",
     "roles": "claude_primary_deepseek_independent_reviewer"
   }
 }
