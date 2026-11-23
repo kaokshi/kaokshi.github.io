@@ -13,14 +13,16 @@
     "klein": 12,
     "gemini": 2,
     "routerai": 2,
-    "routerai_review": 2
+    "routerai_review": 2,
+    "routerai_brain": 8
   },
   "daily_calls": {
     "groq": 34,
     "klein": 20,
     "gemini": 4,
     "routerai": 4,
-    "routerai_review": 4
+    "routerai_review": 4,
+    "routerai_brain": 16
   },
   "minimum_images": 7,
   "maximum_images": 8,
@@ -114,9 +116,16 @@
     "max_calls_per_cycle": 4,
     "require_balance_preflight": true,
     "status": "claude_drafter_deepseek_v4_pro_0813_reviewer_payment_guard_pending",
-    "note": "One shared 100 RUB/day and 3000 RUB/30-days TARGET for Claude Sonnet author plus DeepSeek V4 Pro reviewer, not yet enforced. Never enable API calls without tested shared durable budget reservation, balance check, and actual spend reconciliation. Real provider charges may differ from quoted catalogue.",
+    "note": "One 100 RUB/day and 3000 RUB/30 days target for Claude drafter, DeepSeek V4 Pro reviewer, Qwen 3.6 Plus orchestrator. All paid routes remain disabled until verified balance and durable shared budget guard, including brain. No autonomous publication.",
     "primary_model": "anthropic/claude-sonnet-5.5",
     "review_model": "deepseek/deepseek-v4-pro-0813",
-    "roles": "claude_primary_deepseek_independent_reviewer"
+    "roles": "claude_primary_deepseek_independent_reviewer",
+    "brain_model": "qwen/qwen3.6-plus",
+    "brain_enabled": false,
+    "brain_tasks": [
+      "topics",
+      "editorial-audit",
+      "image-plan"
+    ]
   }
 }
