@@ -86,6 +86,13 @@ def safe_zip(data):
             archive.close()
             raise Blocked("unsafe_encrypted_archive")
         names.add(entry.filename)
+    # A path may not also be a file serving as the parent of another member.
+    # Reject this before extracting any bytes, rather than leaving half a restore.
+    if any(any("/".join(PurePosixPath(name).parts[:depth]) in names
+               for depth in range(1, len(PurePosixPath(name).parts)))
+           for name in names):
+        archive.close()
+        raise Blocked("unsafe_encrypted_archive")
     if archive.testzip() is not None:
         archive.close()
         raise Blocked("encrypted_archive_integrity_failure")
@@ -127,9 +134,29 @@ def save_outputs(root, day, outgoing):
 
 
 def unpack(data, target):
+    # Archive path validation alone cannot protect a destination with pre-existing
+    # symlinked directories or files. Never extract through one, even in a
+    # restored workspace; a failure must not write outside the chosen state root.
+    target = Path(target)
+    if target.is_symlink():
+        raise Blocked("unsafe_restore_symlink")
+    target_root = target.resolve()
     with safe_zip(data) as archive:
-        for entry in archive.infolist():
-            write(target / entry.filename, archive.read(entry))
+        entries = archive.infolist()
+        for entry in entries:
+            candidate = target / entry.filename
+            for parent in (candidate, *candidate.parents):
+                if parent == target.parent:
+                    break
+                if parent.is_symlink():
+                    raise Blocked("unsafe_restore_symlink")
+            if not candidate.resolve().is_relative_to(target_root):
+                raise Blocked("unsafe_restore_destination")
+        # Read and authenticate every member before modifying any files.
+        # A corrupt late ZIP member must not leave an earlier state.json updated.
+        contents = [(entry.filename, archive.read(entry)) for entry in entries]
+        for name, raw in contents:
+            write(target / name, raw)
 
 
 def restore_blob(payload, root, day):
@@ -261,6 +288,19 @@ def restore_checkpoint(root, day, command):
     return {"status": "checkpoint_restored"}
 
 
+def publish_verified_directory(source, output):
+    """Expose verified files only after a successful complete copy."""
+    if output.exists() or output.is_symlink():
+        raise Blocked("retrieval_output_already_exists")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".zen-owner-stage-", dir=output.parent) as staging:
+        completed = Path(staging) / "verified"
+        shutil.copytree(source, completed)
+        if output.exists() or output.is_symlink():
+            raise Blocked("retrieval_output_already_exists")
+        completed.rename(output)
+
+
 def retrieve(output, key_path, *, day, artifact=None, run_id=None, allow_incomplete=False,
              private_repository=None):
     from cryptography.exceptions import InvalidTag
@@ -313,7 +353,7 @@ def retrieve(output, key_path, *, day, artifact=None, run_id=None, allow_incompl
                 raise Blocked("review_artifact_date_mismatch")
             target = work / "verified"
             unpack(data, target)
-            shutil.copytree(target, output)
+            publish_verified_directory(target, output)
             return {**verified, "status": "verified_files_available", "directory": str(output)}
     raise Blocked("delivery_integration_pending: matching_complete_review_not_found")
 

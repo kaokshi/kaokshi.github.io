@@ -15,11 +15,13 @@ import fcntl
 from . import editorial_cinema as cinema
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
+from .editorial_layout import layout_issues
 from .editorial_groq_budget import forecast
 from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
 from .editorial_package import package, zip_packet
+from .editorial_subscription import CHANNELS as SUBSCRIPTION_CHANNELS
 from .editorial_providers import Blocked, MODELS, ProviderError, klein, text_call
 from .editorial_review import RULES, canonical, improves, parse_article, qa, source_context, sources, structural_checks
 
@@ -92,6 +94,14 @@ class Article:
         return self.memory.task(self.id, stage, executor, inputs, fn, **kwargs)
 
     def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
+        if provider == "groq" and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
+            # Authenticated, zero-price OpenRouter catalog was checked by the workflow.
+            # Do not contact Groq at all when its daily capacity is unavailable.
+            return self.model(stage, "openrouter", prompt, validate=validate,
+                              tokens=max(7800, tokens or 0),
+                              metadata={**(metadata or {}), "fallback_from": "groq",
+                                        "fallback_reason": "groq_preflight_capacity_unavailable"},
+                              repair=repair)
         if tokens is None:
             tokens = 3700 if provider == "groq" else 7800
 
@@ -114,10 +124,33 @@ class Article:
                     raise
                 return send(task, tokens)
 
-        result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
-                                           "prompt_sha256": digest(prompt), **(metadata or {})},
-                           execute, minimum_seconds=130,
-                           validator=(lambda response: validate(json_reply(response))) if validate else None)
+        try:
+            result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
+                                               "prompt_sha256": digest(prompt), **(metadata or {})},
+                               execute, minimum_seconds=130,
+                               validator=(lambda response: validate(json_reply(response))) if validate else None)
+        except Blocked as exc:
+            # Route a quota-stopped Groq stage to a separately recorded, verified-free
+            # OpenRouter task. Do not hide authentication failures, malformed answers,
+            # incomplete previous requests or any editorial validation errors.
+            reason = str(exc)
+            quota_blockers = {
+                "call_budget_exhausted",
+                "groq_quota_wait_exceeds_deadline",
+                "groq_daily_quota_reset_pending",
+                "groq_editorial_budget_exhausted",
+                "groq_daily_budget_exhausted",
+                "groq_editorial_reserve_protected",
+                "http_429_groq_daily_quota",
+                "provider_stopped_http_429_groq_daily_quota",
+            }
+            if (provider != "groq" or stage.startswith("editorial-audit")
+                    or reason not in quota_blockers):
+                raise
+            return self.model(stage, "openrouter", prompt, validate=validate,
+                              tokens=max(7800, tokens),
+                              metadata={**(metadata or {}), "fallback_from": "groq",
+                                        "fallback_reason": reason}, repair=repair)
         return json_reply(result) if validate else result["text"]
 
     def source_seed(self, history):
@@ -300,7 +333,13 @@ class Article:
             style = ("Канал «Кадр за Кадром». Отделяй авторскую оценку от доказуемых фактов. "
                      "Не выдумывай сцены, реплики и последовательность событий. "
                      f"Карточка, формат и режим спойлеров: {json.dumps(self.film, ensure_ascii=False)}.")
-        brief = f"{RULES}\n{style}\nТема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}"
+        channel_name = SUBSCRIPTION_CHANNELS[self.channel]
+        brief = (f"{RULES}\n{style}\n"
+                 f"В последнем абзаце естественно пригласи подписаться на канал "
+                 f"«{channel_name}». Укажи название канала точно в таком написании, "
+                 "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
+                 "редакция добавит сама при экспорте.\n"
+                 f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
         author, editor = "groq", "openrouter"
         try:
             raw = self.model("draft", author, brief, metadata={"topic": self.title})
@@ -411,9 +450,12 @@ class Article:
         if self.channel == "cinema":
             guide = ("Только photo: официальные кадры или пресс-материалы именно этого фильма. "
                      "Описывай подлинную сцену, актёров и визуальный контекст; не придумывай эпизоды.")
-        prompt = (f"{guide} Для каждого из {count} разделов минимум один кадр, для насыщенных "
-                  "два. Когда остаются свободные кадры, выдели два разных кандидата на обложку "
-                  "в первом разделе. Первая секция должна поддерживать сильную обложку. Верни JSON "
+        prompt = (f"{guide} Строго {count+1} разных изображений на {count} разделов: "
+                  "два разных изображения привяжи к разделу 1 (лучшее по смыслу и качеству "
+                  "будет отдельной обложкой сразу после оглавления, второе — сразу после "
+                  "первого заголовка), ровно по одному — к каждому разделу 2 и далее. "
+                  "После каждого жирного заголовка должен идти кадр без пустых абзацев. "
+                  "Оцени каждую сцену по смыслу и не вставляй отвлечённые заглушки. Верни JSON "
                   '{"subject":"English overall theme","images":[{"section":1,"kind":"photo|illustration",'
                   '"subject":"English concrete scene or subject","brief":"English detailed visual brief",'
                   '"query":"English search phrase for photo"}]}.\n'
@@ -519,6 +561,13 @@ class Article:
                 self.blockers.append("substantive_issues_pending")
             if len(self.pictures) < self.config["minimum_images"]:
                 self.blockers.append("image_count_below_minimum")
+            visual_issues = layout_issues(
+                self.current["article"], self.pictures,
+                minimum=self.config["minimum_images"], maximum=self.config["maximum_images"])
+            if visual_issues:
+                self.blockers.extend(visual_issues)
+            summary["layout_status"] = "layout_blocked" if visual_issues else "verified"
+            summary["layout_issues"] = visual_issues
             pending_rights = any(row["rights_status"] == "rights_review_pending" for row in self.pictures)
             status = ("partial_review_pending" if self.blockers else
                       "rights_review_pending" if pending_rights else "review_pending")

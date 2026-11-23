@@ -1,0 +1,1322 @@
+{
+  "label_method": "manual pixel inspection and source provenance before model inference; one reviewer; two hard-negative grades",
+  "images": [
+    {
+      "id": "nightbus-c0",
+      "channel": "legends",
+      "sha256": "a82967aa8082aae794a152b957e0d79296c15fa122834e4231f268177499ae8e",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/44/Lviv_night_bus_route.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:Lviv_night_bus_route.jpg",
+      "license": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "creator": "Santehnik",
+      "reusable": true
+    },
+    {
+      "id": "busstop-c0",
+      "channel": "legends",
+      "sha256": "ff3824b54a6546b76dc949ebfb3c094569a96460418d95afde2fbed14584f9c3",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/23/Bus_shelter_on_Putney_Heath_-_geograph.org.uk_-_1587919.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:Bus_shelter_on_Putney_Heath_-_geograph.org.uk_-_1587919.jpg",
+      "license": "CC-BY-SA-2.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+      "creator": "tristan forward",
+      "reusable": true
+    },
+    {
+      "id": "station-c0",
+      "channel": "legends",
+      "sha256": "25f2651b68aff5891d36fc05a304992dd5a74c888ac19f75f37caf9f7d17caf2",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/f/fa/Lukow-train-station-platform-by-night-170716.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:Lukow-train-station-platform-by-night-170716.jpg",
+      "license": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "creator": "Grzegorz W. Tężycki",
+      "reusable": true
+    },
+    {
+      "id": "train-c0",
+      "channel": "legends",
+      "sha256": "a2792e7bcd50637b497276f89375ad030389624a1b9551177c47ff7d6a6a19db",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/f/fb/Benkid77_Delamere_railway_station_4_010709.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Benkid77_Delamere_railway_station_4_010709.JPG",
+      "license": "CC-BY-SA-3.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+      "creator": "Rept0n1x",
+      "reusable": true
+    },
+    {
+      "id": "mirror-c0",
+      "channel": "legends",
+      "sha256": "57253862db6cc9336132972de87f16779979a6d2b16d873185516ac2b2a2d4cd",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/7/7c/Charles_T._Parry_House_Reception_Room_Mirror_HABS_1968.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Charles_T._Parry_House_Reception_Room_Mirror_HABS_1968.jpg",
+      "license": "PUBLIC_DOMAIN",
+      "license_url": "",
+      "creator": "James L. Dillon, HABS photographer.",
+      "reusable": false
+    },
+    {
+      "id": "window-c0",
+      "channel": "legends",
+      "sha256": "985e88253eea8cfcf79c71dce184da61cc6362b05abe61f7850c6987f444d05d",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/b/be/Georgia%2C_Abkhasia%2C_Akhali_Atoni%2C_%D0%A8%D0%B8%D1%86%D0%BA%D0%B2%D0%B0%D1%80%D0%B0_-_%D0%97%D0%B4%D0%B0%D0%BD%D0%B8%D0%B5_%D0%B1%D1%8B%D0%B2%D1%88%D0%B5%D0%B3%D0%BE_%D0%BF%D0%B0%D0%BD%D1%81%D0%B8%D0%BE%D0%BD%D0%B0%D1%82%D0%B0_%D0%92%D0%BE%D0%B5%D0%BD%D0%B8%D0%B7%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%BD%D0%BE%D0%B9_%D0%BE%D1%85%D1%80%D0%B0%D0%BD%D1%8B_%D0%9C%D0%B8%D0%BD%D0%B8%D1%81%D1%82%D0%B5%D1%80%D1%81%D1%82%D0%B2%D0%B0_%D0%BF%D1%83%D1%82%D0%B5%D0%B9_%D1%81%D0%BE%D0%BE%D0%B1%D1%89%D0%B5%D0%BD%D0%B8%D1%8F_%D0%A1%D0%A1%D0%A1%D0%A0_%C2%AB%D0%AD%D1%88%D0%B5%D1%80%D0%B0%C2%BB_WMID3873686.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Georgia,_Abkhasia,_Akhali_Atoni,_%D0%A8%D0%B8%D1%86%D0%BA%D0%B2%D0%B0%D1%80%D0%B0_-_%D0%97%D0%B4%D0%B0%D0%BD%D0%B8%D0%B5_%D0%B1%D1%8B%D0%B2%D1%88%D0%B5%D0%B3%D0%BE_%D0%BF%D0%B0%D0%BD%D1%81%D0%B8%D0%BE%D0%BD%D0%B0%D1%82%D0%B0_%D0%92%D0%BE%D0%B5%D0%BD%D0%B8%D0%B7%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%BD%D0%BE%D0%B9_%D0%BE%D1%85%D1%80%D0%B0%D0%BD%D1%8B_%D0%9C%D0%B8%D0%BD%D0%B8%D1%81%D1%82%D0%B5%D1%80%D1%81%D1%82%D0%B2%D0%B0_%D0%BF%D1%83%D1%82%D0%B5%D0%B9_%D1%81%D0%BE%D0%BE%D0%B1%D1%89%D0%B5%D0%BD%D0%B8%D1%8F_%D0%A1%D0%A1%D0%A1%D0%A0_%C2%AB%D0%AD%D1%88%D0%B5%D1%80%D0%B0%C2%BB_WMID3873686.jpg",
+      "license": "CC-BY-SA-3.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+      "creator": "Svetessa",
+      "reusable": true
+    },
+    {
+      "id": "telephone-c1",
+      "channel": "legends",
+      "sha256": "d089d107a28db4c785ae90f62d00ce821c97b4386b7aa1f5bafb67ce57f269d4",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/a1/Red_Telephone_Box_-_geograph.org.uk_-_2163232.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Red_Telephone_Box_-_geograph.org.uk_-_2163232.jpg",
+      "license": "CC-BY-SA-2.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+      "creator": "Keith Evans",
+      "reusable": true
+    },
+    {
+      "id": "gate-c0",
+      "channel": "legends",
+      "sha256": "4c40b3e0c2a61edb2714f624a67b52f6e6ace6a22857de57cd71ca6a46256df9",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/55/Old_Iron_Gate_onto_Meadow_at_Ashridge_-_geograph.org.uk_-_1193776.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Old_Iron_Gate_onto_Meadow_at_Ashridge_-_geograph.org.uk_-_1193776.jpg",
+      "license": "CC-BY-SA-2.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+      "creator": "Chris Reynolds",
+      "reusable": true
+    },
+    {
+      "id": "river-c2",
+      "channel": "legends",
+      "sha256": "355e2f2ab72713f12cdef64aeaefc35f81d62f0dc887444fcc9a20c78118315f",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/f/fa/Rzeka_Elbl%C4%85g_%28126650273%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Rzeka_Elbl%C4%85g_(126650273).jpg",
+      "license": "CC-BY-SA-3.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+      "creator": "Piotr Gliński",
+      "reusable": true
+    },
+    {
+      "id": "studio-c0",
+      "channel": "legends",
+      "sha256": "05d3b40face1184dc559424b2a019cd47ff49be04cd6d973f8cbead21baaf7a6",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/89/Self_portrait_of_Stephen_Doblo%2C_ca._1914_%288725096390%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:Self_portrait_of_Stephen_Doblo,_ca._1914_(8725096390).jpg",
+      "license": null,
+      "license_url": "https://www.flickr.com/commons/usage/",
+      "creator": "State Library of Queensland, Australia",
+      "reusable": false
+    },
+    {
+      "id": "aurora-c0",
+      "channel": "science",
+      "sha256": "033a3808bd9543c359b589b54e6a71c061c99d9ce074f1f5018ced05d26f5cf0",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/e/e0/Aurora_Borealis_over_Condie_Regina.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:Aurora_Borealis_over_Condie_Regina.jpg",
+      "license": "CC-BY-SA-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "creator": "Dre Erwin Photography",
+      "reusable": true
+    },
+    {
+      "id": "nlc-c0",
+      "channel": "science",
+      "sha256": "c0dedc5e9c01e1dc7c1265f003afd5e610cfb4d43125e1132138006609bc23c7",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/a1/Noctilucent_clouds_bargerveen.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:Noctilucent_clouds_bargerveen.jpg",
+      "license": "CC-BY-SA-3.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+      "creator": "Hrald",
+      "reusable": true
+    },
+    {
+      "id": "red-sprite-c0",
+      "channel": "science",
+      "sha256": "7c0077da2dee3192ac3f9e8b12b6ab724aebedd4f7707088f523903707e88611",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/5b/BigRed-Sprite.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:BigRed-Sprite.jpg",
+      "license": "PUBLIC_DOMAIN",
+      "license_url": "",
+      "creator": "Eastview",
+      "reusable": false
+    },
+    {
+      "id": "red-sprite-c3",
+      "channel": "science",
+      "sha256": "586121d845253921d8194639d358aa5b9ea37de6ce91b361a7d2bff7dadc0b74",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/9/90/Red_sprite.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:Red_sprite.jpg",
+      "license": "PUBLIC_DOMAIN",
+      "license_url": "",
+      "creator": "Matt Heavner",
+      "reusable": false
+    },
+    {
+      "id": "volcano-c0",
+      "channel": "science",
+      "sha256": "54732740c91dcd5402211b99f75019dc5b9ad2ff04aea373978db3ee4988ceb3",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/6/61/Fresh_Lava_Flow_on_Bagana_Volcano_-_NASA_Earth_Observatory.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:Fresh_Lava_Flow_on_Bagana_Volcano_-_NASA_Earth_Observatory.jpg",
+      "license": "CC-BY-2.0",
+      "license_url": "https://creativecommons.org/licenses/by/2.0",
+      "creator": "NASA's Earth Observatory",
+      "reusable": true
+    },
+    {
+      "id": "hail-c0",
+      "channel": "science",
+      "sha256": "69a288e919ebfe09428722b86e645a47201585f4d2f71b1de6320cac435c15a9",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/1/1a/Hailstorm_damage_to_garden_plants_in_Dnipro_2026-05-30_by_baby-bear.org_.jpg_03.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:Hailstorm_damage_to_garden_plants_in_Dnipro_2026-05-30_by_baby-bear.org_.jpg_03.jpg",
+      "license": "CC-BY-4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "creator": "Natalka Ukraine",
+      "reusable": true
+    },
+    {
+      "id": "comet-c0",
+      "channel": "science",
+      "sha256": "3aa81ff9dc5b8fcdd91a1224674046edb24dfac19a9af680926887c6d4ae0b0a",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/b/bc/CometC2020F3-Neowise-20200716.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "source": "https://commons.wikimedia.org/wiki/File:CometC2020F3-Neowise-20200716.png",
+      "license": "PUBLIC_DOMAIN",
+      "license_url": "",
+      "creator": "NASA, ESA, A. Pagan (STScI), and Q. Zhang (Caltech)",
+      "reusable": false
+    },
+    {
+      "id": "moon-c1",
+      "channel": "science",
+      "sha256": "63079ff83cc162b348b7e27a5e6d5577d9a94c3d90b3f767108526b1821d4678",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/27/Photo-Mojo_-_red_moon_%28by%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Photo-Mojo_-_red_moon_(by).jpg",
+      "license": "CC-BY-2.0",
+      "license_url": "https://creativecommons.org/licenses/by/2.0",
+      "creator": "Chris \"Mojo\" Denbow from Birmingham, USA",
+      "reusable": true
+    },
+    {
+      "id": "eclipse-c0",
+      "channel": "science",
+      "sha256": "5bdc519426c8877eb4728e59916c91ef4e35e2b13109217e70e6c779cfbf6e0d",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/3/3c/A644%2C_August_21%2C_2017_total_solar_eclipse_composite_image_with_corona%2C_prominences_and_diamond_ring.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:A644,_August_21,_2017_total_solar_eclipse_composite_image_with_corona,_prominences_and_diamond_ring.jpg",
+      "license": null,
+      "license_url": "https://artlibre.org/licence/lal/en",
+      "creator": "Brian W. Schaller",
+      "reusable": false
+    },
+    {
+      "id": "rocket-c0",
+      "channel": "science",
+      "sha256": "dad6db04434dfbd2afe5cdc784ff4f78f8f6087bdbedc1a7144aa059a7fdfcc8",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/3/3e/Rocket_Launch_at_Night_Seen_From_JPSS_Satellites_%28CIRA_2026-04-21%29.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Rocket_Launch_at_Night_Seen_From_JPSS_Satellites_(CIRA_2026-04-21).png",
+      "license": "PUBLIC_DOMAIN",
+      "license_url": "",
+      "creator": "JPSS imagery: CSU/CIRA & NOAA/NESDIS",
+      "reusable": false
+    },
+    {
+      "id": "01_seahaven_site",
+      "channel": "cinema",
+      "sha256": "e7d4fc8df5d7b316aa3d4782e02b84c704042789e9d325bed85460319a113b25",
+      "path": "content/assets/truman/01_seahaven_site.jpg",
+      "source": "https://genrevision.com/posts/truman-show",
+      "license": "existing film reference; no redistribution in report",
+      "reusable": false
+    },
+    {
+      "id": "02_mirror_site",
+      "channel": "cinema",
+      "sha256": "f3160bc3e4248f66f7fb237e7ec07040068dbcf85e2d65f6dbe9b0a83ebc5bcb",
+      "path": "content/assets/truman/02_mirror_site.jpg",
+      "source": "https://revistamonet.globo.com/filmes/noticia/2024/04/os-segredos-de-o-show-de-truman-rixa-de-jim-carrey-com-o-diretor-cenas-sombrias-cortadas-e-mais.ghtml",
+      "license": "existing film reference; no redistribution in report",
+      "reusable": false
+    },
+    {
+      "id": "03_viewers_site",
+      "channel": "cinema",
+      "sha256": "3737de0d2387fbaae6628f7accf03a15d226b769aa2f97befede1aa113adde00",
+      "path": "content/assets/truman/03_viewers_site.jpg",
+      "source": "https://www.slashfilm.com/1177851/jim-carrey-has-never-said-yes-to-a-movie-faster-than-the-truman-show/",
+      "license": "existing film reference; no redistribution in report",
+      "reusable": false
+    },
+    {
+      "id": "04_meryl_truman_site",
+      "channel": "cinema",
+      "sha256": "0f13b92810a3ab5bbafcbdde661a20fc95bcd2bdff4370eef1941085986de3fa",
+      "path": "content/assets/truman/04_meryl_truman_site.jpg",
+      "source": "https://www.listal.com/viewimage/7304330",
+      "license": "existing film reference; no redistribution in report",
+      "reusable": false
+    },
+    {
+      "id": "05_cocoa_site",
+      "channel": "cinema",
+      "sha256": "c577f4fa113cceda268eecf5e4f230877d0d7a4dc6a173cce0281da4d44fd0cc",
+      "path": "content/assets/truman/05_cocoa_site.jpg",
+      "source": "https://www.looper.com/1109226/the-ending-of-the-truman-show-explained/",
+      "license": "existing film reference; no redistribution in report",
+      "reusable": false
+    },
+    {
+      "id": "06_christof_site",
+      "channel": "cinema",
+      "sha256": "0d7faf138c1660e1eab29a127968782976b5a2648fec6a78d235484c83fa7c7a",
+      "path": "content/assets/truman/06_christof_site.jpg",
+      "source": "https://www.listal.com/viewimage/7813272",
+      "license": "existing film reference; no redistribution in report",
+      "reusable": false
+    },
+    {
+      "id": "07_sea_site",
+      "channel": "cinema",
+      "sha256": "b229da6a149ee3a2f18947a0095c72fa53ee1945644e340f0dad02f7f2580f88",
+      "path": "content/assets/truman/07_sea_site.jpg",
+      "source": "https://www.imdb.com/title/tt0120382/mediaviewer/rm3992055041/",
+      "license": "existing film reference; no redistribution in report",
+      "reusable": false
+    },
+    {
+      "id": "08_exit_site",
+      "channel": "cinema",
+      "sha256": "907e97aa6e793ae12188ad791c7fc251e1bb0e6263027fba37608d483b3ad8c4",
+      "path": "content/assets/truman/08_exit_site.jpg",
+      "source": "https://www.imdb.com/title/tt0120382/mediaviewer/rm743703808",
+      "license": "existing film reference; no redistribution in report",
+      "reusable": false
+    },
+    {
+      "id": "river-c1",
+      "channel": "cinema",
+      "sha256": "b7411b33cf03398d5ea5cc3d0157350110424f823385abbd170ad99d9fe5ca45",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/3/37/Night_Waves_%28250231021%29.jpeg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Night_Waves_(250231021).jpeg",
+      "license": "CC-BY-SA-3.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+      "creator": "Daniel Lepoittevin",
+      "reusable": true
+    },
+    {
+      "id": "stair2-c0",
+      "channel": "cinema",
+      "sha256": "2cc38fb6810b16e1508802a0f70c0dd2e35e843eede460f5e6a21bbcf9b72006",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/56/Concrete_Staircase%2C_Disused_Quarry%2C_St_Albans_Head%2C_Dorset_-_geograph.org.uk_-_20531.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "source": "https://commons.wikimedia.org/wiki/File:Concrete_Staircase,_Disused_Quarry,_St_Albans_Head,_Dorset_-_geograph.org.uk_-_20531.jpg",
+      "license": "CC-BY-SA-2.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+      "creator": "Jerry Fryman",
+      "reusable": true
+    }
+  ],
+  "cases": [
+    {
+      "id": "bus",
+      "channel": "legends",
+      "subject": "A city bus with headlights on a wet street at night",
+      "heading": "Ночной автобус",
+      "source_article": "legends-pilot-midnight-bus-20261120",
+      "topic": "a photograph illustrating an atmospheric urban mystery",
+      "candidates": [
+        "mirror-c0",
+        "studio-c0",
+        "gate-c0",
+        "station-c0",
+        "train-c0",
+        "busstop-c0",
+        "telephone-c1",
+        "window-c0",
+        "nightbus-c0",
+        "river-c2"
+      ],
+      "labels": {
+        "mirror-c0": "irrelevant",
+        "studio-c0": "irrelevant",
+        "gate-c0": "irrelevant",
+        "station-c0": "near",
+        "train-c0": "irrelevant",
+        "busstop-c0": "near",
+        "telephone-c1": "irrelevant",
+        "window-c0": "irrelevant",
+        "nightbus-c0": "match",
+        "river-c2": "near"
+      },
+      "required_features": {
+        "vehicle": [
+          "bus",
+          "buses"
+        ],
+        "time": [
+          "night",
+          "dark"
+        ],
+        "headlights": [
+          "headlights",
+          "headlamps",
+          "lights"
+        ]
+      },
+      "forbidden": [
+        "train platform",
+        "empty shelter"
+      ]
+    },
+    {
+      "id": "platform",
+      "channel": "legends",
+      "subject": "A brightly lit empty railway platform with tracks at night",
+      "heading": "Платформа последней электрички",
+      "source_article": "legends-02-poslednyaya-elektrichka",
+      "topic": "a photograph illustrating an atmospheric urban mystery",
+      "candidates": [
+        "mirror-c0",
+        "busstop-c0",
+        "window-c0",
+        "telephone-c1",
+        "nightbus-c0",
+        "station-c0",
+        "gate-c0",
+        "studio-c0",
+        "train-c0",
+        "river-c2"
+      ],
+      "labels": {
+        "mirror-c0": "irrelevant",
+        "busstop-c0": "near",
+        "window-c0": "irrelevant",
+        "telephone-c1": "irrelevant",
+        "nightbus-c0": "near",
+        "station-c0": "match",
+        "gate-c0": "irrelevant",
+        "studio-c0": "irrelevant",
+        "train-c0": "near",
+        "river-c2": "irrelevant"
+      },
+      "required_features": {
+        "setting": [
+          "platform",
+          "station"
+        ],
+        "time": [
+          "night",
+          "dark"
+        ],
+        "tracks": [
+          "tracks",
+          "rails",
+          "railway"
+        ]
+      },
+      "forbidden": [
+        "bus",
+        "daytime",
+        "roadway"
+      ]
+    },
+    {
+      "id": "antique-mirror",
+      "channel": "legends",
+      "subject": "A tall ornate framed mirror standing against a wall inside a room",
+      "heading": "Старое зеркало",
+      "source_article": "legends-10-zerkalo-perehoda",
+      "topic": "a photograph illustrating an atmospheric urban mystery",
+      "candidates": [
+        "gate-c0",
+        "nightbus-c0",
+        "station-c0",
+        "train-c0",
+        "studio-c0",
+        "window-c0",
+        "busstop-c0",
+        "telephone-c1",
+        "river-c2",
+        "mirror-c0"
+      ],
+      "labels": {
+        "gate-c0": "irrelevant",
+        "nightbus-c0": "irrelevant",
+        "station-c0": "irrelevant",
+        "train-c0": "irrelevant",
+        "studio-c0": "near",
+        "window-c0": "near",
+        "busstop-c0": "irrelevant",
+        "telephone-c1": "irrelevant",
+        "river-c2": "irrelevant",
+        "mirror-c0": "match"
+      },
+      "required_features": {
+        "object": [
+          "mirror"
+        ],
+        "inside": [
+          "room",
+          "interior"
+        ],
+        "detail": [
+          "ornate",
+          "decorative",
+          "frame",
+          "framed"
+        ]
+      },
+      "forbidden": [
+        "broken window",
+        "doorway"
+      ]
+    },
+    {
+      "id": "telephone",
+      "channel": "legends",
+      "subject": "A red glass-panel telephone box standing beside a village building",
+      "heading": "Красная телефонная будка",
+      "source_article": "legends-09-telefonnaya-budka",
+      "topic": "a photograph illustrating an atmospheric urban mystery",
+      "candidates": [
+        "station-c0",
+        "nightbus-c0",
+        "telephone-c1",
+        "studio-c0",
+        "window-c0",
+        "river-c2",
+        "train-c0",
+        "busstop-c0",
+        "gate-c0",
+        "mirror-c0"
+      ],
+      "labels": {
+        "station-c0": "irrelevant",
+        "nightbus-c0": "irrelevant",
+        "telephone-c1": "match",
+        "studio-c0": "irrelevant",
+        "window-c0": "near",
+        "river-c2": "irrelevant",
+        "train-c0": "irrelevant",
+        "busstop-c0": "near",
+        "gate-c0": "near",
+        "mirror-c0": "irrelevant"
+      },
+      "required_features": {
+        "object": [
+          "telephone box",
+          "phone booth",
+          "telephone booth",
+          "phone box",
+          "red booth"
+        ],
+        "color": [
+          "red"
+        ],
+        "setting": [
+          "building",
+          "house",
+          "brick",
+          "wall",
+          "village"
+        ]
+      },
+      "forbidden": [
+        "bus stop",
+        "railway"
+      ]
+    },
+    {
+      "id": "sprites",
+      "channel": "science",
+      "subject": "A narrow red lightning sprite high above a visibly glowing cloud deck at night",
+      "heading": "Красные спрайты над облаками",
+      "source_article": "science-01-krasnye-spraity",
+      "topic": "a photograph showing a specific scientific phenomenon",
+      "candidates": [
+        "volcano-c0",
+        "red-sprite-c0",
+        "nlc-c0",
+        "aurora-c0",
+        "hail-c0",
+        "comet-c0",
+        "moon-c1",
+        "rocket-c0",
+        "eclipse-c0",
+        "red-sprite-c3"
+      ],
+      "labels": {
+        "volcano-c0": "irrelevant",
+        "red-sprite-c0": "match",
+        "nlc-c0": "near",
+        "aurora-c0": "near",
+        "hail-c0": "irrelevant",
+        "comet-c0": "irrelevant",
+        "moon-c1": "near",
+        "rocket-c0": "near",
+        "eclipse-c0": "irrelevant",
+        "red-sprite-c3": "match"
+      },
+      "required_features": {
+        "object": [
+          "sprite",
+          "sprites",
+          "red lightning"
+        ],
+        "color": [
+          "red",
+          "crimson"
+        ],
+        "context": [
+          "cloud",
+          "clouds",
+          "storm",
+          "atmosphere"
+        ]
+      },
+      "forbidden": [
+        "aurora",
+        "moon",
+        "rocket launch"
+      ]
+    },
+    {
+      "id": "mesospheric-cloud",
+      "channel": "science",
+      "subject": "Wispy silver-blue noctilucent clouds over a flat horizon during twilight",
+      "heading": "Серебристые облака",
+      "source_article": "science-pilot-noctilucent-clouds-20261120",
+      "topic": "a photograph showing a specific scientific phenomenon",
+      "candidates": [
+        "aurora-c0",
+        "comet-c0",
+        "moon-c1",
+        "eclipse-c0",
+        "volcano-c0",
+        "nlc-c0",
+        "red-sprite-c3",
+        "red-sprite-c0",
+        "hail-c0",
+        "rocket-c0"
+      ],
+      "labels": {
+        "aurora-c0": "near",
+        "comet-c0": "irrelevant",
+        "moon-c1": "irrelevant",
+        "eclipse-c0": "irrelevant",
+        "volcano-c0": "irrelevant",
+        "nlc-c0": "match",
+        "red-sprite-c3": "near",
+        "red-sprite-c0": "near",
+        "hail-c0": "irrelevant",
+        "rocket-c0": "near"
+      },
+      "required_features": {
+        "object": [
+          "clouds",
+          "cloud",
+          "streaks"
+        ],
+        "time": [
+          "twilight",
+          "sunset",
+          "dusk",
+          "sunrise",
+          "night"
+        ],
+        "color": [
+          "silver",
+          "blue",
+          "wispy",
+          "white"
+        ]
+      },
+      "forbidden": [
+        "aurora",
+        "thunderstorm lightning",
+        "rocket launch"
+      ]
+    },
+    {
+      "id": "solar-eclipse",
+      "channel": "science",
+      "subject": "A total solar eclipse with a black disk surrounded by a bright white solar corona",
+      "heading": "Астрономический контрольный эпизод",
+      "source_article": "science-04-temnaya-materiya",
+      "topic": "a photograph showing a specific scientific phenomenon",
+      "candidates": [
+        "eclipse-c0",
+        "rocket-c0",
+        "comet-c0",
+        "red-sprite-c3",
+        "aurora-c0",
+        "hail-c0",
+        "moon-c1",
+        "nlc-c0",
+        "volcano-c0",
+        "red-sprite-c0"
+      ],
+      "labels": {
+        "eclipse-c0": "match",
+        "rocket-c0": "irrelevant",
+        "comet-c0": "near",
+        "red-sprite-c3": "irrelevant",
+        "aurora-c0": "near",
+        "hail-c0": "irrelevant",
+        "moon-c1": "near",
+        "nlc-c0": "irrelevant",
+        "volcano-c0": "irrelevant",
+        "red-sprite-c0": "irrelevant"
+      },
+      "required_features": {
+        "event": [
+          "solar eclipse",
+          "eclipse"
+        ],
+        "shape": [
+          "disk",
+          "disc",
+          "circle",
+          "ring",
+          "corona"
+        ]
+      },
+      "forbidden": [
+        "lunar eclipse",
+        "red moon"
+      ]
+    },
+    {
+      "id": "aurora",
+      "channel": "science",
+      "subject": "A bright green aurora borealis curtain over a dark landscape",
+      "heading": "Зелёное полярное сияние",
+      "source_article": "science-05-polyarnoe-siyanie",
+      "topic": "a photograph showing a specific scientific phenomenon",
+      "candidates": [
+        "red-sprite-c3",
+        "aurora-c0",
+        "moon-c1",
+        "eclipse-c0",
+        "rocket-c0",
+        "red-sprite-c0",
+        "comet-c0",
+        "hail-c0",
+        "volcano-c0",
+        "nlc-c0"
+      ],
+      "labels": {
+        "red-sprite-c3": "near",
+        "aurora-c0": "match",
+        "moon-c1": "irrelevant",
+        "eclipse-c0": "irrelevant",
+        "rocket-c0": "near",
+        "red-sprite-c0": "near",
+        "comet-c0": "irrelevant",
+        "hail-c0": "irrelevant",
+        "volcano-c0": "irrelevant",
+        "nlc-c0": "near"
+      },
+      "required_features": {
+        "object": [
+          "aurora",
+          "northern lights"
+        ],
+        "color": [
+          "green"
+        ],
+        "context": [
+          "sky",
+          "night"
+        ]
+      },
+      "forbidden": [
+        "red sprite",
+        "lunar eclipse",
+        "rocket launch"
+      ]
+    },
+    {
+      "id": "truman-mirror",
+      "channel": "cinema",
+      "subject": "A man in a striped pink shirt looking into a bathroom mirror with markings on the glass",
+      "heading": "Труман перед зеркалом",
+      "source_article": "cinema-01-truman-show-real-photos",
+      "topic": "a still from The Truman Show",
+      "candidates": [
+        "07_sea_site",
+        "river-c1",
+        "stair2-c0",
+        "05_cocoa_site",
+        "06_christof_site",
+        "01_seahaven_site",
+        "08_exit_site",
+        "03_viewers_site",
+        "04_meryl_truman_site",
+        "02_mirror_site"
+      ],
+      "labels": {
+        "07_sea_site": "irrelevant",
+        "river-c1": "irrelevant",
+        "stair2-c0": "irrelevant",
+        "05_cocoa_site": "near",
+        "06_christof_site": "near",
+        "01_seahaven_site": "irrelevant",
+        "08_exit_site": "irrelevant",
+        "03_viewers_site": "irrelevant",
+        "04_meryl_truman_site": "near",
+        "02_mirror_site": "match"
+      },
+      "required_features": {
+        "person": [
+          "man"
+        ],
+        "object": [
+          "mirror",
+          "reflection"
+        ],
+        "detail": [
+          "striped",
+          "pink",
+          "stripes",
+          "markings"
+        ]
+      },
+      "forbidden": [
+        "sailboat",
+        "woman holding a jar",
+        "crowd"
+      ]
+    },
+    {
+      "id": "truman-cocoa",
+      "channel": "cinema",
+      "subject": "A smiling woman in a white outfit presenting a jar of cocoa in a kitchen",
+      "heading": "Мэрил показывает банку какао",
+      "source_article": "cinema-01-truman-show-real-photos",
+      "topic": "a still from The Truman Show",
+      "candidates": [
+        "river-c1",
+        "01_seahaven_site",
+        "07_sea_site",
+        "06_christof_site",
+        "02_mirror_site",
+        "03_viewers_site",
+        "05_cocoa_site",
+        "04_meryl_truman_site",
+        "08_exit_site",
+        "stair2-c0"
+      ],
+      "labels": {
+        "river-c1": "irrelevant",
+        "01_seahaven_site": "irrelevant",
+        "07_sea_site": "irrelevant",
+        "06_christof_site": "irrelevant",
+        "02_mirror_site": "near",
+        "03_viewers_site": "near",
+        "05_cocoa_site": "match",
+        "04_meryl_truman_site": "near",
+        "08_exit_site": "irrelevant",
+        "stair2-c0": "irrelevant"
+      },
+      "required_features": {
+        "person": [
+          "woman",
+          "lady"
+        ],
+        "object": [
+          "jar",
+          "container",
+          "cocoa",
+          "can"
+        ],
+        "place": [
+          "kitchen",
+          "cupboard",
+          "cabinet",
+          "cabinets"
+        ]
+      },
+      "forbidden": [
+        "boat",
+        "crowd",
+        "restaurant"
+      ]
+    },
+    {
+      "id": "truman-sea",
+      "channel": "cinema",
+      "subject": "A white sailboat sailing on calm water in daylight with its sails raised",
+      "heading": "Труман выходит в море",
+      "source_article": "cinema-01-truman-show-real-photos",
+      "topic": "a still from The Truman Show",
+      "candidates": [
+        "05_cocoa_site",
+        "04_meryl_truman_site",
+        "02_mirror_site",
+        "river-c1",
+        "06_christof_site",
+        "07_sea_site",
+        "03_viewers_site",
+        "01_seahaven_site",
+        "08_exit_site",
+        "stair2-c0"
+      ],
+      "labels": {
+        "05_cocoa_site": "irrelevant",
+        "04_meryl_truman_site": "irrelevant",
+        "02_mirror_site": "irrelevant",
+        "river-c1": "near",
+        "06_christof_site": "near",
+        "07_sea_site": "match",
+        "03_viewers_site": "irrelevant",
+        "01_seahaven_site": "irrelevant",
+        "08_exit_site": "near",
+        "stair2-c0": "irrelevant"
+      },
+      "required_features": {
+        "object": [
+          "sailboat",
+          "sailing boat",
+          "yacht"
+        ],
+        "context": [
+          "water",
+          "sea",
+          "ocean"
+        ],
+        "detail": [
+          "sail",
+          "sails",
+          "sailing"
+        ]
+      },
+      "forbidden": [
+        "beach at night",
+        "staircase",
+        "crowd"
+      ]
+    },
+    {
+      "id": "truman-exit",
+      "channel": "cinema",
+      "subject": "A solitary figure beside a staircase at the edge of a flat sea against a blue painted sky wall",
+      "heading": "Лестница у края декорации",
+      "source_article": "cinema-01-truman-show-real-photos",
+      "topic": "a still from The Truman Show",
+      "candidates": [
+        "07_sea_site",
+        "river-c1",
+        "stair2-c0",
+        "01_seahaven_site",
+        "03_viewers_site",
+        "06_christof_site",
+        "08_exit_site",
+        "02_mirror_site",
+        "05_cocoa_site",
+        "04_meryl_truman_site"
+      ],
+      "labels": {
+        "07_sea_site": "near",
+        "river-c1": "near",
+        "stair2-c0": "near",
+        "01_seahaven_site": "irrelevant",
+        "03_viewers_site": "irrelevant",
+        "06_christof_site": "irrelevant",
+        "08_exit_site": "match",
+        "02_mirror_site": "irrelevant",
+        "05_cocoa_site": "irrelevant",
+        "04_meryl_truman_site": "irrelevant"
+      },
+      "required_features": {
+        "object": [
+          "stairs",
+          "staircase",
+          "steps"
+        ],
+        "setting": [
+          "sea",
+          "water",
+          "ocean",
+          "sky"
+        ],
+        "person": [
+          "man",
+          "person",
+          "figure"
+        ]
+      },
+      "forbidden": [
+        "sailboat",
+        "green hillside",
+        "crowd"
+      ]
+    }
+  ],
+  "article_replay": {
+    "article": "content/articles/cinema-01-truman-show-real-photos.json",
+    "description": "Section placement on a fixed existing article. Reference film stills are for private evaluation only.",
+    "cases": [
+      {
+        "id": "article-cover",
+        "channel": "cinema",
+        "heading": "Обложка",
+        "subject": "A man holding a bag in the middle of an orderly small town street edged with pastel houses",
+        "previous": "01_seahaven_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "03_viewers_site",
+          "06_christof_site",
+          "01_seahaven_site",
+          "07_sea_site",
+          "08_exit_site",
+          "02_mirror_site",
+          "river-c1",
+          "stair2-c0",
+          "05_cocoa_site",
+          "04_meryl_truman_site"
+        ],
+        "labels": {
+          "03_viewers_site": "irrelevant",
+          "06_christof_site": "irrelevant",
+          "01_seahaven_site": "match",
+          "07_sea_site": "irrelevant",
+          "08_exit_site": "irrelevant",
+          "02_mirror_site": "irrelevant",
+          "river-c1": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "05_cocoa_site": "irrelevant",
+          "04_meryl_truman_site": "irrelevant"
+        },
+        "required_features": {
+          "person": [
+            "man",
+            "person"
+          ],
+          "place": [
+            "street",
+            "road",
+            "town"
+          ],
+          "buildings": [
+            "houses",
+            "buildings"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "staircase"
+        ]
+      },
+      {
+        "id": "article-city",
+        "channel": "cinema",
+        "heading": "Город, в котором слишком хорошо",
+        "subject": "A man holding a bag in the middle of an orderly small town street edged with pastel houses",
+        "previous": "02_mirror_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "02_mirror_site",
+          "08_exit_site",
+          "06_christof_site",
+          "04_meryl_truman_site",
+          "stair2-c0",
+          "07_sea_site",
+          "03_viewers_site",
+          "01_seahaven_site",
+          "river-c1",
+          "05_cocoa_site"
+        ],
+        "labels": {
+          "02_mirror_site": "near",
+          "08_exit_site": "irrelevant",
+          "06_christof_site": "irrelevant",
+          "04_meryl_truman_site": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "07_sea_site": "irrelevant",
+          "03_viewers_site": "irrelevant",
+          "01_seahaven_site": "match",
+          "river-c1": "irrelevant",
+          "05_cocoa_site": "irrelevant"
+        },
+        "required_features": {
+          "person": [
+            "man",
+            "person"
+          ],
+          "place": [
+            "street",
+            "road",
+            "town"
+          ],
+          "buildings": [
+            "houses",
+            "buildings"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "staircase"
+        ]
+      },
+      {
+        "id": "article-audience",
+        "channel": "cinema",
+        "heading": "Секрет, который знают все, кроме главного героя",
+        "subject": "A group of viewers crowding around a television in a bar",
+        "previous": "03_viewers_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "07_sea_site",
+          "03_viewers_site",
+          "05_cocoa_site",
+          "06_christof_site",
+          "01_seahaven_site",
+          "02_mirror_site",
+          "stair2-c0",
+          "river-c1",
+          "04_meryl_truman_site",
+          "08_exit_site"
+        ],
+        "labels": {
+          "07_sea_site": "irrelevant",
+          "03_viewers_site": "match",
+          "05_cocoa_site": "irrelevant",
+          "06_christof_site": "near",
+          "01_seahaven_site": "irrelevant",
+          "02_mirror_site": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "river-c1": "irrelevant",
+          "04_meryl_truman_site": "irrelevant",
+          "08_exit_site": "irrelevant"
+        },
+        "required_features": {
+          "group": [
+            "crowd",
+            "group",
+            "people"
+          ],
+          "place": [
+            "bar",
+            "restaurant",
+            "tables"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "mirror"
+        ]
+      },
+      {
+        "id": "article-acting",
+        "channel": "cinema",
+        "heading": "Джим Керри, которого многие не ожидали увидеть",
+        "subject": "A man in a red checkered shirt standing beside a woman in white in a kitchen",
+        "previous": "04_meryl_truman_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "06_christof_site",
+          "02_mirror_site",
+          "05_cocoa_site",
+          "04_meryl_truman_site",
+          "03_viewers_site",
+          "07_sea_site",
+          "08_exit_site",
+          "01_seahaven_site",
+          "river-c1",
+          "stair2-c0"
+        ],
+        "labels": {
+          "06_christof_site": "irrelevant",
+          "02_mirror_site": "near",
+          "05_cocoa_site": "near",
+          "04_meryl_truman_site": "match",
+          "03_viewers_site": "irrelevant",
+          "07_sea_site": "irrelevant",
+          "08_exit_site": "irrelevant",
+          "01_seahaven_site": "irrelevant",
+          "river-c1": "irrelevant",
+          "stair2-c0": "irrelevant"
+        },
+        "required_features": {
+          "man": [
+            "man"
+          ],
+          "woman": [
+            "woman",
+            "lady"
+          ],
+          "place": [
+            "kitchen",
+            "cabinet",
+            "cupboard"
+          ],
+          "shirt": [
+            "plaid",
+            "checkered",
+            "striped",
+            "red shirt"
+          ]
+        },
+        "forbidden": [
+          "crowd",
+          "boat"
+        ]
+      },
+      {
+        "id": "article-director",
+        "channel": "cinema",
+        "heading": "Кристоф: человек, который решил стать Богом",
+        "subject": "A close-up of an older bald man in a dark jacket, with clouds behind him",
+        "previous": "06_christof_site",
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "01_seahaven_site",
+          "02_mirror_site",
+          "06_christof_site",
+          "river-c1",
+          "08_exit_site",
+          "05_cocoa_site",
+          "03_viewers_site",
+          "07_sea_site",
+          "stair2-c0",
+          "04_meryl_truman_site"
+        ],
+        "labels": {
+          "01_seahaven_site": "irrelevant",
+          "02_mirror_site": "near",
+          "06_christof_site": "match",
+          "river-c1": "irrelevant",
+          "08_exit_site": "irrelevant",
+          "05_cocoa_site": "irrelevant",
+          "03_viewers_site": "near",
+          "07_sea_site": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "04_meryl_truman_site": "irrelevant"
+        },
+        "required_features": {
+          "person": [
+            "man"
+          ],
+          "setting": [
+            "clouds",
+            "cloud",
+            "storm"
+          ],
+          "detail": [
+            "bald",
+            "older",
+            "elderly",
+            "dark jacket",
+            "black jacket"
+          ]
+        },
+        "forbidden": [
+          "jar of cocoa",
+          "boat"
+        ]
+      },
+      {
+        "id": "article-analogy",
+        "channel": "cinema",
+        "heading": "Почему «Шоу Трумана» сегодня выглядит ещё актуальнее",
+        "subject": "People gathered at tables watching a television broadcast",
+        "previous": null,
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "01_seahaven_site",
+          "river-c1",
+          "02_mirror_site",
+          "stair2-c0",
+          "04_meryl_truman_site",
+          "05_cocoa_site",
+          "07_sea_site",
+          "06_christof_site",
+          "03_viewers_site",
+          "08_exit_site"
+        ],
+        "labels": {
+          "01_seahaven_site": "irrelevant",
+          "river-c1": "irrelevant",
+          "02_mirror_site": "irrelevant",
+          "stair2-c0": "irrelevant",
+          "04_meryl_truman_site": "irrelevant",
+          "05_cocoa_site": "irrelevant",
+          "07_sea_site": "irrelevant",
+          "06_christof_site": "near",
+          "03_viewers_site": "match",
+          "08_exit_site": "irrelevant"
+        },
+        "required_features": {
+          "people": [
+            "group",
+            "crowd",
+            "people"
+          ],
+          "context": [
+            "television",
+            "tv",
+            "screen",
+            "bar"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "staircase"
+        ]
+      },
+      {
+        "id": "article-revisit",
+        "channel": "cinema",
+        "heading": "Моё мнение: стоит ли пересматривать «Шоу Трумана»?",
+        "subject": "A recognizable view of an orderly small fictional seaside town",
+        "previous": null,
+        "topic": "a still from The Truman Show",
+        "candidates": [
+          "stair2-c0",
+          "03_viewers_site",
+          "04_meryl_truman_site",
+          "01_seahaven_site",
+          "02_mirror_site",
+          "08_exit_site",
+          "river-c1",
+          "06_christof_site",
+          "07_sea_site",
+          "05_cocoa_site"
+        ],
+        "labels": {
+          "stair2-c0": "irrelevant",
+          "03_viewers_site": "irrelevant",
+          "04_meryl_truman_site": "irrelevant",
+          "01_seahaven_site": "match",
+          "02_mirror_site": "irrelevant",
+          "08_exit_site": "irrelevant",
+          "river-c1": "irrelevant",
+          "06_christof_site": "near",
+          "07_sea_site": "irrelevant",
+          "05_cocoa_site": "irrelevant"
+        },
+        "required_features": {
+          "place": [
+            "street",
+            "town"
+          ],
+          "buildings": [
+            "houses",
+            "buildings"
+          ]
+        },
+        "forbidden": [
+          "sailboat",
+          "lunar eclipse"
+        ]
+      }
+    ],
+    "reuse_cases": {
+      "truman-cocoa": "05_cocoa_site",
+      "truman-sea": "07_sea_site",
+      "truman-exit": "08_exit_site"
+    },
+    "source_sha256": "3e5ff1b8efd2ddfb10f32e2594acb7ff55ecaee4cf352962be216d9bd8f528f0"
+  }
+}

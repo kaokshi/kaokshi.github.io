@@ -1,0 +1,37 @@
+name: Editorial private storage one-time encrypted probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  encrypted-private-roundtrip:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'kaokshi/kaokshi.github.io' && github.ref == 'refs/heads/assistant/groq-quota-fallback-20261123'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install encryption dependency
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Verify unapproved production remains disabled and load public key only
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          config = json.loads(Path("config/editorial_production.json").read_text(encoding="utf-8"))
+          schedule = config["schedule"]
+          assert schedule["enabled"] is False and schedule["owner_approved"] is False
+          assert schedule["private_repository"] == "kaokshi/zen-editorial-review"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write("EDITORIAL_REVIEW_PUBLIC_KEY=" + schedule["owner_public_key"] + "\n")
+          PY
+      - name: Verify encrypted write, read, decrypt and remove in private GitHub
+        env:
+          EDITORIAL_DAILY_REPOSITORY: kaokshi/zen-editorial-review
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+        run: python -m src.editorial_storage_probe
