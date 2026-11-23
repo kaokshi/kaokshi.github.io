@@ -113,11 +113,20 @@ def run_repairs(base, sync, *, generate=False):
     # live in their original checkpoints and are never replayed by this workflow.
     prior_composition_collision = read_json(work / "groq-compositions.json") or {}
     prior_groq = int(set(prior_composition_collision) == {"model", "sha256", "usage"})
-    config["daily_calls"].update(klein=min(config["daily_calls"]["klein"], 4), groq=1 + prior_groq)
-    config["per_article_calls"].update(klein=min(config["per_article_calls"]["klein"], 4), groq=1 + prior_groq)
+    # A 400 response to the old strict JSON API request permits a corrected
+    # plain completion. A reserved call or other errors do not permit retries.
+    ledger_path = work / "ledger" / DAY / "state.json"
+    prior_attempts = (read_json(ledger_path) or {}).get("calls", [])
+    corrected_transport = prior_groq and any(
+        row["task"] == "historical-composition-collision-recovery"
+        and row["status"] == "failed" and row.get("http_status") == 400 for row in prior_attempts)
+    groq_limit = 1 + prior_groq + int(corrected_transport)
+    config["daily_calls"].update(klein=min(config["daily_calls"]["klein"], 4), groq=groq_limit)
+    config["per_article_calls"].update(klein=min(config["per_article_calls"]["klein"], 4), groq=groq_limit)
     memory = Memory(work / "ledger", DAY, datetime.now(timezone.utc) + timedelta(minutes=24), config,
                     private_git=SimpleNamespace(checkpoint=lambda: sync("Persist historical repair reservation or receipt")))
     descriptions = work / ("groq-compositions-recovered.json" if prior_groq else "groq-compositions.json")
+    saved_completion = work / ("groq-compositions-plain.txt" if corrected_transport else "groq-compositions-raw.txt")
     if generate and not descriptions.is_file():
         grouped = {slot: {"scene": card, "section": section} for (channel, slot), (card, section, _)
                    in pending.items() if channel == "legends-01"}
@@ -139,18 +148,24 @@ def run_repairs(base, sync, *, generate=False):
                        + json.dumps(compact, separators=(",", ":")))
             output_budget = 240
 
-        def compose():
-            reply = text_call("groq", message, max_tokens=output_budget, response_json=True)
-            composition = json_reply(reply)
-            if set(composition) != set(grouped) or not all(isinstance(value, str) and 20 <= len(value) <= 900
-                                                         for value in composition.values()):
-                raise Blocked("final_repair_composition_contract_invalid")
-            return json.dumps(composition).encode(), {"model": reply["model"], "usage": reply["usage"]}
+        def compose(*, plain=False):
+            reply = text_call("groq", message, max_tokens=460 if plain else output_budget, response_json=not plain)
+            return reply["text"].encode(), {"model": reply["model"], "usage": reply["usage"]}
 
-        # The raw response is stored separately from the reservation ledger and
-        # restored from the same private branch on a subsequent workflow.
-        operation = "historical-composition-collision-recovery" if prior_groq else "historical-compositions-v1"
-        recover_or_call(memory, operation, "groq", compose, descriptions)
+        if corrected_transport:
+            operation = "historical-composition-plain-after-http-400"
+        else:
+            operation = "historical-composition-collision-recovery" if prior_groq else "historical-compositions-v1"
+        response = recover_or_call(memory, operation, "groq",
+                                   lambda: compose(plain=corrected_transport), saved_completion)
+        composition = json_reply({"text": response.decode()})
+        if set(composition) != set(grouped) or not all(isinstance(value, str) and 20 <= len(value) <= 900
+                                                     for value in composition.values()):
+            raise Blocked("final_repair_composition_contract_invalid")
+        payload = json.dumps(composition).encode()
+        write(descriptions, payload)
+        write_json(receipt_path(descriptions), {"sha256": digest(payload), "input_sha256": digest(response)})
+        sync("Preserve parsed compositions from the saved Groq response")
 
     compositions = read_json(descriptions) or {}
     all_hashes = [(key, *image_hashes(path)) for key, (path, _, _) in selected.items()]
@@ -250,8 +265,7 @@ def materialize_verified_selection(base, destination):
         for row in rows:
             slot = row["slot"]
             if (row.get("status") != "accepted" or slots.get(row["section_id"]) != slot
-                    or not row.get("clip", {}).get("model")
-                    or not (row.get("vision") or {}).get("models", {}).get("blip")):
+                    or not qa.verified_model_evidence(row)):
                 raise Blocked("historical_release_image_not_verified")
             source = (base / row["selected_path"]).resolve()
             if not source.is_relative_to(base.resolve()):
