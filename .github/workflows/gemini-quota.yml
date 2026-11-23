@@ -25,8 +25,15 @@ jobs:
       - run: python -m unittest -v tests.test_editorial_gemini_quota
   read-gemini:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      id-token: write  # short-lived Google Cloud Monitoring credential, no long-lived GCP key
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
+    env:
+      GOOGLE_WIF_PROVIDER: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+      GOOGLE_QUOTA_VIEWER_SA_EMAIL: ${{ secrets.GOOGLE_QUOTA_VIEWER_SA_EMAIL }}
+      GOOGLE_QUOTA_MONITOR_PROJECT: ${{ vars.GOOGLE_QUOTA_MONITOR_PROJECT }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,4 +45,19 @@ jobs:
       - name: List Gemini-accessible models without inference requests
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python -m src.editorial_gemini_quota --output "$RUNNER_TEMP/gemini-status.json"
+        run: python -m src.editorial_gemini_quota --model gemini-3.5-flash-lite --output "$RUNNER_TEMP/gemini-status.json"
+      - name: Obtain short-lived optional Google Monitoring Viewer identity
+        id: google_auth
+        if: env.GOOGLE_WIF_PROVIDER != '' && env.GOOGLE_QUOTA_VIEWER_SA_EMAIL != '' && env.GOOGLE_QUOTA_MONITOR_PROJECT != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ env.GOOGLE_QUOTA_VIEWER_SA_EMAIL }}
+          token_format: access_token
+          create_credentials_file: false
+          access_token_scopes: https://www.googleapis.com/auth/monitoring.read
+      - name: Observe optional Gemini Cloud Monitoring metrics without inference
+        if: always()
+        env:
+          GOOGLE_CLOUD_ACCESS_TOKEN: ${{ steps.google_auth.outputs.access_token }}
+        run: python -m src.editorial_gemini_cloud_usage --model gemini-3.5-flash-lite --output "$RUNNER_TEMP/gemini-cloud-metrics.json"

@@ -106,7 +106,7 @@ class ProductionTests(unittest.TestCase):
                                                   "science-01": "partial_review_pending"})
             state = read_json(root / result["day"] / "state.json")
             self.assertTrue(all(task["executor"] != "openrouter" for task in state["tasks"].values()))
-            self.assertTrue(all("independent_edit_unavailable: no_independent_provider"
+            self.assertTrue(all("independent_edit_unavailable: gemini_limits_not_verified"
                                 in entry["blockers"] for entry in state["articles"].values()))
             for task in state["tasks"].values():
                 self.assertEqual([x["status"] for x in task["events"]],

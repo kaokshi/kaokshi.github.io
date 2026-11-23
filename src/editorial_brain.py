@@ -17,6 +17,7 @@ from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_layout import layout_issues
 from .editorial_groq_budget import forecast
+from .editorial_gemini_guard import safe_status as gemini_safe_status, ensure_minute_budget
 from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
@@ -96,6 +97,19 @@ class Article:
     def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
         if tokens is None:
             tokens = 3700
+        if provider == "gemini":
+            if stage not in ("full-edit", "full-edit-retry"):
+                raise Blocked("gemini_is_independent_editor_only")
+            state = gemini_safe_status(
+                self.config,
+                free_only=os.environ.get("EDITORIAL_GEMINI_FREE_ONLY") == "true",
+                model_available=os.environ.get("EDITORIAL_GEMINI_EDITOR_ALLOWED") == "true",
+            )
+            if state != "ready":
+                raise Blocked(state)
+            state = ensure_minute_budget(self.config["gemini_quota_guard"], prompt, tokens)
+            if state != "ready":
+                raise Blocked(state)
 
         def send(task, ceiling):
             callback = lambda: text_call(provider, prompt, ceiling)
@@ -314,7 +328,8 @@ class Article:
                  "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
-        author, editor = "groq", None
+        author = "groq"
+        editor = "gemini" if self.config.get("gemini_quota_guard", {}).get("automated_generation_enabled") else None
         raw = self.model("draft", author, brief, metadata={"topic": self.title})
         self.memory.article(self.id, draft_provider=author, independent_editor_provider=editor)
         self.current = self.remember_version(raw)
@@ -324,10 +339,17 @@ class Article:
                        "Если объём мал, развивай только недостаточно раскрытые места. "
                        "Сохрани естественный CTA. Верни полностью отредактированный текст.\nЧЕРНОВИК:\n"
                        + raw)
-        # No second text model is enabled. Keep a visible blocker rather than
-        # treating a second pass by Groq as an independent editorial review.
         edited = None
-        self.blockers.append("independent_edit_unavailable: no_independent_provider")
+        if editor:
+            try:
+                edited = self.model("full-edit", editor, edit_prompt, tokens=3700,
+                                    metadata={"source_sha256": original["text_sha256"]})
+                self.remember_version(edited)
+            except Blocked as exc:
+                # Never accept a Groq self-review as independent or bypass a Gemini quota stop.
+                self.blockers.append("independent_edit_unavailable: " + str(exc))
+        else:
+            self.blockers.append("independent_edit_unavailable: gemini_limits_not_verified")
         self.current = self.inspect(original)
         if edited and canonical(parse_article(edited)) != canonical(original["article"]):
             candidate = self.inspect(self.remember_version(edited), self.current)
@@ -649,7 +671,8 @@ def health(storage):
     return {"configuration_only": True, "private_storage": "connected" if storage else "not_connected",
             "credentials_present": {name: bool(os.environ.get(name)) for name in required},
             "free_account_attested": {s: os.environ.get(var) == "true" for s, var in (
-                ("klein", "EDITORIAL_CF_FREE_ONLY"), ("groq", "EDITORIAL_GROQ_FREE_ONLY"))},
+                ("klein", "EDITORIAL_CF_FREE_ONLY"), ("groq", "EDITORIAL_GROQ_FREE_ONLY"),
+                ("gemini", "EDITORIAL_GEMINI_FREE_ONLY"))},
             "local_executables": {cmd: bool(shutil.which(cmd)) for cmd in
                                   ("java", "aiw-ru", "ai-accent-detector", "git")},
             "assistant_handoff": "not_connected"}

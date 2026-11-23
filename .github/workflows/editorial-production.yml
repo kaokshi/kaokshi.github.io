@@ -172,10 +172,13 @@ jobs:
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
         run: |
           python -m src.cloudflare_quota --output "$RUNNER_TEMP/cloudflare-editorial-preflight.json" --require-free-neurons 6000
-      - name: Check Gemini model availability without generation
+      - name: Check Gemini 3.5 Flash-Lite visibility without inference
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'quota' || env.EDITORIAL_EFFECTIVE_COMMAND == 'health'
         continue-on-error: true
-        run: python -m src.editorial_gemini_quota --output "$RUNNER_TEMP/gemini-availability.json"
+        run: python -m src.editorial_gemini_quota --model gemini-3.5-flash-lite --output "$RUNNER_TEMP/gemini-availability.json"
+      - name: Apply Gemini second-editor free quota admission
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
+        run: python -m src.editorial_gemini_guard --github-env "$GITHUB_ENV" --model-report "$RUNNER_TEMP/gemini-availability.json"
       - name: Inspect shared Groq quota status without model calls
         id: quota
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'quota'
