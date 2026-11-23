@@ -8,7 +8,7 @@ from time import monotonic
 from .editorial_memory import digest, json_bytes, read_json, write_json
 from .editorial_providers import Blocked
 
-SCHEMA = "editorial-scene-qa-v1"
+SCHEMA = "editorial-scene-qa-v2"
 SECTION_FIELDS = ("location", "time_of_day", "visual_description")
 LIST_FIELDS = ("characters", "must_have", "must_not_have", "optional_details")
 TYPES = {"environment", "event", "object", "character"}
@@ -132,8 +132,10 @@ def questions_for(card):
     rows = [("setting", card["location"]), *(("required", item) for item in
             dict.fromkeys([*card["must_have"], *card["characters"]]) if item != card["location"]),
             *(("forbidden", item) for item in card["must_not_have"])]
-    statements = [f"Does the actual image clearly show {item}? Answer only yes, no, or uncertain."
-                  for _, item in rows]
+    statements = [question for role, item in rows for question in (
+        f"Is this {item}?" if role == "setting" else f"Is there {item} in the image?",
+        f"Can you see {item} in this picture?",
+    )]
     observations = [
         "Where does the scene take place? Describe only what is visible.",
         "What main objects and people are visible?",
@@ -142,21 +144,23 @@ def questions_for(card):
     return rows, statements + observations
 
 
-def inspect_pixels(card, image, kinds=("smol", "blip"), *, ask=ask_pixels):
+def inspect_pixels(card, image, kinds=("blip",), *, ask=ask_pixels):
     rows, questions = questions_for(card)
     perceptions = {}
+    n = len(rows) * 2
     for kind in kinds:
         replies = ask(kind, image, questions)
         if len(replies) != len(questions):
             raise ValueError("vision_reply_count")
-        perceptions[kind] = {"model": list(MODELS[kind]),
-                             "answers": replies[:len(rows)],
-                             "observations": dict(zip(("place", "objects_and_people", "action"), replies[len(rows):]))}
+        perceptions[kind] = {"model": list(MODELS[kind]), "answers": replies[:n],
+                             "observations": dict(zip(("place", "objects_and_people", "action"), replies[n:]))}
     findings = []
     for ix, (role, item) in enumerate(rows):
-        votes = {k: binary_answer(result["answers"][ix]) for k, result in perceptions.items()}
-        status = next(iter(votes.values())) if len(set(votes.values())) == 1 else "uncertain"
-        findings.append({"role": role, "element": item, "status": status, "votes": votes})
+        votes = {kind: [binary_answer(a) for a in result["answers"][ix * 2:ix * 2 + 2]]
+                 for kind, result in perceptions.items()}
+        answers = {status for pair in votes.values() for status in pair}
+        findings.append({"role": role, "element": item,
+                         "status": next(iter(answers)) if len(answers) == 1 else "uncertain", "votes": votes})
     return {"models": perceptions, "findings": findings}
 
 
@@ -256,7 +260,7 @@ def apply_channel_policy(report, channel, metadata, *, film=None, spoilers=False
         else:
             issue = "science_image_medium_unknown"
     elif channel == "cinema":
-        story = metadata.get("scene", "") + " " + card["visual_description"]
+        story = (metadata.get("scene") or "") + " " + card["visual_description"]
         identity = (
             film and source_valid and (
                 (metadata.get("original_title") == film.get("original_title")
@@ -285,3 +289,13 @@ def apply_channel_policy(report, channel, metadata, *, film=None, spoilers=False
         if report["status"] == "accepted":
             report["status"] = "needs_review"
     report["policy"] = checks
+
+
+
+def accepted_for(row, card, *, is_cover):
+    report = row.get("image_qa") or {}
+    return bool(card and report.get("schema") == SCHEMA and report.get("status") == "accepted"
+                and report.get("scene_card_sha256") == digest(json_bytes(card))
+                and report.get("image_sha256") == row.get("sha256")
+                and row.get("is_cover") is is_cover
+                and type(is_cover) is bool)

@@ -68,18 +68,13 @@ def manifest_by_file(folder):
     return {row.get("filename", row.get("file")): row for row in values}
 
 
-def compare_models(card, image):
-    evidence = qa.inspect_pixels(card, image)
-    return evidence
-
-
 def audit_image(channel, key, slot, card, error, meta, folder, all_hashes):
     path = folder / "illustrations" / f"{slot}.jpg"
     raw = path.read_bytes()
     sha = digest(raw)
     row = {"article_id": channel, "section_id": key, "slot": slot, "image_sha256": sha,
            "generations": 0, "requests": 0}
-    if error or meta.get("sha256") != sha:
+    if error or card is None or meta.get("sha256") != sha:
         row.update(status="needs_review", reasons=[error or "source_manifest_sha_mismatch"])
         return row
     image, contrast = decode_candidate(raw)
@@ -91,8 +86,7 @@ def audit_image(channel, key, slot, card, error, meta, folder, all_hashes):
     dupes = [other for other, exact, near in all_hashes if other != (channel, slot)
              and (exact == sha or (int(near, 16) ^ int(phash, 16)).bit_count() <= 6)]
     decision = qa.judge(card, image, sha, clip, duplicate=bool(dupes), clip_gate=False,
-                        quality={"passed": True, "size": list(image.size), "contrast": round(contrast, 2)},
-                        vision=compare_models)
+                        quality={"passed": True, "size": list(image.size), "contrast": round(contrast, 2)})
     decision["duplicate_slots"] = dupes
     qa.apply_channel_policy(decision, channel.split("-")[0], meta,
                             film={"original_title": "Prisoners", "year": 2013, "imdb": "tt1392214"}
@@ -102,7 +96,7 @@ def audit_image(channel, key, slot, card, error, meta, folder, all_hashes):
 
 def audit(root, day):
     base = root / "editorial-chat-review" / checked_day(day)
-    report_dir = base / "image-qa-audit-v1"
+    report_dir = base / "image-qa-audit-v2"
     output = report_dir / "image_qa.json"
     all_hashes = []
     for channel in CHANNELS:
