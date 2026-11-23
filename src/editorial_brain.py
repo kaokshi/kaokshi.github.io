@@ -20,6 +20,7 @@ from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
 from .editorial_no_repeat import topic_duplicate_reason, words
 from .editorial_package import package, zip_packet
+from .editorial_subscription import CHANNELS as SUBSCRIPTION_CHANNELS
 from .editorial_providers import Blocked, MODELS, ProviderError, klein, text_call
 from .editorial_review import RULES, canonical, improves, parse_article, qa, source_context, sources, structural_checks
 
@@ -331,7 +332,13 @@ class Article:
             style = ("Канал «Кадр за Кадром». Отделяй авторскую оценку от доказуемых фактов. "
                      "Не выдумывай сцены, реплики и последовательность событий. "
                      f"Карточка, формат и режим спойлеров: {json.dumps(self.film, ensure_ascii=False)}.")
-        brief = f"{RULES}\n{style}\nТема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}"
+        channel_name = SUBSCRIPTION_CHANNELS[self.channel]
+        brief = (f"{RULES}\n{style}\n"
+                 f"В последнем абзаце естественно пригласи подписаться на канал "
+                 f"«{channel_name}». Укажи название канала точно в таком написании, "
+                 "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
+                 "редакция добавит сама при экспорте.\n"
+                 f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
         author, editor = "groq", "openrouter"
         try:
             raw = self.model("draft", author, brief, metadata={"topic": self.title})
