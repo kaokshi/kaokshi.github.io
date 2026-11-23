@@ -1,4 +1,4 @@
-name: One-time OVHcloud anonymous free route integration check
+name: One-time OVHcloud Qwen anonymous free route integration check
 on:
   push:
     branches:
