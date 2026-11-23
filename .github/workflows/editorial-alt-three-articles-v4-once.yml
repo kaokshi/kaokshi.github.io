@@ -2,6 +2,10 @@ name: Kilo OVH OpenRouter isolated editorial validation
 on:
   workflow_dispatch:
     inputs:
+      quota_only:
+        description: Read the OpenRouter free quota without generating articles
+        type: boolean
+        default: false
       include_cinema:
         description: Include cinema in this isolated validation
         type: boolean
@@ -24,8 +28,30 @@ permissions:
   contents: read
   actions: read
 jobs:
+  openrouter-quota:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && (inputs.quota_only || contains(github.event.head_commit.message, '[quota-only]'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read the remaining OpenRouter free requests
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python - <<'QUOTA'
+          import json
+          from datetime import datetime, timezone
+          from src.editorial_free_fallback import free_remaining
+          print(json.dumps({"openrouter_free_remaining": free_remaining(),
+                            "checked_at": datetime.now(timezone.utc).isoformat()}))
+          QUOTA
   agent-three-channel:
-    if: github.repository == 'kaokshi/kaokshi.github.io'
+    if: github.repository == 'kaokshi/kaokshi.github.io' && !inputs.quota_only && !contains(github.event.head_commit.message, '[quota-only]')
     runs-on: ubuntu-24.04
     timeout-minutes: 160
     env:
