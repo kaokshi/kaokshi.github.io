@@ -123,6 +123,19 @@ class Article:
                               metadata={**(metadata or {}), "fallback_from": "groq",
                                         "fallback_reason": "groq_preflight_capacity_unavailable"},
                               repair=repair)
+        if (alternate_enabled() and provider == "openrouter"
+                and (stage.startswith("full-edit") or stage.startswith("repair-"))):
+            # Count submitted requests, including failed/reserved ones. A failed
+            # response still consumes free quota and therefore an editing slot.
+            with self.memory.lock:
+                operations = self.memory.data["tasks"]
+                used = sum(
+                    1 for row in self.memory.data["calls"]
+                    if row.get("article") == self.id and row.get("provider") == "openrouter"
+                    and (lambda op: op.startswith(("full-edit", "repair-")))(
+                        operations.get(row.get("task"), {}).get("operation", "")))
+            if used >= 2:
+                raise Blocked("openrouter_two_edit_requests_per_article_exhausted")
         if tokens is None:
             tokens = 3700 if provider == "groq" else 7800
 
@@ -418,7 +431,7 @@ class Article:
             self.remember_version(edited)
         except Blocked as exc:
             can_retry = str(exc) in {"empty_visible_content", "connection_failed", "truncated_response"}
-            if can_retry:
+            if can_retry and not alternative_test():
                 try:
                     edited = self.model("full-edit-retry", editor, edit_prompt,
                                         metadata={"source_sha256": original["text_sha256"]})
@@ -451,7 +464,7 @@ class Article:
 
     def revise(self, brief):
         from .editorial_alt_models import enabled as alternative_test
-        limit = self.escalation["agent_revision_limit"]
+        limit = min(2, self.escalation["agent_revision_limit"]) if alternative_test() else self.escalation["agent_revision_limit"]
         seen = {self.current["text_sha256"], *(row["after"] for row in self.attempts if "after" in row)}
         for attempt in range(1, limit + 1):
             report = self.current["report"]
