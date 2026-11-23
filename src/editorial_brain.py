@@ -283,8 +283,26 @@ class Article:
                     raise Blocked("topic_list_missing")
             topic_prompt = prompt + (f" В этот раз выбери иные предметы для набора {shift}." if shift else "")
             try:
-                result = self.model(f"topics-{shift + 1}", "groq", topic_prompt,
-                                    validate=is_valid, tokens=topic_tokens)
+                saved_topic = None
+                if groq_gemini_klein_pilot() and self.memory.retry:
+                    # Reuse the original model-made candidate list even if
+                    # non-semantic prompt formatting changed between patches.
+                    # No new model request is needed to retry independent
+                    # verification of the same film candidates.
+                    with self.memory.lock:
+                        saved_topic = next((
+                            task["result"]
+                            for task in self.memory.data["tasks"].values()
+                            if task["article"] == self.id
+                            and task["operation"] == f"topics-{shift + 1}"
+                            and task["status"] == "completed"
+                            and isinstance(task.get("result"), dict)
+                            and isinstance(task["result"].get("text"), str)
+                        ), None)
+                result = (json_reply(saved_topic) if saved_topic is not None
+                          else self.model(f"topics-{shift + 1}", "groq", topic_prompt,
+                                          validate=is_valid, tokens=topic_tokens))
+                is_valid(result)
             except Blocked as exc:
                 # Retry malformed JSON as a new, metered model task. Never
                 # insert any assistant-authored topic or other creative data.
@@ -318,7 +336,8 @@ class Article:
                     row = {**row, "records": records}
                 if self.channel == "cinema":
                     try:
-                        film = self.task("film-evidence", "wikidata-and-film-sources", {"plan": row},
+                        film = self.task("film-evidence", "wikidata-and-film-sources",
+                            {"plan": row, "research_version": "wikimedia-ua-20261123"},
                             lambda _: cinema.evidence(row, self.cinema_registry), minimum_seconds=125)
                     except Blocked:
                         continue
