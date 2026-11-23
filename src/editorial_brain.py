@@ -152,10 +152,17 @@ class Article:
                     sleep(exc.retry_after)
                 return send(task, tokens)
 
+        inputs = {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
+                  "prompt_sha256": digest(prompt), **(metadata or {})}
+        if provider == "kilo" and isinstance(self.memory, Memory) and self.memory.retry:
+            previous = {**inputs, "model": "kilo-auto/free"}
+            with self.memory.lock:
+                if any(row["article"] == self.id and row["operation"] == stage
+                       and row["executor"] == provider and row["status"] == "completed"
+                       and row["inputs"] == previous for row in self.memory.data["tasks"].values()):
+                    inputs = previous
         try:
-            result = self.task(stage, provider, {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
-                                               "prompt_sha256": digest(prompt), **(metadata or {})},
-                               execute, minimum_seconds=130,
+            result = self.task(stage, provider, inputs, execute, minimum_seconds=130,
                                validator=(lambda response: validate(json_reply(response))) if validate else None)
         except Blocked as exc:
             # Route a quota-stopped Groq stage to a separately recorded, verified-free

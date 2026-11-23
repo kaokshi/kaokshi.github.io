@@ -94,14 +94,18 @@ jobs:
           print(json.dumps({"providers":status,"openrouter_free_remaining":remaining},
                            sort_keys=True),flush=True)
           PY
-      - name: Probe all four free text routes
+      - name: Probe free text routes needed for this run
+        env:
+          KILO_PROBE_ONLY: ${{ inputs.resume_run != '' || contains(github.event.head_commit.message, '[resume]') }}
         run: |
           python - <<'PY'
-          import json
+          import json, os
           from time import monotonic
           from src.editorial_brain import json_reply
           from src.editorial_providers import Blocked, text_call
-          for provider in ("kilo", "ovh", "ovh-gptoss", "openrouter"):
+          providers = ("kilo",) if os.environ["KILO_PROBE_ONLY"] == "true" else (
+              "kilo", "ovh", "ovh-gptoss", "openrouter")
+          for provider in providers:
               started = monotonic()
               status = {"provider": provider}
               try:

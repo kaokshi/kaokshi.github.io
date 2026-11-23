@@ -16,8 +16,9 @@ from .editorial_groq_budget import instant, rate_headers, seconds, usage_fields
 GROQ = "openai/gpt-oss-120b"
 NEMOTRON = "nvidia/nemotron-3-ultra-550b-a55b:free"
 KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
+KILO = "nvidia/nemotron-3.5-lightning:free"
 MODELS = {"groq": GROQ, "openrouter": NEMOTRON, "klein": KLEIN,
-          "kilo": "kilo-auto/free", "ovh": "qwen3.6-35b-a3b", "ovh-gptoss": "gpt-oss-120b"}
+          "kilo": KILO, "ovh": "qwen3.6-35b-a3b", "ovh-gptoss": "gpt-oss-120b"}
 USER_AGENT = "ZenEditorial/1.0 (+https://github.com/kaokshi/kaokshi.github.io)"
 
 
