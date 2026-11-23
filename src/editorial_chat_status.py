@@ -11,6 +11,7 @@ ARTICLE_IDS = ("science-01", "legends-01", "cinema-01")
 STATES = {"missing", "running", "blocked", "partial_review_pending",
           "rights_review_pending", "review_pending", "package_failed"}
 CODES = re.compile(r"^[a-z][a-z0-9_]{2,85}$")
+STAGES = re.compile(r"^[a-z][a-z0-9_-]{2,85}$")
 SAFE_PREFIXES = ("film_", "movie_", "cinema_", "qa_", "editorial_", "image_",
                  "layout_", "groq_", "openrouter_", "provider_", "http_",
                  "call_", "production_", "revision_", "source_", "rights_",
@@ -49,8 +50,8 @@ def public_report(data, day):
         entries[ident] = {
             "status": state if state in STATES else "blocked",
             "blockers": sorted(set(code(b) for b in entry.get("blockers", [])))[:20],
-            "failed_tasks": sorted([{"stage": task.get("operation") if CODES.fullmatch(
-                task.get("operation", "")) else "unknown",
+            "failed_tasks": sorted([{"stage": task.get("operation") if isinstance(task.get("operation"), str) and STAGES.fullmatch(
+                task["operation"]) else "unknown",
                 "code": code(task.get("error"))} for task in rows],
                 key=lambda row: (row["stage"], row["code"]))[:35],
         }
