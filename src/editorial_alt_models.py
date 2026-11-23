@@ -40,8 +40,12 @@ def groq_ovh_klein_pilot():
     return ovh_trial() and os.environ.get("EDITORIAL_GROQ_OVH_KLEIN_PILOT") == "true"
 
 
+def groq_gemini_klein_pilot():
+    return os.environ.get("EDITORIAL_GROQ_GEMINI_KLEIN_PILOT") == "true"
+
+
 def gemini_pilot():
-    return groq_ovh_klein_pilot() and os.environ.get("EDITORIAL_GEMINI_EDITOR") == "true"
+    return groq_gemini_klein_pilot() or (groq_ovh_klein_pilot() and os.environ.get("EDITORIAL_GEMINI_EDITOR") == "true")
 
 
 def ovh_finalize():
@@ -58,9 +62,9 @@ def require_isolated():
         raise Blocked("alt_provider_requires_isolated_validation")
     if os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
         raise Blocked("alt_provider_must_not_route_groq")
-    if os.environ.get("GROQ_API_KEY") and not groq_ovh_klein_pilot():
+    if os.environ.get("GROQ_API_KEY") and not (groq_ovh_klein_pilot() or groq_gemini_klein_pilot()):
         raise Blocked("alt_provider_groq_secret_must_be_absent")
-    if groq_ovh_klein_pilot() and os.environ.get("EDITORIAL_GROQ_FREE_ONLY") != "true":
+    if (groq_ovh_klein_pilot() or groq_gemini_klein_pilot()) and os.environ.get("EDITORIAL_GROQ_FREE_ONLY") != "true":
         raise Blocked("groq_free_account_unconfirmed")
     if os.environ.get("OVH_AI_ENDPOINTS_ACCESS_TOKEN") or os.environ.get("OVH_API_KEY"):
         raise Blocked("ovh_removed_from_project")
