@@ -78,7 +78,7 @@ jobs:
           EDITORIAL_PRIVATE_REPOSITORY: ''
         run: |
           python -m src.editorial_brain retry --date "$(cat "$RUNNER_TEMP/editorial-day")" \
-            --encrypted-mode --validate-cinema --validation-window 85 --local-state "$EDITORIAL_STATE_DIR"
+            --encrypted-mode --validate-cinema --validation-window 90 --local-state "$EDITORIAL_STATE_DIR"
       - name: Deliver clearly labeled final or incomplete review privately
         if: always()
         continue-on-error: true
