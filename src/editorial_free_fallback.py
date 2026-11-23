@@ -52,6 +52,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--github-env", type=Path, required=True)
     parser.add_argument("--minimum-free-remaining", type=int, default=0)
+    parser.add_argument("--quota-only", action="store_true",
+                        help="Check actual free request headroom without rerouting Groq")
     args = parser.parse_args()
     if verify_fallback() != "free_route_confirmed":
         print("OpenRouter free-only preflight unavailable; production remains blocked.")
@@ -64,6 +66,8 @@ def main():
             return 2
         print(f"OpenRouter free request envelope verified: {available} remaining; "
               "no paid model calls authorized.")
+    if args.quota_only:
+        return 0
     # GITHUB_ENV is a trusted GitHub-created file, not a user path in public execution.
     with args.github_env.open("a", encoding="utf-8") as stream:
         stream.write("EDITORIAL_GROQ_FALLBACK_ONLY=true\n")
