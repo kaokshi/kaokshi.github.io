@@ -332,6 +332,11 @@ def latest_alt_checkpoint(current_run_id, *, one_article=False):
         rows = json.loads(gh("api", f"{path}/runs/{run['id']}/artifacts?per_page=100"))["artifacts"]
         if any(row["name"] == name and not row["expired"] for row in rows):
             return str(run["id"])
+        if os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+            from .editorial_v1_checkpoints import has_private_checkpoint
+
+            if has_private_checkpoint(str(run["id"]), edition.isoformat()):
+                return str(run["id"])
     return None
 
 

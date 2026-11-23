@@ -112,14 +112,16 @@ jobs:
           EDITORIAL_PRIVATE_TOKEN: ''
           EDITORIAL_PRIVATE_REPOSITORY: ''
           EDITORIAL_V1_CHECKPOINT_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
-          RESUME_RUN: ${{ inputs.resume_run || '45200372945' }}
+          RESUME_RUN: ${{ inputs.resume_run }}
           GH_TOKEN: ${{ github.token }}
         run: |
           umask 077
           day="$(TZ=Europe/Moscow date +%F)"
           echo "$day" > "$RUNNER_TEMP/editorial-day"
           command=daily
-          if [ "$GITHUB_EVENT_NAME" = push ] && [ -z "$RESUME_RUN" ]; then
+          if [ "$GITHUB_RUN_ATTEMPT" -gt 1 ]; then
+            RESUME_RUN=""
+          elif [ -z "$RESUME_RUN" ]; then
             RESUME_RUN="$(python -c 'from src.editorial_delivery import latest_alt_checkpoint; import os; print(latest_alt_checkpoint(os.environ["GITHUB_RUN_ID"]) or "")')"
           fi
           if [ -n "$RESUME_RUN" ] && [ "$RESUME_RUN" != "$GITHUB_RUN_ID" ]; then

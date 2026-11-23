@@ -56,3 +56,13 @@ def restore_private_checkpoint(root, day, run_id):
         return False
     with TemporaryDirectory(prefix="zen-v1-checkpoint-restore-") as work:
         return ReleaseCheckpoint(Path(work) / "private", token, run_id).restore(root, day)
+
+
+
+def has_private_checkpoint(run_id, day):
+    token = os.environ.get("EDITORIAL_V1_CHECKPOINT_TOKEN")
+    if not token:
+        return False
+    with TemporaryDirectory(prefix="zen-v1-checkpoint-find-") as work:
+        store = ReleaseCheckpoint(Path(work) / "private", token, run_id)
+        return store.path(day).is_file()
