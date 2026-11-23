@@ -846,7 +846,10 @@ class Article:
                         s, plan["subject"], p, self.image_index, self.film["film"], self.cinema_registry)
                 elif sourced_illustrations or scene["kind"] == "photo":
                     executor = "commons-verified-license" if sourced_illustrations else "commons-nasa"
-                    options = {"verified_only": True} if sourced_illustrations or pilot else {}
+                    # In the mixed-media science pilot, try traceable NASA photos after
+                    # Commons; NASA rights are explicitly left pending for owner review.
+                    # Only the sourced-illustration route requires Commons license metadata.
+                    options = {"verified_only": True} if sourced_illustrations else {}
                     fn = lambda _, s=scene, p=path: photo(s, plan["subject"], p, self.image_index, **options)
                 else:
                     executor = "klein"
