@@ -245,26 +245,53 @@ def gemini_text(prompt, max_tokens, *, response_json=False, fallback_model=False
         if wait > 0:
             sleep(wait)
         _gemini_last_request = monotonic()
-    url = f"https://{GEMINI_HOST}/v1beta/models/{selected_model}:streamGenerateContent?alt=sse"
-    raw = request(url, (GEMINI_HOST,), data=json.dumps(body).encode(),
-                  headers={**gemini_headers(), "Content-Type": "application/json"},
-                  timeout=210, limit=4_000_000, retry_transient=True)
     text_parts = []
     finish = None
     usage = {}
     model = selected_model
-    for line in raw.splitlines():
-        if not line.startswith(b"data:"):
-            continue
-        chunk = parse_json(line.removeprefix(b"data:").strip())
-        if not isinstance(chunk, dict):
+    # Structured edits should use the ordinary JSON endpoint. The previous
+    # "streaming" implementation buffered the entire SSE response first and
+    # offered no progress benefit, while making malformed event handling harder.
+    if response_json:
+        url = f"https://{GEMINI_HOST}/v1beta/models/{selected_model}:generateContent"
+        packet = parse_json(request(url, (GEMINI_HOST,),
+                                    data=json.dumps(body).encode(),
+                                    headers={**gemini_headers(),
+                                             "Content-Type": "application/json"},
+                                    timeout=150, limit=4_000_000,
+                                    retry_transient=True))
+        if not isinstance(packet, dict):
             raise ProviderError("gemini_generation_incomplete")
-        model = chunk.get("modelVersion") or model
-        usage = chunk.get("usageMetadata") or usage
-        for candidate in chunk.get("candidates", ())[:1]:
+        model = packet.get("modelVersion") or selected_model
+        usage = packet.get("usageMetadata") or {}
+        candidates = packet.get("candidates") or []
+        if not isinstance(candidates, list):
+            raise ProviderError("gemini_generation_incomplete")
+        for candidate in candidates[:1]:
+            if not isinstance(candidate, dict):
+                continue
             finish = candidate.get("finishReason") or finish
-            text_parts.extend(part["text"] for part in candidate.get("content", {}).get("parts", ())
-                              if not part.get("thought") and isinstance(part.get("text"), str))
+            parts = (candidate.get("content") or {}).get("parts") or []
+            text_parts.extend(part["text"] for part in parts
+                              if isinstance(part, dict) and not part.get("thought")
+                              and isinstance(part.get("text"), str))
+    else:
+        url = f"https://{GEMINI_HOST}/v1beta/models/{selected_model}:streamGenerateContent?alt=sse"
+        raw = request(url, (GEMINI_HOST,), data=json.dumps(body).encode(),
+                      headers={**gemini_headers(), "Content-Type": "application/json"},
+                      timeout=150, limit=4_000_000, retry_transient=True)
+        for line in raw.splitlines():
+            if not line.startswith(b"data:"):
+                continue
+            chunk = parse_json(line.removeprefix(b"data:").strip())
+            if not isinstance(chunk, dict):
+                raise ProviderError("gemini_generation_incomplete")
+            model = chunk.get("modelVersion") or model
+            usage = chunk.get("usageMetadata") or usage
+            for candidate in chunk.get("candidates", ())[:1]:
+                finish = candidate.get("finishReason") or finish
+                text_parts.extend(part["text"] for part in candidate.get("content", {}).get("parts", ())
+                                  if not part.get("thought") and isinstance(part.get("text"), str))
     if finish == "MAX_TOKENS":
         raise ProviderError("truncated_response")
     if finish != "STOP":
