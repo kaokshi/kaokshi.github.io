@@ -1,0 +1,25 @@
+name: V1 private Git concurrent write integration
+on:
+  push:
+    branches: [assistant/kilo-modelscope-openrouter-isolated-20261123]
+    paths:
+      - .github/workflows/editorial-v1-storage-integration.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  storage-integration:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.ref_name == 'assistant/kilo-modelscope-openrouter-isolated-20261123'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Simultaneous write and stale-image conflict on synthetic data
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+        run: python -m src.editorial_storage_integration
