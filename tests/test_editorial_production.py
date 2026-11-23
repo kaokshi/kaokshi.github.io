@@ -147,7 +147,7 @@ class ProductionTests(unittest.TestCase):
             self.assertEqual(delivered["status"], "verified_files_available")
             self.assertTrue((root / "authorized" / "science-01" / "Статья.docx").is_file())
             self.assertTrue((root / "authorized" / "science-01" / "Статья.html").is_file())
-            self.assertEqual(len(list((root / "authorized" / "science-01" / "images").glob("*.jpg"))), 7)
+            self.assertEqual(len(list((root / "authorized" / "science-01" / "images").glob("*.jpg"))), 8)
 
             previous = len(calls)
             brain.execute("daily", root, PrivateStub(), validation_window=120)
