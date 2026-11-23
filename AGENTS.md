@@ -2,6 +2,12 @@
 
 This repository is the **existing** editorial pipeline, not a new website. Read `docs/EDITORIAL_AUTOMATION.md`, the latest owner instructions, `docs/EDITORIAL_AGENT_V1_MODEL_A_20261120.md`, `config/ai_revision_policy.json`, `config/agent_learning.json` before editing.
 
+## Content authorship boundary — owner instruction 2026-11-23
+
+**Hard prohibition for ChatGPT, Codex and external human assistants during content production:** do not originate, write, rewrite, edit, expand or suggest any article text, headlines, plots, topics, outlines, captions, prompts describing concrete images, or illustrations for the three Dzen channels. Do not use ChatGPT image generation or external manual content creation as a shortcut. Do not insert assistant-produced creative content, fabricated previews, sample paragraphs or replacement illustrations into article packets. All creative outputs must arise from the existing project's autonomous editorial pipeline via its configured model providers, and carry verifiable per-task provider and source/version metadata. The assistant may only write and review **software, prompts-as-code that define generic quality rules, configuration, tests with clearly labelled synthetic fixtures, infrastructure, and factual status reports**, and may inspect/relay project-produced output verbatim to the owner. Creating tests must not masquerade as creating real articles. If project generation is blocked by quotas, sources, model access, storage or checks, leave the corresponding article **blocked/pending** and report the genuine blocker; never fill in missing material manually. This rule applies to cinema as a test-only channel too and overrides any former instruction to handwrite pilot content.
+
+The owner requested exactly **one independent test article per channel** (legends, science, cinema). The cinema test is isolated and encrypted; production release remains paused. A three-channel test must report each project's actual generated text, visuals, source checks, QA, and final owner-review package status, not generated claims from ChatGPT.
+
 ## Operating rules
 
 - The owner has three channels; only `legends` and `science` are currently active for drafts. `cinema` stays paused.
