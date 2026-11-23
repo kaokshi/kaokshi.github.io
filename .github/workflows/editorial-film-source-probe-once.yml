@@ -1,0 +1,47 @@
+name: Free cinema factual source probe without LLM calls
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-film-source-probe-once.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  film-source-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check offline film source parsing
+        run: python -m unittest -q tests.test_movie_fact_check
+      - name: Query public metadata for one unreviewed cinema film
+        run: |
+          python - <<'PY'
+          import json
+          from src.movie_autonomous_research import movie_sources
+          from src.editorial_providers import Blocked
+          try:
+              result = movie_sources("discover", {"topic": "«Пленницы» (2013)"})
+              film = result["film"]
+              print(json.dumps({
+                  "status": result["status"],
+                  "film": film["title"],
+                  "year_verified": 2013 in film["years"],
+                  "director_count": len(film["directors"]),
+                  "source_count": len(result["documents"]),
+                  "second_document_chars": len(result["documents"][1]["text"]),
+                  "publication_authorized": False,
+              }, ensure_ascii=False))
+              assert 2013 in film["years"] and film["directors"]
+          except Blocked as exc:
+              print(json.dumps({"status": "blocked", "safe_error": str(exc),
+                                "publication_authorized": False}))
+              raise SystemExit(2)
+          PY
