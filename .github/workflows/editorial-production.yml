@@ -9,10 +9,9 @@ on:
       - 'config/*editorial*'
       - 'config/ai_revision_policy.json'
       - 'requirements-production.txt'
-  schedule:
-    # Europe/Moscow is UTC+03:00 throughout the year.
-    - cron: '0 5 * * *'
-    - cron: '0 8 * * *'
+  # GitHub Actions production schedules are intentionally not installed while
+  # the existing ChatGPT Automations run at 08:00 and 11:00 MSK.
+  # Add cron only in an explicit owner-approved rollout after deduplication.
   workflow_dispatch:
     inputs:
       command:
