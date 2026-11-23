@@ -15,7 +15,7 @@ from .editorial_chat_plaintext import approval, connect, push_private_main, run
 from .editorial_images import image_hashes
 from .editorial_memory import Memory, digest, read_json, write, write_json
 from .editorial_offline_review_pack import AUDIT_DIR, CHANNELS, FILE_NAME
-from .editorial_providers import Blocked, KLEIN, klein, request, text_call
+from .editorial_providers import Blocked, KLEIN, gemini_text, klein, request, text_call
 from .editorial_saved_image_triage import DAY, FILM, OUTPUT, verify_slot
 from .editorial_scene_audit import audit_image, input_sections, manifest_by_file
 
@@ -120,13 +120,15 @@ def run_repairs(base, sync, *, generate=False):
     corrected_transport = prior_groq and any(
         row["task"] == "historical-composition-collision-recovery"
         and row["status"] == "failed" and row.get("http_status") == 400 for row in prior_attempts)
+    use_gemini = corrected_transport and any(
+        row["task"] == "historical-composition-plain-after-http-400"
+        and row["status"] == "failed" and row.get("error") == "truncated_response" for row in prior_attempts)
     groq_limit = 1 + prior_groq + int(corrected_transport)
-    config["daily_calls"].update(klein=min(config["daily_calls"]["klein"], 4), groq=groq_limit)
-    config["per_article_calls"].update(klein=min(config["per_article_calls"]["klein"], 4), groq=groq_limit)
+    for limits in (config["daily_calls"], config["per_article_calls"]):
+        limits.update(klein=min(limits["klein"], 4), groq=groq_limit, gemini=int(use_gemini))
     memory = Memory(work / "ledger", DAY, datetime.now(timezone.utc) + timedelta(minutes=24), config,
                     private_git=SimpleNamespace(checkpoint=lambda: sync("Persist historical repair reservation or receipt")))
     descriptions = work / ("groq-compositions-recovered.json" if prior_groq else "groq-compositions.json")
-    saved_completion = work / ("groq-compositions-plain.txt" if corrected_transport else "groq-compositions-raw.txt")
     if generate and not descriptions.is_file():
         grouped = {slot: {"scene": card, "section": section} for (channel, slot), (card, section, _)
                    in pending.items() if channel == "legends-01"}
@@ -148,16 +150,23 @@ def run_repairs(base, sync, *, generate=False):
                        + json.dumps(compact, separators=(",", ":")))
             output_budget = 240
 
-        def compose(*, plain=False):
-            reply = text_call("groq", message, max_tokens=460 if plain else output_budget, response_json=not plain)
+        provider = "gemini" if use_gemini else "groq"
+
+        def compose():
+            if use_gemini:
+                reply = gemini_text(message, 1300, response_json=True)
+            else:
+                reply = text_call("groq", message, max_tokens=460 if corrected_transport else output_budget,
+                                  response_json=not corrected_transport)
             return reply["text"].encode(), {"model": reply["model"], "usage": reply["usage"]}
 
-        if corrected_transport:
+        if use_gemini:
+            operation = "historical-composition-gemini-after-truncated-groq"
+        elif corrected_transport:
             operation = "historical-composition-plain-after-http-400"
         else:
             operation = "historical-composition-collision-recovery" if prior_groq else "historical-compositions-v1"
-        response = recover_or_call(memory, operation, "groq",
-                                   lambda: compose(plain=corrected_transport), saved_completion)
+        response = recover_or_call(memory, operation, provider, compose, work / f"{operation}.txt")
         composition = json_reply({"text": response.decode()})
         if set(composition) != set(grouped) or not all(isinstance(value, str) and 20 <= len(value) <= 900
                                                      for value in composition.values()):
@@ -165,7 +174,7 @@ def run_repairs(base, sync, *, generate=False):
         payload = json.dumps(composition).encode()
         write(descriptions, payload)
         write_json(receipt_path(descriptions), {"sha256": digest(payload), "input_sha256": digest(response)})
-        sync("Preserve parsed compositions from the saved Groq response")
+        sync("Preserve parsed compositions from the saved provider response")
 
     compositions = read_json(descriptions) or {}
     all_hashes = [(key, *image_hashes(path)) for key, (path, _, _) in selected.items()]
