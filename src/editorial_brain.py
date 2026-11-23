@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import fcntl
 
 from . import editorial_cinema as cinema
-from .editorial_alt_models import ovh_finalize, ovh_recover, ovh_trial, without_openrouter
+from .editorial_alt_models import groq_ovh_klein_pilot, ovh_finalize, ovh_recover, ovh_trial, without_openrouter
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_layout import layout_issues
@@ -106,9 +106,11 @@ class Article:
                     route = {"editorial-audit": "ovh", "image-plan-1": "ovh"}
                 if ovh_recover():
                     route = {"repair-saved-facts": "ovh", "image-plan-1": "ovh"}
+                if groq_ovh_klein_pilot():
+                    route = {"draft": "groq", "full-edit": "ovh", "editorial-audit": "ovh", "image-plan-1": "ovh"}
                 if route.get(stage) != provider:
                     raise Blocked("ovh_trial_stage_or_provider_outside_budget")
-            if provider == "groq":
+            if provider == "groq" and not groq_ovh_klein_pilot():
                 # Old stage labels route through the requested experiment;
                 # no request reaches Groq and no Groq quota is consumed.
                 if stage.startswith(("editorial-audit", "repair-", "full-edit")):
@@ -163,9 +165,11 @@ class Article:
                 # Never shrink a required article merely to fit a provider window.
                 if isolated_edit or exc.retry_after is None:
                     raise
-                if ovh_trial() and not (ovh_recover() and exc.telemetry.get("http_status") == 429):
+                if ovh_trial() and not ((ovh_recover() or groq_ovh_klein_pilot())
+                                        and exc.telemetry.get("http_status") == 429):
                     raise
-                delay = max(70, exc.retry_after) if ovh_recover() else exc.retry_after
+                delay = max(70, exc.retry_after) if provider == "ovh" and (
+                    ovh_recover() or groq_ovh_klein_pilot()) else exc.retry_after
                 if self.memory.time_left() < delay + 165:
                     raise
                 if alternate_enabled():
@@ -420,8 +424,11 @@ class Article:
                            'kind (строго photo или illustration), subject, brief, query (английские строки). '
                            'Включи оба вида. Для Wikimedia Commons выбирай широко документированные '
                            'объекты и запросы по содержанию раздела. Не придумывай URL и лицензии.')
+                if groq_ovh_klein_pilot():
+                    prompt += (" Из семи изображений дай ровно две illustration для генерации Klein. "
+                               "Остальные — реальные фото с английским запросом для Commons.")
                 result = self.model("editorial-audit", "ovh", prompt, validate=lambda x: None,
-                                    metadata={"text_sha256": sha}, tokens=7800)
+                                    metadata={"text_sha256": sha}, tokens=11000 if groq_ovh_klein_pilot() else 7800)
                 self.memory.article(self.id, trial_image_plan=result.get("image_plan"))
                 return result
             last_error = None
@@ -532,10 +539,12 @@ class Article:
             format_rules = ("\nОбязательная форма: короткое вступление, ровно шесть разделов с "
                             "жирными заголовками и 3000–6000 знаков без пробелов. Последний "
                             "абзац приглашает подписаться и называет канал точно.")
-            raw = self.model("draft", "ovh-gptoss", brief + format_rules, metadata={"topic": self.title})
+            writer = "groq" if groq_ovh_klein_pilot() else "ovh-gptoss"
+            raw = self.model("draft", writer, brief + format_rules,
+                             metadata={"topic": self.title}, tokens=3000 if writer == "groq" else None)
             original = self.remember_version(raw)
             self.current = original
-            self.memory.article(self.id, draft_provider="ovh-gptoss", independent_editor_provider="ovh")
+            self.memory.article(self.id, draft_provider=writer, independent_editor_provider="ovh")
             prompt = (brief + format_rules + "\nОтредактируй черновик до готового текста. "
                       "Сохрани проверяемые факты и поддержанные источниками выводы. "
                       "Верни только полный текст.\nЧЕРНОВИК:\n" + raw)
@@ -564,7 +573,8 @@ class Article:
                 self.current = self.inspect(self.current, original, submitted_audit=verdict)
             else:
                 edited = self.model("full-edit", "ovh", prompt,
-                                    metadata={"source_sha256": original["text_sha256"]})
+                                    metadata={"source_sha256": original["text_sha256"]},
+                                    tokens=12000 if groq_ovh_klein_pilot() else None)
                 self.current = self.remember_version(edited)
                 self.current = self.inspect(self.current, original)
             return self.current
@@ -685,7 +695,8 @@ class Article:
 
     def images(self):
         from .editorial_alt_models import enabled as alternative_test
-        sourced_illustrations = alternative_test() and self.channel != "cinema"
+        pilot = groq_ovh_klein_pilot()
+        sourced_illustrations = alternative_test() and self.channel != "cinema" and not pilot
         article = self.current["article"]
         count = len(article["sections"])
         if not 6 <= count <= 7:
@@ -734,13 +745,15 @@ class Article:
                     raise Blocked("image_plan_missing_from_ovh_review")
                 validate_plan(plan, count, self.channel, self.config, sourced_illustrations=True)
             except Blocked:
-                if not ovh_finalize():
+                if not ovh_finalize() and not pilot:
                     raise
-                if ovh_recover():
+                if ovh_recover() or pilot:
                     layout = ", ".join(map(str, [1, 1, *range(2, count + 1)]))
                     prompt += (f"\nПерепроверь JSON перед ответом: окончательный массив images "
                                f"должен иметь ровно {count + 1} элементов; их section в порядке "
                                f"записей: [{layout}]. Не включай другие варианты и пояснения.")
+                if pilot:
+                    prompt += " Укажи две иллюстрации для Klein. Для всех остальных записей используй photo."
                 plan = self.model("image-plan-1", "ovh", prompt,
                                   validate=lambda x: validate_plan(x, count, self.channel, self.config,
                                                                    sourced_illustrations=True),
@@ -760,7 +773,12 @@ class Article:
                 last = exc
         if plan is None:
             raise last
-        for index, scene in enumerate(plan["images"], 1):
+        scenes = plan["images"]
+        if pilot:
+            if sum(scene["kind"] == "illustration" for scene in scenes) != 2:
+                raise Blocked("image_plan_requires_two_klein_illustrations")
+            scenes = sorted(scenes, key=lambda scene: scene["kind"] != "illustration")
+        for index, scene in enumerate(scenes, 1):
             path = self.folder / "images" / f"{self.current['text_sha256'][:12]}-{index:02d}.jpg"
             existing = read_json(path.with_suffix(".json"))
             if (existing and path.is_file() and digest(path.read_bytes()) == existing["sha256"]
@@ -775,7 +793,7 @@ class Article:
                         s, plan["subject"], p, self.image_index, self.film["film"], self.cinema_registry)
                 elif sourced_illustrations or scene["kind"] == "photo":
                     executor = "commons-verified-license" if sourced_illustrations else "commons-nasa"
-                    options = {"verified_only": True} if sourced_illustrations else {}
+                    options = {"verified_only": True} if sourced_illustrations or pilot else {}
                     fn = lambda _, s=scene, p=path: photo(s, plan["subject"], p, self.image_index, **options)
                 else:
                     executor = "klein"
@@ -941,7 +959,7 @@ def status(memory):
     entries = memory.data["articles"]
     expected = {f"{channel}-{i:02d}" for channel, n in memory.config["articles_per_channel"].items()
                 for i in range(1, n + 1)}
-    return {"day": memory.day, "articles": {article: entries.get(article, {}).get("status", "missing")
+    result = {"day": memory.day, "articles": {article: entries.get(article, {}).get("status", "missing")
                                          for article in sorted(expected)},
             "calls": dict(Counter(x["provider"] for x in memory.data["calls"])),
             "production_started_at": memory.data.get("started_at"),
@@ -950,6 +968,16 @@ def status(memory):
             "groq_forecast": groq_plan(memory),
             "delivery": memory.data.get("delivery", {"status": "not_connected"}),
             "publication_authorized": False}
+    if groq_ovh_klein_pilot():
+        draft_calls = [row for row in memory.data["calls"]
+                       if row["provider"] == "groq" and row["status"] == "responded"]
+        counts = [row.get("total_tokens") for row in draft_calls]
+        if counts and all(type(count) is int for count in counts):
+            result["groq_pilot_capacity"] = {
+                "tokens_for_one_draft": sum(counts),
+                "nine_draft_projection": 9 * sum(counts),
+            }
+    return result
 
 
 def review(memory):
@@ -1073,6 +1101,11 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
         for ledger in ("daily_calls", "per_article_calls"):
             cfg[ledger].update(kilo=0, openrouter=0, ovh=8 if ovh_recover() else 4 if ovh_finalize() else 2,
                                **{"ovh-gptoss": 1, "kilo-review": 0})
+        if groq_ovh_klein_pilot():
+            if command != "daily" or ovh_finalize():
+                raise Blocked("groq_ovh_klein_pilot_requires_fresh_isolated_trial")
+            for ledger in ("daily_calls", "per_article_calls"):
+                cfg[ledger].update(groq=2, ovh=5, klein=4, **{"ovh-gptoss": 0})
     return cfg
 
 

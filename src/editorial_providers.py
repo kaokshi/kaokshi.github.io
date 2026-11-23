@@ -185,12 +185,16 @@ def visible_text(choice, telemetry):
 
 
 def text_call(provider, prompt, max_tokens=7500):
-    if (os.environ.get("EDITORIAL_OVH_ONE_ARTICLE") == "true"
-            and provider not in {"ovh", "ovh-gptoss"}):
+    from .editorial_alt_models import groq_ovh_klein_pilot, require_isolated
+    pilot = groq_ovh_klein_pilot()
+    if pilot:
+        require_isolated()
+    allowed = {"groq", "ovh"} if pilot else {"ovh", "ovh-gptoss"}
+    if (os.environ.get("EDITORIAL_OVH_ONE_ARTICLE") == "true" and provider not in allowed):
         raise ProviderError("ovh_trial_text_route_forbidden", stop=True)
     if provider == "openrouter" and os.environ.get("EDITORIAL_TEST_WITHOUT_OPENROUTER") == "true":
         raise ProviderError("openrouter_disabled_for_isolated_test", stop=True)
-    if os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true" and provider == "groq":
+    if os.environ.get("EDITORIAL_ALT_MODELS_TEST") == "true" and provider == "groq" and not pilot:
         raise ProviderError("groq_forbidden_in_alternative_test", stop=True)
     if provider in {"kilo", "kilo-review", "ovh", "ovh-gptoss"}:
         from .editorial_alt_models import generate

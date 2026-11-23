@@ -36,6 +36,10 @@ def ovh_trial():
     return os.environ.get("EDITORIAL_OVH_ONE_ARTICLE") == "true"
 
 
+def groq_ovh_klein_pilot():
+    return ovh_trial() and os.environ.get("EDITORIAL_GROQ_OVH_KLEIN_PILOT") == "true"
+
+
 def ovh_finalize():
     return ovh_trial() and os.environ.get("EDITORIAL_OVH_FINALIZE") == "true"
 
@@ -50,8 +54,10 @@ def require_isolated():
         raise Blocked("alt_provider_requires_isolated_validation")
     if os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") == "true":
         raise Blocked("alt_provider_must_not_route_groq")
-    if os.environ.get("GROQ_API_KEY"):
+    if os.environ.get("GROQ_API_KEY") and not groq_ovh_klein_pilot():
         raise Blocked("alt_provider_groq_secret_must_be_absent")
+    if groq_ovh_klein_pilot() and os.environ.get("EDITORIAL_GROQ_FREE_ONLY") != "true":
+        raise Blocked("groq_free_account_unconfirmed")
     if os.environ.get("OVH_AI_ENDPOINTS_ACCESS_TOKEN") or os.environ.get("OVH_API_KEY"):
         raise Blocked("ovh_anonymous_test_must_not_use_paid_api_key")
 
@@ -111,7 +117,7 @@ def preflight():
     return {"status": "preflight_passed", "kilo_model": None if ovh_trial() else KILO_ID,
             "ovh_model": OVH_ID, "ovh_gptoss_model": OVH_GPTOSS_ID,
             "ovh_access": "anonymous",
-            "groq_allowed": False, "publication_authorized": False}
+            "groq_allowed": groq_ovh_klein_pilot(), "publication_authorized": False}
 
 
 def reserve_ovh_slot():
@@ -157,7 +163,7 @@ def generate(provider, prompt, max_tokens=3000):
                       timeout=150 if ovh_trial() and provider == "ovh" else 100,
                       limit=3_000_000, retry_transient=True)
     finally:
-        if ovh_recover() and provider in {"ovh", "ovh-gptoss"}:
+        if (ovh_recover() or groq_ovh_klein_pilot()) and provider in {"ovh", "ovh-gptoss"}:
             # Leave one full minute free after each response before the next request.
             global _ovh_cooldown_until
             with _ovh_lock:
