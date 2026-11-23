@@ -1,15 +1,11 @@
 name: Editorial private storage one-time encrypted probe
 on:
-  push:
-    branches:
-      - assistant/groq-quota-fallback-20261123
-    paths:
-      - .github/workflows/editorial-private-probe-once.yml
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   encrypted-private-roundtrip:
-    if: github.repository == 'kaokshi/kaokshi.github.io' && github.ref == 'refs/heads/assistant/groq-quota-fallback-20261123'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'kaokshi/kaokshi.github.io' && github.ref == 'refs/heads/assistant/groq-quota-fallback-20261123'
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
