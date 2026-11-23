@@ -25,15 +25,6 @@ class PrivateStorageProbeTests(unittest.TestCase):
             return {}
         return {"content": base64.b64encode(self.content).decode("ascii")}
 
-    def run_probe(self, call):
-        with patch.object(store, "owner_key", return_value="f" * 64), \
-             patch.object(store, "seal_state", return_value=self.content), \
-             patch.object(store, "unseal_state", return_value=b"synthetic"):
-            # Replace the dynamic plaintext generation with verified ciphertext
-            # decoding to avoid treating test stubs as a real cryptographic proof.
-            with patch.object(store, "unseal_state", side_effect=lambda _: self.plaintext):
-                return store.probe(store.EXPECTED_REPOSITORY, "synthetic-fake-token", call=call)
-
     def test_encrypted_roundtrip_and_cleanup(self):
         # The plaintext contains a random UUID generated inside probe().
         # Test encryption and decryption with actual ephemeral symmetric keys.
