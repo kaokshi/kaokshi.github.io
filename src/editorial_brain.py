@@ -15,6 +15,7 @@ import fcntl
 from . import editorial_cinema as cinema
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
+from .editorial_layout import layout_issues
 from .editorial_groq_budget import forecast
 from .editorial_learning import learn, propose_pull_requests
 from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, read_json, write, write_json
@@ -449,9 +450,12 @@ class Article:
         if self.channel == "cinema":
             guide = ("Только photo: официальные кадры или пресс-материалы именно этого фильма. "
                      "Описывай подлинную сцену, актёров и визуальный контекст; не придумывай эпизоды.")
-        prompt = (f"{guide} Для каждого из {count} разделов минимум один кадр, для насыщенных "
-                  "два. Когда остаются свободные кадры, выдели два разных кандидата на обложку "
-                  "в первом разделе. Первая секция должна поддерживать сильную обложку. Верни JSON "
+        prompt = (f"{guide} Строго {count+1} разных изображений на {count} разделов: "
+                  "два разных изображения привяжи к разделу 1 (лучшее по смыслу и качеству "
+                  "будет отдельной обложкой сразу после оглавления, второе — сразу после "
+                  "первого заголовка), ровно по одному — к каждому разделу 2 и далее. "
+                  "После каждого жирного заголовка должен идти кадр без пустых абзацев. "
+                  "Оцени каждую сцену по смыслу и не вставляй отвлечённые заглушки. Верни JSON "
                   '{"subject":"English overall theme","images":[{"section":1,"kind":"photo|illustration",'
                   '"subject":"English concrete scene or subject","brief":"English detailed visual brief",'
                   '"query":"English search phrase for photo"}]}.\n'
@@ -557,6 +561,13 @@ class Article:
                 self.blockers.append("substantive_issues_pending")
             if len(self.pictures) < self.config["minimum_images"]:
                 self.blockers.append("image_count_below_minimum")
+            visual_issues = layout_issues(
+                self.current["article"], self.pictures,
+                minimum=self.config["minimum_images"], maximum=self.config["maximum_images"])
+            if visual_issues:
+                self.blockers.extend(visual_issues)
+            summary["layout_status"] = "layout_blocked" if visual_issues else "verified"
+            summary["layout_issues"] = visual_issues
             pending_rights = any(row["rights_status"] == "rights_review_pending" for row in self.pictures)
             status = ("partial_review_pending" if self.blockers else
                       "rights_review_pending" if pending_rights else "review_pending")
