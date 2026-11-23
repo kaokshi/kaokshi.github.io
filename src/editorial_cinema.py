@@ -101,7 +101,8 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
     trusted = [row for row in approved.get("plot_sources", []) if row.get("reviewed") is True
                and row.get("version_year") == year and row.get("kind") == "complete_plot"]
     deep_urls = [row["url"] for row in trusted]
-    fetched = fetch(list(dict.fromkeys([*deep_urls, *public_urls])), STUDIO_DOMAINS)
+    catalog_reviews = identity.get("catalog_review_urls", [])
+    fetched = fetch(list(dict.fromkeys([*deep_urls, *catalog_reviews, *public_urls])), STUDIO_DOMAINS)
     sources_ok = [row for row in fetched if row["status"] == "accessible"
                   and any(normalize(name) in normalize(row["text"])
                           for name in (identity["title"], identity["original_title"]) if len(normalize(name)) > 3)]

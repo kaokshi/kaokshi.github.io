@@ -105,14 +105,14 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
           python -m pip install -r requirements-production.txt
           aiw-ru models install modernbert lightgbm transformer || echo '::warning::Text detector install incomplete; full QA will block'
-      - name: Generate one new article per channel
+      - name: Restore saved draft and resume each channel
         id: generate
         timeout-minutes: 125
         env:
           EDITORIAL_PRIVATE_TOKEN: ''
           EDITORIAL_PRIVATE_REPOSITORY: ''
           EDITORIAL_V1_CHECKPOINT_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
-          RESUME_RUN: ${{ inputs.resume_run }}
+          RESUME_RUN: ${{ inputs.resume_run || '45200372945' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           umask 077

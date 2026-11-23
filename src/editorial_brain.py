@@ -612,6 +612,21 @@ class Article:
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
         if groq_gemini_klein_pilot():
+            if self.memory.retry and os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+                previous = self.memory.data["articles"].get(self.id, {}).get("text_sha256")
+                if previous and re.fullmatch(r"[a-f0-9]{64}", previous):
+                    origin = self.folder / "versions" / (previous + ".md")
+                    checked = read_json(origin.with_suffix(".json"))
+                    fields = ("model_a", "grammar", "editorial")
+                    if self.channel != "legends":
+                        fields += ("facts",)
+                    if (origin.is_file() and checked and checked.get("text_sha256") == previous
+                            and all(checked.get(field, {}).get("status") == "completed" for field in fields)):
+                        recovered = origin.read_text(encoding="utf-8")
+                        if digest(canonical(parse_article(recovered))) == previous:
+                            self.current = {"raw": recovered, "article": parse_article(recovered),
+                                            "text_sha256": previous, "report": checked}
+                            return self.current
             # The same metered Gemini response edits *and* audits the text.
             # This avoids consuming one separate model call for a redundant
             # second pass. All cited evidence is checked again by local QA.
@@ -878,8 +893,9 @@ class Article:
                       {i: "\n".join([section["heading"], *section["paragraphs"]])
                        for i, section in enumerate(article["sections"], 1)}, ensure_ascii=False))
         def check_plan(result, *, sourced=False):
-            validate_plan(result, count, self.channel, self.config, sourced_illustrations=sourced)
-            return scene_qa.attach_cards(result, self.id, article, source_sha, article_title=self.title)
+            normalized = scene_qa.normalize_plan(result)
+            validate_plan(normalized, count, self.channel, self.config, sourced_illustrations=sourced)
+            return scene_qa.attach_cards(normalized, self.id, article, source_sha, article_title=self.title)
 
         plan = None
         last = None
@@ -896,6 +912,25 @@ class Article:
             if cached is None:
                 raise Blocked("image_recovery_missing_grounded_original_plan")
             plan = check_plan(json_reply(cached))
+        if plan is None and self.memory.retry and os.environ.get("EDITORIAL_RELEASE_TRIO") == "true":
+            tasks = self.memory.data["tasks"]
+            candidates = [task["id"] for task in tasks.values()
+                          if task["article"] == self.id and task["operation"] == "image-plan-1"
+                          and task["inputs"].get("text_sha256") == source_sha]
+            for previous in reversed(candidates):
+                response = self.memory.response(previous)
+                if response:
+                    try:
+                        recovered = json_reply(response)
+                        check_plan(recovered)
+                        plan = recovered
+                        break
+                    except Blocked as exc:
+                        last = exc
+            if plan is None and last is not None:
+                prompt += ("\nПовтори только JSON. В каждом элементе images обязателен scene_card. "
+                           "Для экономии используй короткие наблюдаемые признаки и дословные цитаты. "
+                           "Дублировать описание во внешнем brief не требуется. Для photo сохрани query.")
         providers = () if plan is not None else (("groq", "kilo") if without_openrouter() else (
             ("groq",) if alternative_test() else ("groq", "openrouter")))
         if ovh_trial():
@@ -1337,6 +1372,7 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
                     raise Blocked("release_trio_requires_isolated_cinema_validation")
                 cfg["articles_per_channel"]["science"] = 1
                 cfg["daily_calls"].update(groq=9, gemini=6, klein=18)
+                cfg["per_article_calls"]["groq"] = 4
             if os.environ.get("EDITORIAL_CINEMA_ONLY_SEED") == "true":
                 cfg["articles_per_channel"] = {"cinema": 1}
                 cfg["per_article_calls"]["groq"] = 2

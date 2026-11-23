@@ -81,6 +81,14 @@ def claim_ids(entity, property_id):
     return result
 
 
+def review_urls(entity):
+    for claim in entity.get("claims", {}).get("P1258", []):
+        value = claim.get("mainsnak", {}).get("datavalue", {}).get("value")
+        if (claim.get("rank") != "deprecated" and isinstance(value, str)
+                and re.fullmatch(r"m/[a-zA-Z0-9_-]{1,120}", value)):
+            yield "https://www.rottentomatoes.com/" + value
+
+
 def release_dates(entity):
     """Wikidata P577 at day precision. Future dates never prove a release."""
     dates = []
@@ -220,6 +228,7 @@ def movie_sources(task, payload, *, get_json=fetch_json):
                  "imdb_id": (movie.get("claims", {}).get("P345") or [{}])[0]
                      .get("mainsnak", {}).get("datavalue", {}).get("value"),
                  "years": years, "release_dates": release_dates(movie),
+                 "catalog_review_urls": list(dict.fromkeys(review_urls(movie))),
                  "directors": directors, "cast": cast, "cast_roles": cast_roles,
                  "wikipedia_title": wiki_title},
         "documents": [

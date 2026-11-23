@@ -79,6 +79,27 @@ def make_card(article_id, section, source_sha, section_text, proposal):
             "section_text_sha256": digest(section_text), "source_text_sha256": source_sha}
 
 
+def normalize_plan(plan):
+    """Reuse the grounded card as the single source of duplicated prompt fields."""
+    images = plan.get("images")
+    if not isinstance(images, list):
+        return plan
+    normalized = []
+    for row in images:
+        if not isinstance(row, dict) or not isinstance(row.get("scene_card"), dict):
+            normalized.append(row)
+            continue
+        copy = dict(row)
+        card = row["scene_card"]
+        for field, alternate, limit in (("subject", "location", 180), ("brief", "visual_description", 950)):
+            original, derived = copy.get(field), card.get(alternate)
+            if ((not isinstance(original, str) or not 5 <= len(original.strip()) <= limit)
+                    and isinstance(derived, str) and 5 <= len(derived.strip()) <= limit):
+                copy[field] = derived
+        normalized.append(copy)
+    return {**plan, "images": normalized}
+
+
 def section_text(section):
     return "\n".join([section["heading"], *section["paragraphs"]])
 
