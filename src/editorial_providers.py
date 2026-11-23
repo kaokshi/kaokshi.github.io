@@ -211,6 +211,25 @@ def gemini_headers():
     return {"x-goog-api-key": key("GEMINI_API_KEY")}
 
 
+def gemini_packet(url, body, *, timeout=150):
+    """One and ONLY one HTTP attempt for a saved Gemini reservation.
+
+    Service overload triggers a shared cooldown for other parallel article
+    workers; it never automatically sends a duplicate metered request.
+    """
+    global _gemini_last_request
+    try:
+        return request(url, (GEMINI_HOST,), data=json.dumps(body).encode(),
+                       headers={**gemini_headers(), "Content-Type": "application/json"},
+                       timeout=timeout, limit=4_000_000, retry_transient=True)
+    except ProviderError as exc:
+        if str(exc) in {"http_503_transient", "http_502_transient", "http_504_transient",
+                        "connection_timeout", "connection_failed"}:
+            with _gemini_lock:
+                _gemini_last_request = max(_gemini_last_request, monotonic() + 35)
+        raise
+
+
 def gemini_preflight():
     url = f"https://{GEMINI_HOST}/v1beta/models/{gemini_model()}"
     model = parse_json(request(url, (GEMINI_HOST,), headers=gemini_headers()))
@@ -254,12 +273,7 @@ def gemini_text(prompt, max_tokens, *, response_json=False, fallback_model=False
     # offered no progress benefit, while making malformed event handling harder.
     if response_json:
         url = f"https://{GEMINI_HOST}/v1beta/models/{selected_model}:generateContent"
-        packet = parse_json(request(url, (GEMINI_HOST,),
-                                    data=json.dumps(body).encode(),
-                                    headers={**gemini_headers(),
-                                             "Content-Type": "application/json"},
-                                    timeout=150, limit=4_000_000,
-                                    retry_transient=True))
+        packet = parse_json(gemini_packet(url, body, timeout=150))
         if not isinstance(packet, dict):
             raise ProviderError("gemini_generation_incomplete")
         model = packet.get("modelVersion") or selected_model
@@ -277,9 +291,7 @@ def gemini_text(prompt, max_tokens, *, response_json=False, fallback_model=False
                               and isinstance(part.get("text"), str))
     else:
         url = f"https://{GEMINI_HOST}/v1beta/models/{selected_model}:streamGenerateContent?alt=sse"
-        raw = request(url, (GEMINI_HOST,), data=json.dumps(body).encode(),
-                      headers={**gemini_headers(), "Content-Type": "application/json"},
-                      timeout=150, limit=4_000_000, retry_transient=True)
+        raw = gemini_packet(url, body, timeout=150)
         for line in raw.splitlines():
             if not line.startswith(b"data:"):
                 continue
