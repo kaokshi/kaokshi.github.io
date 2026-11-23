@@ -1,0 +1,138 @@
+name: Three-channel Kilo OVH Qwen GPT-OSS editorial validation retry
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-alt-three-articles-v2-once.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  agent-three-channel:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 160
+    env:
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      EDITORIAL_TEST_FREE_ONLY: 'true'
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_CF_FREE_ONLY: 'true'
+      EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      OMP_NUM_THREADS: '2'
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_XET: '1'
+      GITHUB_ACTIONS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify owner-only agent production and no publication
+        run: |
+          umask 077
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          cfg = json.loads(Path("config/editorial_production.json").read_text(encoding="utf-8"))
+          site = json.loads(Path("config/site.json").read_text(encoding="utf-8"))
+          chat = json.loads(Path("config/editorial_chat_plaintext.json").read_text(encoding="utf-8"))
+          assert site["publication_enabled"] is False
+          assert cfg["schedule"]["enabled"] is False and cfg["schedule"]["owner_approved"] is False
+          assert cfg["schedule"]["klein_free_only"]
+          assert not os.environ.get("GROQ_API_KEY")
+          assert chat["owner_approved"] is True and chat["repository"] == "kaokshi/zen-editorial-review"
+          assert "Content authorship boundary" in Path("AGENTS.md").read_text(encoding="utf-8")
+          if not all(os.environ.get(key) for key in (
+                  "GROQ_API_KEY", "OPENROUTER_API_KEY", "CLOUDFLARE_ACCOUNT_ID",
+                  "CLOUDFLARE_API_TOKEN", "EDITORIAL_PRIVATE_TOKEN", "EDITORIAL_STATE_KEY_HEX")):
+              raise SystemExit("test_blocked_required_private_secrets_missing")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write("EDITORIAL_REVIEW_PUBLIC_KEY=" + cfg["schedule"]["owner_public_key"] + "\n")
+              env.write("EDITORIAL_STATE_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-3-channels\n")
+              env.write("EDITORIAL_SEALED_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-3-sealed\n")
+          print("Isolated Kilo + 2 OVH models + OpenRouter agent test allowed; publication remains OFF.")
+          PY
+      - name: Install encryption dependency
+        run: python -m pip install 'cryptography>=44,<48'
+      - name: Confirm BOTH OVH models, Kilo free model and OpenRouter free editor
+        run: |
+          python - <<'PY'
+          import json
+          from src.editorial_alt_models import preflight
+          from src.editorial_free_fallback import verify_fallback, free_remaining
+          status=preflight()
+          assert status["status"]=="preflight_passed"
+          assert verify_fallback()=="free_route_confirmed", "openrouter_free_editor_unavailable"
+          # Do not reserve 36 calls. Live 50/day ceiling still applies.
+          try:
+              remaining=free_remaining()
+          except Exception:
+              remaining="unavailable"
+          print(json.dumps({"providers":status,"openrouter_free_remaining":remaining},
+                           sort_keys=True),flush=True)
+          PY
+      - name: Install project editorial, QA, documents and image dependencies
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
+          python -m pip install -r requirements-production.txt
+          aiw-ru models install modernbert lightgbm transformer || echo "::warning::Detector unavailable; final QA will block incomplete checks"
+      - name: Generate one real PROJECT-AGENT article per each of three channels, OVH x2
+        id: generate
+        timeout-minutes: 125
+        env:
+          # Encrypted-mode agent must never see private Git write credentials;
+          # delivery gets the secret only in its separate follow-up step.
+          EDITORIAL_PRIVATE_TOKEN: ''
+          EDITORIAL_PRIVATE_REPOSITORY: ''
+        run: |
+          umask 077
+          TZ=Europe/Moscow date +%F > "$RUNNER_TEMP/editorial-day"
+          day="$(cat "$RUNNER_TEMP/editorial-day")"
+          python -m src.editorial_brain daily --date "$day" \
+            --encrypted-mode --validate-cinema --validation-window 120 \
+            --local-state "$EDITORIAL_STATE_DIR"
+      - name: Share only project-created review files with owner-authorized PRIVATE GitHub
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            python -m src.editorial_chat_plaintext publish \
+              --root "$EDITORIAL_STATE_DIR" --date "$day"
+          fi
+      - name: Send sanitized per-article errors to PRIVATE GitHub status issue
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            if [ -f "$EDITORIAL_STATE_DIR/$day/state.json" ]; then
+              python -m src.editorial_chat_bridge --root "$EDITORIAL_STATE_DIR" --date "$day"
+            fi
+          fi
+      - name: Encrypt original project-agent state and review packet
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/editorial-day" ] && [ -d "$EDITORIAL_STATE_DIR" ]; then
+            day="$(cat "$RUNNER_TEMP/editorial-day")"
+            python -m src.editorial_delivery seal \
+              --root "$EDITORIAL_STATE_DIR" --date "$day" --output "$EDITORIAL_SEALED_DIR"
+          fi
+      - name: Retain only encrypted originals as private Actions artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-alt-kilo-ovh-two-models-original-encrypted-20261123
+          path: |
+            ${{ env.EDITORIAL_SEALED_DIR }}/checkpoint.enc
+            ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
+          if-no-files-found: warn
+          retention-days: 14
