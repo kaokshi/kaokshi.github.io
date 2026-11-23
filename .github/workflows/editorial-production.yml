@@ -9,9 +9,7 @@ on:
       - 'config/*editorial*'
       - 'config/ai_revision_policy.json'
       - 'requirements-production.txt'
-  # GitHub Actions production schedules are intentionally not installed while
-  # the existing ChatGPT Automations run at 08:00 and 11:00 MSK.
-  # Add cron only in an explicit owner-approved rollout after deduplication.
+  # No duplicate cron schedule until owner-approved cutover.
   workflow_dispatch:
     inputs:
       command:
@@ -210,15 +208,15 @@ jobs:
           path: ${{ env.EDITORIAL_QUOTA_DIR }}/ready.txt
           if-no-files-found: error
           retention-days: 7
-      - name: Require observed free capacity before a full run
+      - name: Require verified free text capacity before a full run
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
         env:
           QUOTA_STATE: ${{ steps.quota.outputs.state }}
           PROBE_OUTCOME: ${{ steps.probe.outcome }}
         run: |
           if [ "$QUOTA_STATE" != ready ] && [ "$PROBE_OUTCOME" != success ]; then
-            echo "::error::Groq capacity is blocked or unverified. Full production was gated before provider calls."
-            exit 2
+            echo "::notice::Groq unavailable; independently verifying the existing free OpenRouter model."
+            python -m src.editorial_free_fallback --github-env "$GITHUB_ENV"
           fi
       - name: Restore sanitized Groq accounting
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
@@ -230,7 +228,9 @@ jobs:
           echo "EDITORIAL_GROQ_CURRENT_PROBE=$EDITORIAL_QUOTA_DIR/probe.json" >> "$GITHUB_ENV"
       - name: Reserve the remaining Groq envelope before production
         id: reserve_groq
-        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
+        if: >-
+          (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry') &&
+          env.EDITORIAL_GROQ_FALLBACK_ONLY != 'true'
         run: python -m src.editorial_groq_ledger reserve --prior "$EDITORIAL_GROQ_LEDGER" --file "$EDITORIAL_QUOTA_DIR/reservation.json"
       - name: Save the Groq envelope in case the runner is interrupted
         if: steps.reserve_groq.outcome == 'success'
@@ -262,6 +262,9 @@ jobs:
                             "source_count": len(check["records"]), "cinema_scheduled": False,
                             "film_still_rights": "not_verified", "publication_authorized": False}))
           PYTHON
+      - name: Verify actual private storage with encrypted synthetic probe
+        if: env.EDITORIAL_EFFECTIVE_COMMAND == 'storage-test'
+        run: python -m src.editorial_storage_probe
       - name: Exercise package recovery in separate processes without providers
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'storage-test'
         run: |

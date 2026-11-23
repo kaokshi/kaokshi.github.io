@@ -29,7 +29,12 @@ LICENSES = {
 
 def validate_plan(plan, section_count, channel, settings):
     blocks = plan.get("images")
-    if not isinstance(blocks, list) or not settings["minimum_images"] <= len(blocks) <= settings["maximum_images"]:
+    # Each story has one independent cover immediately after the contents, then
+    # exactly one distinct illustration immediately below every section heading.
+    if not 6 <= section_count <= 7:
+        raise Blocked("image_plan_layout_requires_six_or_seven_sections")
+    if (not isinstance(blocks, list) or len(blocks) != section_count + 1
+            or not settings["minimum_images"] <= len(blocks) <= settings["maximum_images"]):
         raise Blocked("image_plan_count")
     subject = plan.get("subject")
     if not isinstance(subject, str) or not subject.strip() or len(subject) > 240:
@@ -55,6 +60,9 @@ def validate_plan(plan, section_count, channel, settings):
         sections.add(section)
         descriptions.add(brief)
         kinds.add(kind)
+    distribution = Counter(row["section"] for row in blocks)
+    if distribution[1] != 2 or any(distribution[i] != 1 for i in range(2, section_count + 1)):
+        raise Blocked("image_plan_layout_distribution")
     if len(sections) != section_count or (channel == "science" and len(kinds) != 2):
         raise Blocked("image_plan_missing_section_or_medium")
 
@@ -98,7 +106,9 @@ def nasa_photos(query):
                "asset_url": asset, "creator": author, "credit": meta.get("center", ""),
                "rights_status": "rights_review_pending", "license": "NASA media guidelines",
                "license_url": NASA_TERMS, "attribution": author,
-               "description": description[:1300], "domains": NASA}
+               "description": description[:1300],
+               "asset_manifest": "https://images-api.nasa.gov/asset/" + quote(meta["nasa_id"], safe=""),
+               "domains": NASA}
 
 
 @lru_cache(maxsize=1)
@@ -143,6 +153,21 @@ def image_hashes(path):
         return digest(path.read_bytes()), str(imagehash.phash(ImageOps.exif_transpose(image)))
 
 
+def decode_candidate(raw):
+    from PIL import Image, ImageOps, ImageStat
+
+    with Image.open(io.BytesIO(raw)) as file:
+        if file.width * file.height > 22_000_000 or min(file.size) < 480:
+            raise ValueError("image_dimensions")
+        if file.format not in ("JPEG", "PNG", "WEBP") or getattr(file, "is_animated", False):
+            raise ValueError("image_format")
+        image = ImageOps.exif_transpose(file).convert("RGB")
+    contrast = ImageStat.Stat(image.convert("L")).stddev[0]
+    if contrast < 15:
+        raise ValueError("image_low_contrast")
+    return image, contrast
+
+
 class ImageIndex:
     def __init__(self, memory, archive):
         self.memory = memory
@@ -154,21 +179,12 @@ class ImageIndex:
                 continue
 
     def save(self, raw, metadata, scene, subject, path):
-        from PIL import Image, ImageOps, ImageStat
         import imagehash
-        with Image.open(io.BytesIO(raw)) as file:
-            if file.width * file.height > 22_000_000 or min(file.size) < 480:
-                raise ValueError("image_dimensions")
-            if file.format not in ("JPEG", "PNG", "WEBP") or getattr(file, "is_animated", False):
-                raise ValueError("image_format")
-            image = ImageOps.exif_transpose(file).convert("RGB")
+        image, contrast = decode_candidate(raw)
         model, scores, embedding = similarity(image, [scene["subject"], subject,
                                             "an unrelated image with no connection with this topic"])
         if scores[0] < .19 or scores[0] <= scores[2] + .015:
             raise ValueError("image_scene_match_below_threshold")
-        contrast = ImageStat.Stat(image.convert("L")).stddev[0]
-        if contrast < 15:
-            raise ValueError("image_low_contrast")
         quality = (min(1, image.width / 1200) * .3
                    + min(1, contrast / 60) * .25
                    + max(0, 1 - abs(image.width / image.height - 1.5)) * .45)
@@ -203,7 +219,11 @@ class ImageIndex:
         return row
 
 
-def photo(scene, subject, path, index):
+def photo(scene, subject, path, index, *, experimental=False):
+    if experimental:
+        from .editorial_image_experiment import ranked_photo
+
+        return ranked_photo(scene, subject, path, index)
     warm_visual_matcher()
     had_candidate = False
     errors = []

@@ -1,6 +1,7 @@
 """Readable owner review packages with round-trip checks on text and images."""
 from collections import Counter
-from html import escape
+from html import escape, unescape
+from xml.sax.saxutils import escape as xml_escape
 from html.parser import HTMLParser
 import io
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -8,6 +9,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from .editorial_memory import digest, write, write_json
 from .editorial_review import canonical
 from .editorial_images import select_cover
+from .editorial_layout import layout_issues
+from .editorial_subscription import approved_url, channel_from_folder, split_cta
 
 
 class ArticleHTML(HTMLParser):
@@ -38,6 +41,31 @@ class ArticleHTML(HTMLParser):
             self.pending.append(text)
 
 
+def add_word_hyperlink(paragraph, label, url):
+    """Add a real clickable external link to DOCX, preserving paragraph.text."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+
+    relation = paragraph.part.relate_to(url, RT.HYPERLINK, is_external=True)
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), relation)
+    run = OxmlElement("w:r")
+    properties = OxmlElement("w:rPr")
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "0563C1")
+    properties.append(color)
+    underline = OxmlElement("w:u")
+    underline.set(qn("w:val"), "single")
+    properties.append(underline)
+    run.append(properties)
+    node = OxmlElement("w:t")
+    node.text = label
+    run.append(node)
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
+
+
 def package(folder, title, version, report, images, image_folder, summary):
     from docx import Document
     from docx.shared import Inches
@@ -45,52 +73,81 @@ def package(folder, title, version, report, images, image_folder, summary):
     folder.mkdir(parents=True, exist_ok=True)
     document = Document()
     document.add_heading(title, 0)
+    article = report["article"]
+    problems = layout_issues(article, images)
+    cover = select_cover(images)
+    hero = next((row for row in images if row["file"] == cover), None)
+    ordered = ([hero] if hero else []) + sorted(
+        (row for row in images if row["file"] != cover),
+        key=lambda row: (row["section"], row["file"]))
     out = ['<!doctype html><html lang="ru"><meta charset="utf-8">',
            f"<title>{escape(title)}</title>",
            "<style>body{font:18px/1.6 system-ui;margin:2rem auto;max-width:760px;padding:0 1rem}"
-           "img{max-width:100%;height:auto;display:block}figure{margin:0 0 1rem}"
+           "img{max-width:100%;height:auto;display:block}figure{margin:0}"
+           "h1,h2,p,nav,ol,li{margin-block:0}nav{margin-bottom:0}"
            "figcaption{font-size:.83em;color:#555}</style>",
-           f"<h1>{escape(title)}</h1><main>"]
-    article = report["article"]
-    cover = select_cover(images)
-    ordered = sorted(images, key=lambda row: (1 if row["file"] == cover else row["section"],
-                                               row["file"] != cover, row["file"]))
-    lines = []
+           f"<h1>{escape(title)}</h1>",
+           '<nav aria-label="Оглавление"><strong>Оглавление</strong><ol>']
+    lines = ["# " + title, "**Оглавление**"]
+    document.add_heading("Оглавление", 1)
+    for number, section in enumerate(article["sections"], 1):
+        heading = section["heading"]
+        out.append(f'<li><a href="#section-{number}">{escape(heading)}</a></li>')
+        document.add_paragraph(heading, "Caption")
+        lines.append(f"{number}. {heading}")
+    out.extend(["</ol></nav>", "<main>"])
+    channel = channel_from_folder(folder)
+    link = approved_url(channel) if channel else None
+    linked_cta = False
 
-    def paragraph(value, heading=False):
+    def paragraph(value, heading=False, last_cta=False, section_number=None):
+        nonlocal linked_cta
         if heading:
             document.add_heading(value, 2)
-            out.append(f"<h2>{escape(value)}</h2>")
+            out.append(f'<h2 id="section-{section_number}">{escape(value)}</h2>')
             lines.append("**" + value + "**")
         else:
-            document.add_paragraph(value)
-            out.append(f"<p>{escape(value)}</p>")
-            lines.append(value)
+            fragments = split_cta(value, channel, link) if last_cta else None
+            if fragments:
+                before, label, after = fragments
+                paragraph_node = document.add_paragraph()
+                paragraph_node.add_run(before)
+                add_word_hyperlink(paragraph_node, label, link)
+                paragraph_node.add_run(after)
+                out.append(f'<p>{escape(before)}<a href="{escape(link, quote=True)}">{escape(label)}</a>{escape(after)}</p>')
+                lines.append(before + "[" + label + "](" + link + ")" + after)
+                linked_cta = True
+            else:
+                document.add_paragraph(value)
+                out.append(f"<p>{escape(value)}</p>")
+                lines.append(value)
 
+    def picture(picture_row):
+        name = picture_row["file"]
+        raw = (image_folder / name).read_bytes()
+        if digest(raw) != picture_row["sha256"]:
+            raise ValueError("saved_image_sha_mismatch")
+        destination = folder / "images" / name
+        write(destination, raw)
+        document.add_picture(io.BytesIO(raw), width=Inches(5.95))
+        scene = picture_row["scene"]
+        out.append(f'<figure><img src="images/{escape(name, quote=True)}" alt="{escape(scene, quote=True)}"></figure>')
+        lines.append(f"![{scene}](images/{name})")
+
+    # Dzen screenshot structure: title -> contents -> the best cover -> intro.
+    # An image immediately follows every bold section heading, before its prose.
+    if hero:
+        picture(hero)
     for value in article["intro"]:
         paragraph(value)
     for number, section in enumerate(article["sections"], 1):
-        paragraph(section["heading"], True)
-        for picture in ordered:
-            target_section = 1 if picture["file"] == cover else picture["section"]
-            if target_section != number:
-                continue
-            name = picture["file"]
-            raw = (image_folder / name).read_bytes()
-            if digest(raw) != picture["sha256"]:
-                raise ValueError("saved_image_sha_mismatch")
-            destination = folder / "images" / name
-            write(destination, raw)
-            document.add_picture(io.BytesIO(raw), width=Inches(5.95))
-            label = picture.get("label")
-            if label:
-                document.add_paragraph(label, "Caption")
-            out.append(f'<figure><img src="images/{name}" alt="{escape(picture["scene"])}">')
-            if label:
-                out.append(f"<figcaption>{escape(label)}</figcaption>")
-            out.append("</figure>")
-        for value in section["paragraphs"]:
-            paragraph(value)
+        paragraph(section["heading"], True, section_number=number)
+        for row in ordered:
+            if row["file"] != cover and row["section"] == number:
+                picture(row)
+        for index, value in enumerate(section["paragraphs"]):
+            paragraph(value, last_cta=(number == len(article["sections"])
+                                       and index == len(section["paragraphs"]) - 1))
     out.append("</main>")
     evidence = report["facts"]["evidence"]
     if evidence:
@@ -147,7 +204,13 @@ def package(folder, title, version, report, images, image_folder, summary):
     write(folder / "Статья.docx", word)
     write(folder / "Статья.md", ("\n\n".join(lines) + "\n").encode("utf-8"))
     write(folder / "Текст для SHA-256.txt", original.encode("utf-8"))
-    write_json(folder / "Статус и проверки.json", {**summary, "cover": cover,
+    write_json(folder / "Статус и проверки.json", {**summary,
+               "layout_status": "verified" if not problems else "layout_blocked",
+               "layout_issues": problems,
+               "layout": "toc-cover-intro-heading-image-text",
+               "subscription_link_status": ("linked" if linked_cta else "channel_url_or_name_missing"),
+               "subscription_url": link if linked_cta else None,
+               "cover": cover,
                "text_sha256": report["text_sha256"], "document_roundtrip": "completed",
                "article_checks": {k: v for k, v in report.items() if k != "article"},
                "images": [{k: v for k, v in row.items() if k != "image_embedding"} for row in ordered]})

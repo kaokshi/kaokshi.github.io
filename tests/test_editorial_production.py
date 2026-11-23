@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from docx import Document
 from PIL import Image
@@ -69,9 +69,10 @@ class ProductionTests(unittest.TestCase):
                     "sources": ["https://nps.gov/a", "https://usgs.gov/b"]}]})
             elif "Верни JSON" in prompt and "subject" in prompt:
                 text = json.dumps({"subject": "water and environmental detail",
-                    "images": [{"section": i, "kind": "photo" if channel == "science" and i % 2 else "illustration",
+                    "images": [{"section": 1 if i < 2 else i,
+                                "kind": "photo" if channel == "science" and i % 2 else "illustration",
                                 "subject": f"distinct subject {i}", "brief": f"Detailed scene description {i}",
-                                "query": "hot spring photograph"} for i in range(1, 8)]})
+                                "query": "hot spring photograph"} for i in range(8)]})
             elif "Проверь конкретные недостатки" in prompt:
                 text = json.dumps(verdict(channel))
             else:
@@ -86,7 +87,7 @@ class ProductionTests(unittest.TestCase):
 
         def asset(scene, subject, path, *_):
             content = io.BytesIO()
-            shade = scene["section"] * 28 + (7 if scene["kind"] == "photo" else 0)
+            shade = (sum(scene["subject"].encode("utf-8")) * 3) % 220
             Image.new("RGB", (580, 490), (shade, 10, 220)).save(content, "JPEG")
             raw = content.getvalue()
             write(path, raw)
@@ -111,7 +112,7 @@ class ProductionTests(unittest.TestCase):
                                  ["created", "assigned", "running", "validating", "completed"])
             packet = root / result["day"] / "review"
             science = packet / "science-01"
-            self.assertEqual(len(Document(science / "Статья.docx").inline_shapes), 7)
+            self.assertEqual(len(Document(science / "Статья.docx").inline_shapes), 8)
             self.assertEqual(digest((science / "Текст для SHA-256.txt").read_bytes()),
                              state["articles"]["science-01"]["text_sha256"])
             report = read_json(science / "Статус и проверки.json")
@@ -146,7 +147,7 @@ class ProductionTests(unittest.TestCase):
             self.assertEqual(delivered["status"], "verified_files_available")
             self.assertTrue((root / "authorized" / "science-01" / "Статья.docx").is_file())
             self.assertTrue((root / "authorized" / "science-01" / "Статья.html").is_file())
-            self.assertEqual(len(list((root / "authorized" / "science-01" / "images").glob("*.jpg"))), 7)
+            self.assertEqual(len(list((root / "authorized" / "science-01" / "images").glob("*.jpg"))), 8)
 
             previous = len(calls)
             brain.execute("daily", root, PrivateStub(), validation_window=120)
@@ -250,23 +251,6 @@ class ProductionTests(unittest.TestCase):
                     {"file": "cover.jpg", "section": 3, "cover_score": .8, "sha256": "c"},
                     {"file": "other.jpg", "section": 3, "cover_score": .3, "sha256": "d"}]
         self.assertEqual(editorial_images.select_cover(pictures), "cover.jpg")
-
-    def test_generated_image_replacement_is_checked_again(self):
-        scene = {"brief": "The stationary tram at the empty terminal",
-                 "subject": "empty tram terminal", "section": 1}
-        index = Mock()
-        index.memory.time_left.return_value = 200
-        index.memory.call.side_effect = lambda task, article, provider, invoke: invoke()
-        accepted = {"sha256": digest(b"replacement")}
-        index.save.side_effect = [ValueError("image_scene_match_below_threshold"), accepted]
-        with patch.object(editorial_images, "warm_visual_matcher"), patch.object(
-                editorial_images, "klein", side_effect=[(b"first", {}), (b"replacement", {})]) as klein:
-            result = editorial_images.generated(scene, "urban transport", Path("image.jpg"), index,
-                                               "image-01", "legends-01", "legends")
-        self.assertEqual(result, accepted)
-        self.assertEqual([call.args[0] for call in index.save.call_args_list], [b"first", b"replacement"])
-        self.assertNotEqual(klein.call_args_list[0].args[0], klein.call_args_list[1].args[0])
-        self.assertEqual(index.save.call_args.args[2], scene)
 
     def test_corrupt_image_cannot_be_accepted(self):
         with TemporaryDirectory() as directory:

@@ -31,6 +31,9 @@ class RolloutTests(unittest.TestCase):
             plan(conf, command="scheduled", cron="0 5 * * *", branch="refs/heads/main")
         conf["schedule"].update({"successful_validation_run": 123, "owner_access_verified": True,
                                  "legacy_automation_retired": True, "owner_approved": True})
+        # Explicitly remove the public key to test the missing-storage guard;
+        # the real owner key is now present in the inactive configuration.
+        conf["schedule"]["owner_public_key"] = None
         with self.assertRaisesRegex(Blocked, "storage_configuration_pending"):
             plan(conf, command="daily", branch="refs/heads/main")
         conf["schedule"].update(private_repository="kaokshi/private-fixture", owner_public_key="12" * 32)
