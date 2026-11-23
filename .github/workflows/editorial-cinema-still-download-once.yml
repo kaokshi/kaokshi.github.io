@@ -1,0 +1,59 @@
+name: Inspect eight real cinema stills without model calls
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-cinema-still-download-once.yml
+permissions:
+  contents: read
+jobs:
+  film-still-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'pillow>=11,<13' 'ImageHash>=4.3,<5'
+      - name: Verify actual pixels, unique stills and no unverified permissions claim
+        run: |
+          python - <<'PY'
+          import io,json
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          import imagehash
+          from PIL import Image
+          from src.editorial_providers import request
+          registry=json.loads(Path("config/editorial_cinema.json").read_text())
+          movie=registry["Q3404003"]
+          results=[]
+          hashes=[]
+          for entry in movie["stills"]:
+              result={"host":urlsplit(entry["asset_url"]).hostname,
+                      "rights_status":entry["rights_status"]}
+              try:
+                  host=urlsplit(entry["asset_url"]).hostname
+                  raw=request(entry["asset_url"],(host,),timeout=20,limit=7_000_000)
+                  with Image.open(io.BytesIO(raw)) as im:
+                      im.load()
+                      result.update(format=im.format,size=list(im.size),
+                                    available=min(im.size)>=480)
+                      h=imagehash.phash(im)
+                      result["unique"] = all(h-p>6 for p in hashes)
+                      if result["available"] and result["unique"]:
+                          hashes.append(h)
+              except (OSError,ValueError) as exc:
+                  result.update(available=False,error_type=type(exc).__name__)
+              results.append(result)
+          print(json.dumps({"schema":"zen-private-film-stills-pixel-probe",
+                            "film":"Prisoners 2013","examined":len(results),
+                            "valid_unique":sum(x.get("available") and x.get("unique") for x in results),
+                            "results":results,"model_calls":0,
+                            "publication_authorized":False},ensure_ascii=False))
+          if sum(x.get("available") and x.get("unique") for x in results)<7:
+              raise SystemExit(2)
+          PY
