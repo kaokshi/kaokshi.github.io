@@ -66,7 +66,7 @@ def metric_snapshot(project, token, model, *, now=None, fetch=urlopen):
             report[kind] = {"status": "unavailable"}
             continue
         rows = payload.get("timeSeries", []) if isinstance(payload, dict) else []
-        if not isinstance(rows, list) or payload.get("nextPageToken"):
+        if not isinstance(payload, dict) or not isinstance(rows, list) or payload.get("nextPageToken"):
             report[kind] = {"status": "incomplete_or_paginated"}
             continue
         records = []
