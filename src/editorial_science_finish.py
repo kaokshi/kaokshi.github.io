@@ -6,7 +6,7 @@ Two conceptual illustrations come from free-account Cloudflare Klein.
 All text and images remain in the owner's PRIVATE review repository.
 """
 import argparse
-from hashlib import sha256
+from hashlib import sha256, md5
 from html import escape
 from io import BytesIO
 import json
@@ -79,18 +79,14 @@ def _metadata(title):
         raise Blocked("science_commons_license_not_verified")
     if "creativecommons.org/" not in license_url:
         raise Blocked("science_commons_license_url_not_verified")
-    url = row.get("thumburl") or row.get("url")
-    # Some Commons versions return a different HTTPS image locator or omit
-    # iiurlwidth URLs. The *file page* and attribution were already verified.
-    # Resolve that exact verified file through Commons's official redirect,
-    # never through an arbitrary third-party image host.
-    from urllib.parse import urlsplit
-    if not isinstance(url, str) or urlsplit(url).scheme != "https" or (
-            urlsplit(url).hostname not in COMMONS_HOSTS):
-        url = ("https://commons.wikimedia.org/wiki/Special:Redirect/file/"
-               + quote(title.replace(" ", "_"), safe="") + "?width=1400")
-    if urlsplit(url).hostname not in COMMONS_HOSTS:
-        raise Blocked("science_commons_image_url_invalid")
+    # Wikimedia's well-defined, content-addressed file path is derived only
+    # from the already license-verified Commons page title. It avoids redirect
+    # chains through outside hosts and rejects untrusted API asset URLs.
+    filename = title.replace(" ", "_")
+    digest_path = md5(filename.encode("utf-8")).hexdigest()
+    url = ("https://upload.wikimedia.org/wikipedia/commons/"
+           + digest_path[0] + "/" + digest_path[:2] + "/"
+           + quote(filename, safe="()"))
     page = "https://commons.wikimedia.org/wiki/File:" + quote(title.replace(" ", "_"), safe="()")
     return {"url": url, "title": title, "license": license_name,
             "license_url": license_url, "artist": artist,
