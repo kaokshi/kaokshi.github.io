@@ -172,27 +172,38 @@ def audit(root, day):
     return output
 
 
-def main(day):
+def main(day, *, legacy=False):
     approval()
     if json.loads(Path("config/site.json").read_text())["publication_enabled"] is not False:
         raise Blocked("image_audit_requires_publication_freeze")
     with TemporaryDirectory(prefix="editorial-image-audit-") as work:
         repo = Path(work) / "private"
         git, env = connect(os.environ.get("EDITORIAL_PRIVATE_TOKEN"), repo)
-        output = audit(repo, day)
+        if legacy:
+            from .editorial_scene_legacy_test import benchmark
+            base = repo / "editorial-chat-review" / checked_day(day)
+            results = benchmark(base)
+            output = base / "image-qa-legacy-test" / "legacy-checks.json"
+            write_json(output, results)
+            print(json.dumps({key: results[key] for key in ("count", "passed", "seconds")}), flush=True)
+        else:
+            output = audit(repo, day)
         args = [*git, "-C", str(repo)]
         run([*args, "add", "--", output.parent.relative_to(repo).as_posix()], env)
         run([*args, "-c", "user.name=Zen Editorial Bot",
              "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
              "commit", "-m", "Audit 23 existing images with local pixel checks"], env)
         run([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=120)
-        results = read_json(output)
-        assert sum(len(article["images"]) for article in results["articles"].values()) == 23
-        print(json.dumps({"private_report_saved": True,
-                          "elapsed_seconds": results["elapsed_seconds"], "klein_calls": 0}), flush=True)
+        if not legacy:
+            results = read_json(output)
+            assert sum(len(article["images"]) for article in results["articles"].values()) == 23
+            print(json.dumps({"private_report_saved": True,
+                              "elapsed_seconds": results["elapsed_seconds"], "klein_calls": 0}), flush=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", required=True)
-    main(parser.parse_args().date)
+    parser.add_argument("--legacy", action="store_true")
+    args = parser.parse_args()
+    main(args.date, legacy=args.legacy)
