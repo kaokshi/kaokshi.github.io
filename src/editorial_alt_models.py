@@ -21,6 +21,7 @@ OVH_CATALOG_URL = "https://catalog.endpoints.ai.ovh.net/rest/v1/models_v2"
 _ovh_lock = Lock()
 OVH_MIN_INTERVAL = 35.0
 _ovh_last_request = float("-inf")
+_ovh_cooldown_until = float("-inf")
 
 
 def enabled():
@@ -37,6 +38,10 @@ def ovh_trial():
 
 def ovh_finalize():
     return ovh_trial() and os.environ.get("EDITORIAL_OVH_FINALIZE") == "true"
+
+
+def ovh_recover():
+    return ovh_finalize() and os.environ.get("EDITORIAL_OVH_RECOVER") == "true"
 
 
 def require_isolated():
@@ -113,7 +118,8 @@ def reserve_ovh_slot():
     """Share two requests per minute across both OVH models and parallel channels."""
     global _ovh_last_request
     with _ovh_lock:
-        wait = OVH_MIN_INTERVAL - (monotonic() - _ovh_last_request)
+        ready_at = max(_ovh_last_request + OVH_MIN_INTERVAL, _ovh_cooldown_until)
+        wait = ready_at - monotonic()
         if wait > 0:
             sleep(wait)
         _ovh_last_request = monotonic()
@@ -144,11 +150,18 @@ def generate(provider, prompt, max_tokens=3000):
     else:
         payload["reasoning_effort"] = "low"
         reserve_ovh_slot()
-    raw = request(base + "/chat/completions", (host,),
-                  data=json.dumps(payload).encode(),
-                  headers={**candidate_headers(provider), "Content-Type": "application/json"},
-                  timeout=150 if ovh_trial() and provider == "ovh" else 100,
-                  limit=3_000_000, retry_transient=True)
+    try:
+        raw = request(base + "/chat/completions", (host,),
+                      data=json.dumps(payload).encode(),
+                      headers={**candidate_headers(provider), "Content-Type": "application/json"},
+                      timeout=150 if ovh_trial() and provider == "ovh" else 100,
+                      limit=3_000_000, retry_transient=True)
+    finally:
+        if ovh_recover() and provider in {"ovh", "ovh-gptoss"}:
+            # Leave one full minute free after each response before the next request.
+            global _ovh_cooldown_until
+            with _ovh_lock:
+                _ovh_cooldown_until = monotonic() + 65
     response = parse_json(raw)
     try:
         result = visible_text(response["choices"][0], {})

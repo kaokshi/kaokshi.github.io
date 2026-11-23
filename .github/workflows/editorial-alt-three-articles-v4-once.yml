@@ -64,6 +64,7 @@ jobs:
       EDITORIAL_ALT_MODELS_TEST: 'true'
       EDITORIAL_OVH_ONE_ARTICLE: ${{ contains(github.event.head_commit.message, '[ovh-one]') }}
       EDITORIAL_OVH_FINALIZE: ${{ contains(github.event.head_commit.message, '[ovh-finalize]') }}
+      EDITORIAL_OVH_RECOVER: ${{ contains(github.event.head_commit.message, '[ovh-recover]') }}
       EDITORIAL_TEST_WITHOUT_OPENROUTER: ${{ inputs.without_openrouter || contains(github.event.head_commit.message, '[no-openrouter]') }}
       EDITORIAL_CF_FREE_ONLY: 'true'
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}

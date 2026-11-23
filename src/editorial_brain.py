@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import fcntl
 
 from . import editorial_cinema as cinema
-from .editorial_alt_models import ovh_finalize, ovh_trial, without_openrouter
+from .editorial_alt_models import ovh_finalize, ovh_recover, ovh_trial, without_openrouter
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_layout import layout_issues
@@ -104,6 +104,8 @@ class Article:
                          "full-edit-with-audit": "ovh"}
                 if ovh_finalize():
                     route = {"editorial-audit": "ovh", "image-plan-1": "ovh"}
+                if ovh_recover():
+                    route = {"repair-saved-facts": "ovh", "image-plan-1": "ovh"}
                 if route.get(stage) != provider:
                     raise Blocked("ovh_trial_stage_or_provider_outside_budget")
             if provider == "groq":
@@ -159,10 +161,15 @@ class Article:
                 return send(task, tokens)
             except ProviderError as exc:
                 # Never shrink a required article merely to fit a provider window.
-                if ovh_trial() or isolated_edit or exc.retry_after is None or self.memory.time_left() < exc.retry_after + 125:
+                if isolated_edit or exc.retry_after is None:
+                    raise
+                if ovh_trial() and not (ovh_recover() and exc.telemetry.get("http_status") == 429):
+                    raise
+                delay = max(70, exc.retry_after) if ovh_recover() else exc.retry_after
+                if self.memory.time_left() < delay + 165:
                     raise
                 if alternate_enabled():
-                    sleep(exc.retry_after)
+                    sleep(delay)
                 return send(task, tokens)
 
         inputs = {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
@@ -435,7 +442,9 @@ class Article:
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
                             "length_exception_reason": candidate["article"].get("length_exception_reason"),
-                            **({"reviewer": "ovh-qwen-facts-only"} if ovh_finalize() else
+                            **({"reviewer": "ovh-qwen-correction", "audit_sha256": digest(
+                                    json.dumps(submitted_audit, ensure_ascii=False, sort_keys=True))} if ovh_recover() else
+                               {"reviewer": "ovh-qwen-facts-only"} if ovh_finalize() else
                                {"reviewer": "ovh-qwen-combined" if submitted_audit is not None else
                                 "ovh-qwen-with-image-plan"} if ovh_trial() else
                                {"reviewer": "ovhcloud"} if without_openrouter() else {})},
@@ -460,7 +469,47 @@ class Article:
             if digest(canonical(parse_article(raw))) != previous_sha:
                 raise Blocked("qa_sha_mismatch")
             self.current = self.remember_version(raw)
-            self.current = self.inspect(self.current)
+            if ovh_recover():
+                previous = read_json(self.folder / "versions" / (previous_sha + ".json"), {})
+                previous_issues = previous.get("issues", [])
+                fact_status = previous.get("facts", {}).get("status")
+                print(json.dumps({"ovh_recovery_previous_qa": {
+                    "facts": fact_status, "editorial": previous.get("editorial", {}).get("status"),
+                    "verified_claims": len(previous.get("facts", {}).get("evidence", [])),
+                    "issues": len(previous_issues)}}), flush=True)
+                if (previous and not previous_issues and fact_status == "completed"
+                        and all(previous.get(key, {}).get("status") == "completed"
+                                for key in ("model_a", "grammar", "editorial"))):
+                    self.current = self.remember_version(raw, previous)
+                    return self.current
+                prompt = (
+                    f"{RULES}\nДоработай научпоп, исправляя только перечисленные замечания. "
+                    "Удали утверждения, которые нельзя подтвердить приведёнными источниками, или замени "
+                    "их сведениями, которые источник подтверждает напрямую. Если числу нет точного "
+                    "подтверждения в той же записи (единицы, разделители, порядок цифр), убери число. "
+                    "Сохрани тему, интро и ровно шесть разделов с жирными заголовками. Сохрани 3000–6000 "
+                    "знаков без пробелов и точное название канала в заключительном призыве. "
+                    "Верни только один JSON с полями article, issues и claims. article — полный исправленный "
+                    "текст; issues — оставшиеся ошибки или пустой массив. claims — проверяемые фразы "
+                    "именно из исправленного текста. У каждого claim (дословная фраза), source (S1, S2 "
+                    "или S3 согласно источникам ниже), quote (дословная непрерывная цитата на языке "
+                    "источника длиной не менее 18 знаков), verdict (supported или unsupported). "
+                    "Проверь в claims все числовые утверждения. Без плана иллюстраций. "
+                    "Никогда не придумывай цитаты, данные и источники. "
+                    f"\nЗАМЕЧАНИЯ:\n{json.dumps(previous_issues[:35], ensure_ascii=False)}"
+                    f"\nИСТОЧНИКИ:\n{source_context(self.records, chars_per_source=8500)}"
+                    f"\nСОХРАНЁННЫЙ ТЕКСТ:\n{raw}")
+                result = self.model("repair-saved-facts", "ovh", prompt, validate=lambda x: None,
+                                    metadata={"text_sha256": previous_sha}, tokens=14000)
+                corrected = result.get("article")
+                if not isinstance(corrected, str) or not corrected.strip():
+                    raise Blocked("empty_visible_content")
+                self.current = self.remember_version(corrected)
+                if self.current["text_sha256"] != previous_sha:
+                    self.memory.article(self.id, trial_image_plan=None)
+                self.current = self.inspect(self.current, submitted_audit=result)
+            else:
+                self.current = self.inspect(self.current)
             return self.current
         facts = source_context(self.records)
         angle = topic["angle"]
@@ -687,6 +736,11 @@ class Article:
             except Blocked:
                 if not ovh_finalize():
                     raise
+                if ovh_recover():
+                    layout = ", ".join(map(str, [1, 1, *range(2, count + 1)]))
+                    prompt += (f"\nПерепроверь JSON перед ответом: окончательный массив images "
+                               f"должен иметь ровно {count + 1} элементов; их section в порядке "
+                               f"записей: [{layout}]. Не включай другие варианты и пояснения.")
                 plan = self.model("image-plan-1", "ovh", prompt,
                                   validate=lambda x: validate_plan(x, count, self.channel, self.config,
                                                                    sourced_illustrations=True),
@@ -1017,7 +1071,7 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
             raise Blocked("ovh_finalize_requires_verified_checkpoint")
         cfg["articles_per_channel"] = {"science": 1}
         for ledger in ("daily_calls", "per_article_calls"):
-            cfg[ledger].update(kilo=0, openrouter=0, ovh=4 if ovh_finalize() else 2,
+            cfg[ledger].update(kilo=0, openrouter=0, ovh=8 if ovh_recover() else 4 if ovh_finalize() else 2,
                                **{"ovh-gptoss": 1, "kilo-review": 0})
     return cfg
 
