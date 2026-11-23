@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import fcntl
 
 from . import editorial_cinema as cinema
-from .editorial_alt_models import without_openrouter
+from .editorial_alt_models import ovh_trial, without_openrouter
 from .editorial_ai_check import REQUIRED_CHECKS, extract_text
 from .editorial_images import ImageIndex, generated, photo, similarity, validate_plan
 from .editorial_layout import layout_issues
@@ -99,6 +99,10 @@ class Article:
         from .editorial_alt_models import enabled as alternate_enabled, require_isolated
         if alternate_enabled():
             require_isolated()
+            if ovh_trial():
+                route = {"draft": "ovh-gptoss", "full-edit": "ovh", "editorial-audit": "ovh"}
+                if route.get(stage) != provider:
+                    raise Blocked("ovh_trial_stage_or_provider_outside_budget")
             if provider == "groq":
                 # Old stage labels route through the requested experiment;
                 # no request reaches Groq and no Groq quota is consumed.
@@ -152,7 +156,7 @@ class Article:
                 return send(task, tokens)
             except ProviderError as exc:
                 # Never shrink a required article merely to fit a provider window.
-                if isolated_edit or exc.retry_after is None or self.memory.time_left() < exc.retry_after + 125:
+                if ovh_trial() or isolated_edit or exc.retry_after is None or self.memory.time_left() < exc.retry_after + 125:
                     raise
                 if alternate_enabled():
                     sleep(exc.retry_after)
@@ -179,6 +183,8 @@ class Article:
             result = self.task(stage, provider, inputs, execute, minimum_seconds=130,
                                validator=(lambda response: validate(json_reply(response))) if validate else None)
         except Blocked as exc:
+            if ovh_trial():
+                raise
             # Route a quota-stopped Groq stage to a separately recorded, verified-free
             # OpenRouter task. Do not hide authentication failures, malformed answers,
             # incomplete previous requests or any editorial validation errors.
@@ -250,6 +256,8 @@ class Article:
             seed = self.source_seed(history)
             if seed:
                 return seed
+            if ovh_trial():
+                raise Blocked("ovh_trial_no_verified_science_seed")
         subject = ("оригинальной городской мистики, с уникальным сюжетом и развязкой" if self.channel == "legends"
                    else "научпопа о наблюдаемом природном явлении, приборе или научном объекте")
         if self.channel == "cinema":
@@ -385,6 +393,18 @@ class Article:
                            + "\nЕсли статья свыше 6000 знаков, проверь конкретность и необходимость обоснования.")
             if reference:
                 prompt += "\nПРЕДЫДУЩАЯ ВЕРСИЯ ДЛЯ СРАВНЕНИЯ:\n" + canonical(reference["article"])
+            if ovh_trial():
+                count = len(candidate["article"]["sections"])
+                prompt += (f'\nВ тот же JSON включи image_plan с subject и массивом images. '
+                           f'Укажи ровно {count + 1} различных изображений: два для первого раздела '
+                           'и по одному для остальных. Каждая запись: section (номер раздела), '
+                           'kind (строго photo или illustration), subject, brief, query (английские строки). '
+                           'Включи оба вида. Для Wikimedia Commons выбирай широко документированные '
+                           'объекты и запросы по содержанию раздела. Не придумывай URL и лицензии.')
+                result = self.model("editorial-audit", "ovh", prompt, validate=lambda x: None,
+                                    metadata={"text_sha256": sha}, tokens=7800)
+                self.memory.article(self.id, trial_image_plan=result.get("image_plan"))
+                return result
             last_error = None
             from .editorial_alt_models import enabled as alternative_test
             providers = ("ovh-gptoss", "kilo-review") if without_openrouter() else (
@@ -403,7 +423,8 @@ class Article:
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
                             "length_exception_reason": candidate["article"].get("length_exception_reason"),
-                            **({"reviewer": "ovhcloud"} if without_openrouter() else {})},
+                            **({"reviewer": "ovh-qwen-with-image-plan"} if ovh_trial() else
+                               {"reviewer": "ovhcloud"} if without_openrouter() else {})},
                            lambda _: qa(raw, self.channel, self.prior[1], self.records,
                                         audit, self.memory.time_left), minimum_seconds=20 * 60,
                            reusable=lambda row: all(row[key]["status"] == "completed"
@@ -430,6 +451,22 @@ class Article:
                  "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
+        if ovh_trial():
+            format_rules = ("\nОбязательная форма: короткое вступление, ровно шесть разделов с "
+                            "жирными заголовками и 3000–6000 знаков без пробелов. Последний "
+                            "абзац приглашает подписаться и называет канал точно.")
+            raw = self.model("draft", "ovh-gptoss", brief + format_rules, metadata={"topic": self.title})
+            original = self.remember_version(raw)
+            self.current = original
+            self.memory.article(self.id, draft_provider="ovh-gptoss", independent_editor_provider="ovh")
+            prompt = (brief + format_rules + "\nОтредактируй черновик до готового текста. "
+                      "Сохрани проверяемые факты и поддержанные источниками выводы. "
+                      "Верни только полный текст.\nЧЕРНОВИК:\n" + raw)
+            edited = self.model("full-edit", "ovh", prompt,
+                                metadata={"source_sha256": original["text_sha256"]})
+            self.current = self.remember_version(edited)
+            self.current = self.inspect(self.current, original)
+            return self.current
         from .editorial_alt_models import enabled as alternative_test
         author, editor = ("kilo", "openrouter") if alternative_test() else ("groq", "openrouter")
         if without_openrouter():
@@ -589,6 +626,12 @@ class Article:
         last = None
         providers = ("groq", "kilo") if without_openrouter() else (
             ("groq",) if alternative_test() else ("groq", "openrouter"))
+        if ovh_trial():
+            plan = self.memory.data["articles"][self.id].get("trial_image_plan")
+            if not isinstance(plan, dict):
+                raise Blocked("image_plan_missing_from_ovh_review")
+            validate_plan(plan, count, self.channel, self.config, sourced_illustrations=True)
+            providers = ()
         for attempt, provider in enumerate(providers, 1):
             try:
                 plan = self.model(f"image-plan-{attempt}", provider,
@@ -906,6 +949,12 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
             # Historical failed requests remain in the encrypted ledger.
             cfg["per_article_calls"].update(ovh=9, openrouter=0, **{"ovh-gptoss": 9, "kilo-review": 6})
             cfg["daily_calls"].update(ovh=20, openrouter=0, **{"ovh-gptoss": 20, "kilo-review": 12})
+    if ovh_trial():
+        if not without_openrouter() or validate_cinema:
+            raise Blocked("ovh_trial_requires_one_science_article_without_openrouter")
+        cfg["articles_per_channel"] = {"science": 1}
+        for ledger in ("daily_calls", "per_article_calls"):
+            cfg[ledger].update(kilo=0, openrouter=0, ovh=2, **{"ovh-gptoss": 1, "kilo-review": 0})
     return cfg
 
 

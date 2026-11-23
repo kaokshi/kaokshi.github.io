@@ -25,6 +25,19 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ProviderError, "groq_forbidden"):
                 text_call("groq", "SYNTHETIC TEST FIXTURE")
 
+    def test_standalone_ovh_trial_has_one_article_and_three_model_requests(self):
+        from src.editorial_brain import cycle_settings
+
+        cfg = self.config(EDITORIAL_OVH_ONE_ARTICLE="true", EDITORIAL_TEST_WITHOUT_OPENROUTER="true")
+        with patch.dict(os.environ, cfg), patch("src.editorial_providers.request") as request:
+            settings = cycle_settings("daily", 120, True)
+            self.assertEqual(settings["articles_per_channel"], {"science": 1})
+            providers = settings["daily_calls"]
+            self.assertEqual([providers[p] for p in ("ovh-gptoss", "ovh", "openrouter", "kilo")], [1, 2, 0, 0])
+            with self.assertRaisesRegex(ProviderError, "ovh_trial_text_route_forbidden"):
+                text_call("kilo", "fixture")
+            request.assert_not_called()
+
     def test_preflight_verifies_separate_free_kilo_reviewer(self):
         import json
         from src.editorial_alt_models import KILO_ID, KILO_REVIEW, OVH_ID, OVH_GPTOSS_ID

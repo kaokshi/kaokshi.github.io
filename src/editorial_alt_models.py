@@ -31,6 +31,10 @@ def without_openrouter():
     return os.environ.get("EDITORIAL_TEST_WITHOUT_OPENROUTER") == "true"
 
 
+def ovh_trial():
+    return os.environ.get("EDITORIAL_OVH_ONE_ARTICLE") == "true"
+
+
 def require_isolated():
     if (not enabled() or os.environ.get("EDITORIAL_ISOLATED_VALIDATION") != "true"
             or os.environ.get("GITHUB_ACTIONS") != "true"):
@@ -86,15 +90,16 @@ def _ovh_available(catalog, model=OVH_ID):
 def preflight():
     """Read two public catalogs. Does not generate tokens or write articles."""
     require_isolated()
-    kilo = parse_json(request(KILO_URL + "/models", ("ai-gateway.kilo.ai",),
-                              headers=candidate_headers("kilo")))
-    _kilo_free(kilo)
-    if without_openrouter():
-        _kilo_free(kilo, KILO_REVIEW)
+    if not ovh_trial():
+        kilo = parse_json(request(KILO_URL + "/models", ("ai-gateway.kilo.ai",),
+                                  headers=candidate_headers("kilo")))
+        _kilo_free(kilo)
+        if without_openrouter():
+            _kilo_free(kilo, KILO_REVIEW)
     ovh = parse_json(request(OVH_CATALOG_URL, ("catalog.endpoints.ai.ovh.net",)))
     _ovh_available(ovh)
     _ovh_available(ovh, OVH_GPTOSS_ID)
-    return {"status": "preflight_passed", "kilo_model": KILO_ID,
+    return {"status": "preflight_passed", "kilo_model": None if ovh_trial() else KILO_ID,
             "ovh_model": OVH_ID, "ovh_gptoss_model": OVH_GPTOSS_ID,
             "ovh_access": "anonymous",
             "groq_allowed": False, "publication_authorized": False}

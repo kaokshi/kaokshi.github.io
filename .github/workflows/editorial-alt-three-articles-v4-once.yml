@@ -62,6 +62,7 @@ jobs:
       EDITORIAL_ISOLATED_VALIDATION: 'true'
       EDITORIAL_TEST_FREE_ONLY: 'true'
       EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_OVH_ONE_ARTICLE: ${{ contains(github.event.head_commit.message, '[ovh-one]') }}
       EDITORIAL_TEST_WITHOUT_OPENROUTER: ${{ inputs.without_openrouter || contains(github.event.head_commit.message, '[no-openrouter]') }}
       EDITORIAL_CF_FREE_ONLY: 'true'
       EDITORIAL_STATE_KEY_HEX: ${{ secrets.EDITORIAL_STATE_KEY_HEX }}
@@ -96,8 +97,9 @@ jobs:
           assert not os.environ.get("GROQ_API_KEY")
           assert chat["owner_approved"] is True and chat["repository"] == "kaokshi/zen-editorial-review"
           assert "Content authorship boundary" in Path("AGENTS.md").read_text(encoding="utf-8")
-          required = ["KILO_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN",
-                      "EDITORIAL_PRIVATE_TOKEN", "EDITORIAL_STATE_KEY_HEX"]
+          required = ["EDITORIAL_PRIVATE_TOKEN", "EDITORIAL_STATE_KEY_HEX"]
+          if os.environ["EDITORIAL_OVH_ONE_ARTICLE"] != "true":
+              required += ["KILO_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"]
           if os.environ["EDITORIAL_TEST_WITHOUT_OPENROUTER"] == "true":
               assert not os.environ.get("OPENROUTER_API_KEY")
           else:
@@ -131,6 +133,7 @@ jobs:
           print(json.dumps(report, sort_keys=True), flush=True)
           PY
       - name: Probe free text routes needed for this run
+        if: env.EDITORIAL_OVH_ONE_ARTICLE != 'true'
         env:
           KILO_PROBE_ONLY: ${{ inputs.resume_run != '' || contains(github.event.head_commit.message, '[resume]') }}
         run: |
@@ -179,7 +182,11 @@ jobs:
           umask 077
           day="${EDITION_DAY:-$(TZ=Europe/Moscow date +%F)}"
           command=daily
-          if [ -z "$RESUME_RUN" ] && [ "$GITHUB_EVENT_NAME" = push ]; then
+          if [ "$EDITORIAL_OVH_ONE_ARTICLE" = true ]; then
+            export EDITORIAL_STATE_DIR="$RUNNER_TEMP/editorial-ovh-one"
+            echo "EDITORIAL_STATE_DIR=$EDITORIAL_STATE_DIR" >>"$GITHUB_ENV"
+          fi
+          if [ "$EDITORIAL_OVH_ONE_ARTICLE" != true ] && [ -z "$RESUME_RUN" ] && [ "$GITHUB_EVENT_NAME" = push ]; then
             RESUME_RUN="$(python - <<'PY_RESTORE'
           import os
           from src.editorial_delivery import latest_alt_checkpoint
@@ -226,7 +233,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: agent-alt-kilo-ovh-encrypted-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ env.EDITORIAL_OVH_ONE_ARTICLE == 'true' && 'agent-ovh-one-encrypted' || 'agent-alt-kilo-ovh-encrypted' }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ env.EDITORIAL_SEALED_DIR }}/checkpoint.enc
             ${{ env.EDITORIAL_SEALED_DIR }}/owner-review.enc
