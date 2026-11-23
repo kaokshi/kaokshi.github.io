@@ -110,7 +110,7 @@ def inputs(root, day):
             raise Blocked("private_review_required_files_missing")
         for image in rows:
             name = image.get("file") if isinstance(image, dict) else None
-            if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9._-]+\\.(jpg|jpeg|png|webp)", name):
+            if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9._-]+\.(jpg|jpeg|png|webp)", name):
                 raise Blocked("private_review_image_name_invalid")
             file = folder / "images" / name
             if not file.is_file() or file.is_symlink() or digest(file.read_bytes()) != image.get("sha256"):
