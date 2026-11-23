@@ -220,13 +220,17 @@ def gemini_preflight():
             "account_quota_verified": False, "publication_authorized": False}
 
 
-def gemini_text(prompt, max_tokens, *, response_json=False):
+def gemini_text(prompt, max_tokens, *, response_json=False, fallback_model=False):
     from .editorial_alt_models import gemini_pilot, require_isolated
     if not gemini_pilot():
         raise Blocked("gemini_requires_isolated_validation")
     require_isolated()
     if type(max_tokens) is not int or not 1 <= max_tokens <= 8192:
         raise Blocked("gemini_output_limit_invalid")
+    # Only retry jobs may explicitly try the supported 3.6 model. This is
+    # a separate, metered request, never an untracked automatic retry.
+    selected_model = ("gemini-3.6-flash" if fallback_model and
+                      gemini_model() == "gemini-3.5-flash" else gemini_model())
     config = {"maxOutputTokens": max_tokens, "thinkingConfig": {"thinkingLevel": "LOW"}}
     if response_json:
         config["responseMimeType"] = "application/json"
@@ -241,14 +245,14 @@ def gemini_text(prompt, max_tokens, *, response_json=False):
         if wait > 0:
             sleep(wait)
         _gemini_last_request = monotonic()
-    url = f"https://{GEMINI_HOST}/v1beta/models/{gemini_model()}:streamGenerateContent?alt=sse"
+    url = f"https://{GEMINI_HOST}/v1beta/models/{selected_model}:streamGenerateContent?alt=sse"
     raw = request(url, (GEMINI_HOST,), data=json.dumps(body).encode(),
                   headers={**gemini_headers(), "Content-Type": "application/json"},
-                  timeout=210, limit=4_000_000)
+                  timeout=210, limit=4_000_000, retry_transient=True)
     text_parts = []
     finish = None
     usage = {}
-    model = gemini_model()
+    model = selected_model
     for line in raw.splitlines():
         if not line.startswith(b"data:"):
             continue
