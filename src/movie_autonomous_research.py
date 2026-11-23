@@ -39,17 +39,27 @@ def movie_identity(topic):
 def fetch_json(endpoint, params):
     url = endpoint + "?" + urlencode(params)
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    try:
-        with urlopen(request, timeout=12) as response:
-            raw = response.read(MAX_BYTES + 1)
-        if len(raw) > MAX_BYTES:
-            raise ValueError("API response too large")
-        result = json.loads(raw)
-        if not isinstance(result, dict) or result.get("error"):
-            raise ValueError("Invalid API response")
-        return result
-    except (OSError, ValueError, TypeError) as exc:
-        raise Blocked("Film source API unavailable: " + type(exc).__name__) from exc
+    for attempt in range(2):
+        try:
+            with urlopen(request, timeout=12) as response:
+                raw = response.read(MAX_BYTES + 1)
+            if len(raw) > MAX_BYTES:
+                raise ValueError("API response too large")
+            result = json.loads(raw)
+            if not isinstance(result, dict) or result.get("error"):
+                raise ValueError("Invalid API response")
+            return result
+        except OSError as exc:
+            if attempt == 0:
+                # The first Wikimedia endpoint failure can be transient.
+                # Retry once with the SAME factual source, without guessing
+                # film identity or substituting generated claims.
+                from time import sleep
+                sleep(1)
+                continue
+            raise Blocked("Film source API unavailable: " + type(exc).__name__) from exc
+        except (ValueError, TypeError) as exc:
+            raise Blocked("Film source API unavailable: " + type(exc).__name__) from exc
 
 
 def claim_ids(entity, property_id):

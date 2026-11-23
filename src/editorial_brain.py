@@ -199,22 +199,40 @@ class Article:
             prompt += (" Для каждой темы верни дополнительно film_title, year, qid (если известен), "
                        "format (retelling, review, critique или plot_analysis), spoilers (boolean). "
                        "Дай ссылки на студийные или независимые источники о конкретном фильме. "
+                       "Не угадывай QID: если не уверен в нём, оставь поле пустым; "
+                       "независимый каталог проверит фильм сам. "
                        f"Публичные сигналы интереса: {json.dumps(signals, ensure_ascii=False)}. "
                        f"Недавние релизы: {json.dumps(releases, ensure_ascii=False)}.")
         for shift in range(2):
-            if shift:
+            if shift and os.environ.get("EDITORIAL_GROQ_FALLBACK_ONLY") != "true":
                 with self.memory.lock:
                     projection = groq_plan(self.memory)
                 if (projection["groq_usage"]["accounted_tokens"] >= self.config["groq_budget"]["target_daily_tokens"][1]
                         or not all(projection[key] for key in ("fits_editorial_budget",
                             "fits_observed_organization_headroom", "deadline_estimate_fits"))):
                     raise Blocked("groq_optional_topic_retry_deferred")
+            # When Groq was preflight-blocked and the zero-price OpenRouter
+            # route was separately verified, only the latter's real request
+            # envelope and the common deadline may gate this retry.
             def is_valid(plan):
                 if not isinstance(plan.get("topics"), list):
                     raise Blocked("topic_list_missing")
-            result = self.model(f"topics-{shift + 1}", "groq",
-                                prompt + (f" В этот раз выбери иные предметы для набора {shift}." if shift else ""),
-                                validate=is_valid, tokens=3200)
+            topic_prompt = prompt + (f" В этот раз выбери иные предметы для набора {shift}." if shift else "")
+            try:
+                result = self.model(f"topics-{shift + 1}", "groq", topic_prompt,
+                                    validate=is_valid, tokens=3200)
+            except Blocked as exc:
+                # Retry malformed JSON as a new, metered model task. Never
+                # insert any assistant-authored topic or other creative data.
+                if str(exc) not in {"model_json_invalid", "model_json_not_object",
+                                    "topic_list_missing"}:
+                    raise
+                strict_prompt = (topic_prompt + " Ответь строго одним JSON-объектом "
+                                 "с массивом topics; без Markdown, пояснений или "
+                                 "текста до/после JSON. Не придумывай идентификаторы "
+                                 "каталога фильмов, если не уверен.")
+                result = self.model(f"topics-json-retry-{shift + 1}", "groq",
+                                    strict_prompt, validate=is_valid, tokens=3200)
             for row in result["topics"][:8]:
                 if not isinstance(row, dict):
                     continue
@@ -747,6 +765,14 @@ def cycle_settings(command, validation_window=None, encrypted_mode=False, valida
                 or os.environ.get("EDITORIAL_ISOLATED_VALIDATION") != "true"):
             raise Blocked("cinema_validation_requires_isolated_encrypted_cycle")
         cfg = {**cfg, "articles_per_channel": {**cfg["articles_per_channel"], "cinema": 1}}
+        if os.environ.get("EDITORIAL_TEST_FREE_ONLY") == "true":
+            # The configured 10 OpenRouter calls cover the two production
+            # channels only. A three-channel isolated QA requires a separate
+            # bounded test envelope, still enforced by verified $0 model pricing
+            # and the provider's actual account quota.
+            cfg = {**cfg, "per_article_calls": {
+                **cfg["per_article_calls"], "openrouter": 12},
+                "daily_calls": {**cfg["daily_calls"], "openrouter": 36}}
     return cfg
 
 

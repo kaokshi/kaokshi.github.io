@@ -218,6 +218,11 @@ jobs:
             echo "::notice::Groq unavailable; independently verifying the existing free OpenRouter model."
             python -m src.editorial_free_fallback --github-env "$GITHUB_ENV"
           fi
+      - name: Require actual free OpenRouter headroom for three independent test articles
+        if: >-
+          inputs.isolated_validation && inputs.validate_cinema &&
+          (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry')
+        run: python -m src.editorial_free_fallback --github-env "$GITHUB_ENV" --quota-only --minimum-free-remaining 36
       - name: Restore sanitized Groq accounting
         if: env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry'
         run: |
@@ -324,6 +329,20 @@ jobs:
             if [ "$EDITORIAL_VALIDATE_CINEMA" = true ]; then args+=(--validate-cinema); fi
           fi
           python -m src.editorial_brain "${args[@]}"
+      - name: Send sanitized test diagnostics to private GitHub review issue
+        if: >-
+          always() && inputs.isolated_validation &&
+          (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry')
+        continue-on-error: true
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+        run: |
+          state="$EDITORIAL_STATE_DIR/$EDITORIAL_MOSCOW_DAY/state.json"
+          if [ -f "$state" ]; then
+            python -m src.editorial_chat_bridge --root "$EDITORIAL_STATE_DIR" --date "$EDITORIAL_MOSCOW_DAY"
+          else
+            echo "::notice::No private editorial state to report"
+          fi
       - name: Record a confirmed daily Groq stop without publishing editorial data
         if: always() && steps.command.outcome != 'skipped' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry')
         run: python -m src.editorial_quota record --state "$EDITORIAL_STATE_DIR" --markers "$EDITORIAL_QUOTA_DIR"

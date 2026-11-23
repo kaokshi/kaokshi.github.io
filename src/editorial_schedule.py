@@ -39,12 +39,17 @@ def plan(config, *, command, cron="", branch="", isolated=False, test_key="", te
         if (not PRIVATE_REPO.fullmatch(repository or "") or repository == "kaokshi/kaokshi.github.io"
                 or not PUBLIC_KEY.fullmatch(schedule["owner_public_key"] or "")):
             raise Blocked("storage_configuration_pending")
-    if isolated and branch != "refs/heads/codex/editorial-production":
+    if isolated and branch not in {"refs/heads/main", "refs/heads/codex/editorial-production"}:
         raise Blocked("unsupported_validation_branch")
+    # Isolated tests can use the non-secret owner PUBLIC key already committed
+    # to this project; no private decrypting key is ever made available to CI.
     repository = "" if isolated else schedule["private_repository"]
+    public_key = (test_key or schedule["owner_public_key"]) if isolated else schedule["owner_public_key"]
+    if public_key and not PUBLIC_KEY.fullmatch(public_key):
+        raise Blocked("storage_configuration_pending: invalid_public_key")
     return {"command": command, "schedule": "enabled" if enabled else "disabled",
             "repository": repository or "",
-            "public_key": (test_key if isolated else schedule["owner_public_key"]) or "",
+            "public_key": public_key or "",
             "groq_free": test_free if isolated else schedule["groq_free_only"] is True,
             "klein_free": test_free if isolated else schedule["klein_free_only"] is True}
 
