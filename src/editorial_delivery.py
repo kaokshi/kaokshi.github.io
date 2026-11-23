@@ -134,7 +134,7 @@ def save_outputs(root, day, outgoing):
             "delivery": "delivery_integration_pending"}
 
 
-def unpack(data, target):
+def unpack(data, target, *, excluded=()):
     # Archive path validation alone cannot protect a destination with pre-existing
     # symlinked directories or files. Never extract through one, even in a
     # restored workspace; a failure must not write outside the chosen state root.
@@ -143,7 +143,7 @@ def unpack(data, target):
         raise Blocked("unsafe_restore_symlink")
     target_root = target.resolve()
     with safe_zip(data) as archive:
-        entries = archive.infolist()
+        entries = [entry for entry in archive.infolist() if entry.filename not in excluded]
         for entry in entries:
             candidate = target / entry.filename
             for parent in (candidate, *candidate.parents):
@@ -162,6 +162,7 @@ def unpack(data, target):
 
 def restore_blob(payload, root, day):
     data = unseal_state(payload)
+    excluded = ()
     with safe_zip(data) as archive:
         name = day + "/state.json"
         if name not in archive.namelist() or json.loads(archive.read(name))["day"] != day:
@@ -169,11 +170,21 @@ def restore_blob(payload, root, day):
         packet = day + "/Комплект согласования.zip"
         if packet in archive.namelist():
             raw = archive.read(packet)
-            report = verify_review(raw, allow_incomplete=True)
-            sha = archive.read(day + "/Комплект согласования.sha256").decode().strip()
-            if report["date"] != day or report["package_sha256"] != sha:
+            checksum = day + "/Комплект согласования.sha256"
+            if digest(raw) != archive.read(checksum).decode().strip():
                 raise Blocked("checkpoint_review_mismatch")
-    unpack(data, root)
+            try:
+                report = verify_review(raw, allow_incomplete=True)
+            except Blocked as exc:
+                if str(exc) not in {"image_review_required_before_packaging", "review_duplicate_image_pixels"}:
+                    raise
+                # The authenticated drafts, image files and ledger are still
+                # recoverable. Omit the old output that must be rebuilt.
+                excluded = (packet, checksum)
+            else:
+                if report["date"] != day:
+                    raise Blocked("checkpoint_review_mismatch")
+    unpack(data, root, excluded=excluded)
 
 
 def verify_review(data, *, allow_incomplete=False):

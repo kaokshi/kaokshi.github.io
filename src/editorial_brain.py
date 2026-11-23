@@ -1158,7 +1158,8 @@ class Article:
                 self.task("review-package", "docx-html-export",
                           {"text_sha256": report["text_sha256"], "checks_sha256": digest(
                               json.dumps(report, sort_keys=True, ensure_ascii=False)),
-                           "image_sha256": [row["sha256"] for row in self.pictures],
+                           "visual_evidence_sha256": [digest(scene_qa.json_bytes(row["image_qa"]))
+                                                      for row in self.pictures],
                            "scene_qa_schema": scene_qa.SCHEMA, "status": status},
                           lambda _: package(folder, self.title,
                                             sorted((self.folder / "versions").glob("*")), report,

@@ -154,7 +154,7 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Install storage and review utilities
         if: env.EDITORIAL_EFFECTIVE_COMMAND != 'skip'
-        run: python -m pip install 'cryptography>=44,<48'
+        run: python -m pip install 'cryptography>=44,<48' 'python-docx==1.2.0' 'Pillow==11.3.0' 'ImageHash==4.3.2'
       - name: Verify production storage credentials and visibility before provider calls
         if: env.EDITORIAL_MODE == 'private' && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' || env.EDITORIAL_EFFECTIVE_COMMAND == 'retry' || env.EDITORIAL_EFFECTIVE_COMMAND == 'review')
         run: |

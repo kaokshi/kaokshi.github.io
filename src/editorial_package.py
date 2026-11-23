@@ -6,7 +6,7 @@ from html.parser import HTMLParser
 import io
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from .editorial_memory import digest, write, write_json
+from .editorial_memory import digest, read_json, write, write_json
 from .editorial_review import canonical
 from .editorial_scene_qa import require_packet_rows, require_ready_rows
 from .editorial_images import select_cover
@@ -371,12 +371,21 @@ def package(folder, title, version, report, images, image_folder, summary):
     return {"text_sha256": report["text_sha256"], "cover": cover, "files": len(hashes)}
 
 
-def zip_packet(root, destination, *, articles=None):
+def zip_packet(root, destination, *, articles):
+    for article_id, status in articles.items():
+        if status not in {"review_pending", "rights_review_pending"}:
+            continue
+        folder = root / article_id
+        checks = read_json(folder / "Статус и проверки.json")
+        if not checks or checks.get("status") != status:
+            raise Blocked("review_visual_layout_incomplete")
+        final_visual_gate(checks.get("visual_article"), checks.get("images", []),
+                          checks["text_sha256"], article_id, lambda name: (folder / "images" / name).read_bytes(),
+                          encoded=((folder / "Статья.html").read_bytes(), (folder / "Статья.docx").read_bytes()))
     with ZipFile(destination, mode="w", compression=ZIP_DEFLATED) as archive:
         for path in sorted(root.rglob("*")):
             relative = path.relative_to(root)
-            if path.is_file() and (articles is None or len(relative.parts) == 1
-                                   or relative.parts[0] in articles):
+            if path.is_file() and (len(relative.parts) == 1 or relative.parts[0] in articles):
                 archive.write(path, relative)
     with ZipFile(destination) as archive:
         if archive.testzip() is not None:

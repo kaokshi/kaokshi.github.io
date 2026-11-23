@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption,
 from docx import Document
 
 from src.editorial_brain import Memory, review, settings
-from src.editorial_delivery import restore_blob, retrieve, save_outputs
+from src.editorial_delivery import bundle_state, restore_blob, retrieve, save_outputs, seal_state
 from src.editorial_groq_budget import snapshot
 from src.editorial_groq_ledger import archive_document, collection
 from src.editorial_memory import digest, read_json, write_json
@@ -99,6 +99,22 @@ def validate_restored(encrypted, workspace, key):
 
 
 class StorageTests(unittest.TestCase):
+    def test_restore_preserves_drafts_when_old_visual_evidence_requires_recheck(self):
+        with TemporaryDirectory() as directory, patch.dict(
+                os.environ, {"EDITORIAL_STATE_KEY_HEX": os.urandom(32).hex()}):
+            root = Path(directory)
+            original = root / "original"
+            build_fixture(original)
+            checkpoint = seal_state(bundle_state(original, DAY))
+            restored = root / "restored"
+            with patch("src.editorial_delivery.verify_review",
+                       side_effect=Blocked("image_review_required_before_packaging")):
+                restore_blob(checkpoint, restored, DAY)
+            self.assertTrue((restored / DAY / "state.json").is_file())
+            self.assertTrue((restored / DAY / "review" / "legends-01" / "images" / "0.jpg").is_file())
+            self.assertFalse((restored / DAY / "Комплект согласования.zip").exists())
+            self.assertFalse((restored / DAY / "Комплект согласования.sha256").exists())
+
     def test_pack_restore_and_open_after_original_workspace_removed(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
