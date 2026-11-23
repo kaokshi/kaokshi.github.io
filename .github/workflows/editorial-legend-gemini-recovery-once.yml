@@ -89,7 +89,7 @@ jobs:
         run: |
           day="$(cat "$RUNNER_TEMP/editorial-day")"
           python -m src.editorial_brain retry --date "$day" --encrypted-mode \
-            --validation-window 95 --local-state "$EDITORIAL_STATE_DIR"
+            --validation-window 120 --local-state "$EDITORIAL_STATE_DIR"
       - name: Private owner review, including clearly labeled incomplete drafts
         if: always()
         continue-on-error: true
