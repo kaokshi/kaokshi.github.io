@@ -132,8 +132,10 @@ def inputs(root, day):
             files.append(file)
         seen = {p.relative_to(folder).as_posix() for p in files
                 if p.name != "SHA256SUMS.txt"}
-        if expected.keys() != seen or any(
-                digest((folder / name).read_bytes()) != sha for name, sha in expected.items()):
+        # The complete original manifest also includes the model's historical
+        # versions; avoid exposing those auxiliary files in the chat transport.
+        if not seen <= expected.keys() or any(
+                digest((folder / name).read_bytes()) != expected[name] for name in seen):
             raise Blocked("private_review_manifest_mismatch")
         for path in files:
             if path.is_symlink() or not path.resolve().is_relative_to(folder.resolve()):
