@@ -199,16 +199,20 @@ def gemini_limit(name, default, ceiling):
     return int(raw)
 
 
+def gemini_model():
+    return "gemini-3.6-flash" if os.environ.get("EDITORIAL_GEMINI_COMBINED_FALLBACK") == "true" else GEMINI
+
+
 def gemini_headers():
     return {"x-goog-api-key": key("GEMINI_API_KEY")}
 
 
 def gemini_preflight():
-    url = f"https://{GEMINI_HOST}/v1beta/models/{GEMINI}"
+    url = f"https://{GEMINI_HOST}/v1beta/models/{gemini_model()}"
     model = parse_json(request(url, (GEMINI_HOST,), headers=gemini_headers()))
     if "generateContent" not in model.get("supportedGenerationMethods", ()):
         raise Blocked("gemini_model_generation_unavailable")
-    return {"status": "preflight_passed", "gemini_model": GEMINI,
+    return {"status": "preflight_passed", "gemini_model": gemini_model(),
             "account_quota_verified": False, "publication_authorized": False}
 
 
@@ -233,14 +237,14 @@ def gemini_text(prompt, max_tokens, *, response_json=False):
         if wait > 0:
             sleep(wait)
         _gemini_last_request = monotonic()
-    url = f"https://{GEMINI_HOST}/v1beta/models/{GEMINI}:streamGenerateContent?alt=sse"
+    url = f"https://{GEMINI_HOST}/v1beta/models/{gemini_model()}:streamGenerateContent?alt=sse"
     raw = request(url, (GEMINI_HOST,), data=json.dumps(body).encode(),
                   headers={**gemini_headers(), "Content-Type": "application/json"},
                   timeout=210, limit=4_000_000)
     text_parts = []
     finish = None
     usage = {}
-    model = GEMINI
+    model = gemini_model()
     for line in raw.splitlines():
         if not line.startswith(b"data:"):
             continue

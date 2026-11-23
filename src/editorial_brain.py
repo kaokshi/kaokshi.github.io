@@ -24,7 +24,7 @@ from .editorial_memory import Memory, PrivateGit, StorageError, digest, now, rea
 from .editorial_no_repeat import topic_duplicate_reason, words
 from .editorial_package import package, zip_packet
 from .editorial_subscription import CHANNELS as SUBSCRIPTION_CHANNELS
-from .editorial_providers import Blocked, MODELS, ProviderError, gemini_limit, gemini_text, klein, text_call
+from .editorial_providers import Blocked, MODELS, ProviderError, gemini_limit, gemini_model, gemini_text, klein, text_call
 from .editorial_review import RULES, canonical, improves, parse_article, qa, source_context, sources, structural_checks
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -181,7 +181,7 @@ class Article:
                     sleep(delay)
                 return send(task, tokens)
 
-        inputs = {"model": MODELS[provider], "prompt_version": PROMPT_VERSION,
+        inputs = {"model": gemini_model() if provider == "gemini" else MODELS[provider], "prompt_version": PROMPT_VERSION,
                   "prompt_sha256": digest(prompt), **(metadata or {})}
         if isinstance(self.memory, Memory) and self.memory.retry:
             with self.memory.lock:
@@ -460,7 +460,9 @@ class Article:
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
                             "length_exception_reason": candidate["article"].get("length_exception_reason"),
-                            **({"reviewer": "gemini-flash"} if gemini_pilot() else
+                            **({"reviewer": gemini_model(),
+                                  **({"audit_sha256": digest(json.dumps(submitted_audit, sort_keys=True))}
+                                     if submitted_audit is not None else {})} if gemini_pilot() else
                                {"reviewer": "ovh-qwen-pilot-resume"} if pilot_resume else
                                {"reviewer": "ovh-qwen-correction", "audit_sha256": digest(
                                     json.dumps(submitted_audit, ensure_ascii=False, sort_keys=True))} if ovh_recover() else
@@ -499,11 +501,31 @@ class Article:
                           f"\nКАНАЛ: {SUBSCRIPTION_CHANNELS[self.channel]}"
                           f"\nИСТОЧНИКИ:\n{source_context(self.records, chars_per_source=5000)}"
                           f"\nЧЕРНОВИК:\n{raw}")
-                edited = self.model("full-edit", "gemini", prompt,
-                                    metadata={"source_sha256": previous_sha}, tokens=4800)
+                if os.environ.get("EDITORIAL_GEMINI_COMBINED_FALLBACK") == "true":
+                    prompt = prompt.replace("Верни только полный текст статьи.", (
+                        'Верни JSON с полями article, issues, claims, image_plan. article — полный '
+                        'отредактированный текст. issues — список оставшихся замечаний или []. '
+                        'claims — все проверяемые утверждения именно из article, включая числа. '
+                        'Каждая запись содержит claim (дословный отрывок текста), source (S1, S2 '
+                        'или S3), quote (точная непрерывная цитата источника на языке источника '
+                        'длиной от 18 знаков), verdict (supported или unsupported). Не выдумывай '
+                        'ссылок или цитат. image_plan содержит subject и images из ровно семи '
+                        'записей. section в порядке [1, 1, 2, 3, 4, 5, 6]. Две записи с kind '
+                        'illustration, пять с kind photo. Каждая запись содержит section, kind, '
+                        'а также английские subject, brief, query для Klein или Wikimedia Commons.'))
+                    answer = self.model("full-edit", "gemini", prompt, validate=lambda x: None,
+                                        metadata={"source_sha256": previous_sha}, tokens=8192)
+                    edited = answer.get("article")
+                    if not isinstance(edited, str) or not edited.strip():
+                        raise Blocked("empty_visible_content")
+                    image_plan = answer.get("image_plan")
+                else:
+                    edited = self.model("full-edit", "gemini", prompt,
+                                        metadata={"source_sha256": previous_sha}, tokens=4800)
+                    answer = image_plan = None
                 self.current = self.remember_version(edited)
-                self.memory.article(self.id, independent_editor_provider="gemini", trial_image_plan=None)
-                self.current = self.inspect(self.current, original)
+                self.memory.article(self.id, independent_editor_provider="gemini", trial_image_plan=image_plan)
+                self.current = self.inspect(self.current, original, submitted_audit=answer)
                 return self.current
             if ovh_recover():
                 previous = read_json(self.folder / "versions" / (previous_sha + ".json"), {})
