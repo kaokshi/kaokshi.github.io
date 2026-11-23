@@ -857,6 +857,18 @@ class Article:
                   + self.current["raw"])
         plan = None
         last = None
+        if os.environ.get("EDITORIAL_IMAGE_RECOVERY_ONLY") == "true":
+            # Reuse the existing model-created image plan, never ask Groq again.
+            with self.memory.lock:
+                cached = next((
+                    row["result"] for row in self.memory.data["tasks"].values()
+                    if row["article"] == self.id and row["operation"] == "image-plan-1"
+                    and row["status"] == "completed" and isinstance(row.get("result"), dict)
+                ), None)
+            if cached is None:
+                raise Blocked("image_recovery_missing_original_plan")
+            plan = json_reply(cached)
+            validate_plan(plan, count, self.channel, self.config)
         providers = ("groq", "kilo") if without_openrouter() else (
             ("groq",) if alternative_test() else ("groq", "openrouter"))
         if ovh_trial():
@@ -948,6 +960,30 @@ class Article:
             return existing["status"]
         if existing.get("status") in ("review_pending", "rights_review_pending") and not self.memory.retry:
             return existing["status"]
+        if os.environ.get("EDITORIAL_IMAGE_RECOVERY_ONLY") == "true":
+            if not self.memory.retry or self.channel != "cinema":
+                raise Blocked("image_recovery_requires_cinema_retry")
+            # Do not rerun any text model or QA. Read ONLY the immutable
+            # article text and report preserved in the authenticated state.
+            self.title = existing["title"]
+            topic = existing["topic_plan"]
+            self.records = topic["records"]
+            self.film = {k: topic[k] for k in ("film", "format", "spoilers", "detailed_plot_evidence")}
+            original_sha = existing["text_sha256"]
+            raw_path = self.folder / "versions" / (original_sha + ".md")
+            report_path = self.folder / "versions" / (original_sha + ".json")
+            if not raw_path.is_file() or not report_path.is_file():
+                raise Blocked("image_recovery_immutable_original_missing")
+            self.current = self.remember_version(raw_path.read_text(encoding="utf-8"),
+                                                  report=read_json(report_path))
+            if self.current["text_sha256"] != original_sha:
+                raise Blocked("image_recovery_original_sha_mismatch")
+            self.memory.article(self.id, status="running", channel=self.channel)
+            try:
+                self.images()
+            except Blocked as exc:
+                self.blockers.append(str(exc))
+            return self.finish()
         self.memory.article(self.id, status="running", channel=self.channel, prompt_version=PROMPT_VERSION,
                             started_at=existing.get("started_at") or now())
         try:
