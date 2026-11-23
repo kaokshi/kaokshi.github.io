@@ -25,45 +25,25 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ProviderError, "groq_forbidden"):
                 text_call("groq", "SYNTHETIC TEST FIXTURE")
 
-    def test_gemini_uses_separate_quota_and_can_return_structured_audit(self):
-        import json
+    def test_deprecated_ovh_gemini_pilot_cannot_start(self):
         from src.editorial_brain import cycle_settings
-        from src.editorial_providers import gemini_text
-
-        cfg = self.config(EDITORIAL_OVH_ONE_ARTICLE="true", EDITORIAL_TEST_WITHOUT_OPENROUTER="true",
-                          EDITORIAL_GROQ_FREE_ONLY="true", EDITORIAL_GROQ_OVH_KLEIN_PILOT="true",
-                          EDITORIAL_GEMINI_EDITOR="true", EDITORIAL_GEMINI_DAILY_CALLS="20",
+        cfg = self.config(EDITORIAL_OVH_ONE_ARTICLE="true",
+                          EDITORIAL_TEST_WITHOUT_OPENROUTER="true",
+                          EDITORIAL_GROQ_FREE_ONLY="true",
+                          EDITORIAL_GROQ_OVH_KLEIN_PILOT="true",
+                          EDITORIAL_GEMINI_EDITOR="true",
                           GEMINI_API_KEY="fixture-key")
-        response = {"candidates": [{"finishReason": "STOP", "content": {"parts": [
-            {"thought": True, "text": "internal"}, {"text": '{"issues":[],"claims":[]}'}]}}],
-            "usageMetadata": {"totalTokenCount": 48}}
-        with patch.dict(os.environ, cfg), patch("src.editorial_providers.request",
-                                               return_value=b"data: " + json.dumps(response).encode() + b"\n\n") as request:
-            settings = cycle_settings("retry", 120, True)
-            self.assertEqual([settings["daily_calls"][p] for p in ("gemini", "groq", "ovh")], [20, 0, 0])
-            self.assertEqual(settings["per_article_calls"]["gemini"], 3)
-            result = gemini_text("fixture", 1024, response_json=True)
-        self.assertEqual(json.loads(result["text"]), {"issues": [], "claims": []})
-        self.assertEqual(result["usage"]["total_tokens"], 48)
-        self.assertNotIn("fixture-key", request.call_args.args[0])
-        self.assertIn("streamGenerateContent", request.call_args.args[0])
-        self.assertEqual(request.call_args.kwargs["headers"]["x-goog-api-key"], "fixture-key")
-        self.assertEqual(json.loads(request.call_args.kwargs["data"])["generationConfig"]["responseMimeType"],
-                         "application/json")
-
-    def test_standalone_ovh_trial_has_one_article_and_three_model_requests(self):
+        with patch.dict(os.environ, cfg), self.assertRaisesRegex(
+                Blocked, "ovh_removed_from_project"):
+            cycle_settings("retry", 120, True)
+    def test_standalone_ovh_trial_is_retired_before_network_calls(self):
         from src.editorial_brain import cycle_settings
-
-        cfg = self.config(EDITORIAL_OVH_ONE_ARTICLE="true", EDITORIAL_TEST_WITHOUT_OPENROUTER="true")
-        with patch.dict(os.environ, cfg), patch("src.editorial_providers.request") as request:
-            settings = cycle_settings("daily", 120, True)
-            self.assertEqual(settings["articles_per_channel"], {"science": 1})
-            providers = settings["daily_calls"]
-            self.assertEqual([providers[p] for p in ("ovh-gptoss", "ovh", "openrouter", "kilo")], [1, 2, 0, 0])
-            with self.assertRaisesRegex(ProviderError, "ovh_trial_text_route_forbidden"):
-                text_call("kilo", "fixture")
+        cfg = self.config(EDITORIAL_OVH_ONE_ARTICLE="true",
+                          EDITORIAL_TEST_WITHOUT_OPENROUTER="true")
+        with patch.dict(os.environ, cfg), patch("src.editorial_alt_models.request") as request:
+            with self.assertRaisesRegex(Blocked, "ovh_removed_from_project"):
+                cycle_settings("daily", 120, True)
             request.assert_not_called()
-
     def test_preflight_verifies_separate_free_kilo_reviewer(self):
         import json
         from src.editorial_alt_models import KILO_ID, KILO_REVIEW, OVH_ID, OVH_GPTOSS_ID
@@ -95,7 +75,7 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
 
     def test_ovh_authentication_is_forbidden_in_free_test(self):
         with patch.dict(os.environ, self.config(OVH_AI_ENDPOINTS_ACCESS_TOKEN="TEST-NOT-REAL"), clear=False):
-            with self.assertRaisesRegex(Blocked, "ovh_anonymous_test_must_not_use_paid_api_key"):
+            with self.assertRaisesRegex(Blocked, "ovh_removed_from_project"):
                 require_isolated()
 
     def test_bad_provider_never_routes_to_paid_model(self):
@@ -113,25 +93,14 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
                 preflight()
 
 
-    def test_ovh_models_share_the_same_rate_window(self):
+    def test_both_ovh_models_are_hard_blocked_before_network(self):
         from src import editorial_alt_models as models
-
-        requests = []
-
-        def send(url, domains, *, data, **kwargs):
-            import json
-            requests.append(json.loads(data)["model"])
-            return b'{"choices":[{"message":{"content":"SYNTHETIC FIXTURE"}}]}'
-
-        with patch.dict(os.environ, self.config()), patch.object(models, "request", side_effect=send), \
-                patch.object(models, "_ovh_last_request", float("-inf")), \
-                patch.object(models, "monotonic", side_effect=[0, 0, 1, 35]), \
-                patch.object(models, "sleep") as pause:
-            generate("ovh", "fixture")
-            generate("ovh-gptoss", "fixture")
-        self.assertEqual(requests, [models.OVH_MODEL, models.OVH_GPTOSS_MODEL])
-        pause.assert_called_once_with(34)
-
+        with patch.dict(os.environ, self.config()), patch.object(models, "request") as request:
+            for provider in ("ovh", "ovh-gptoss"):
+                with self.subTest(provider=provider), self.assertRaisesRegex(
+                        Blocked, "ovh_removed_from_project"):
+                    generate(provider, "synthetic fixture")
+            request.assert_not_called()
     def test_visible_content_parts_exclude_reasoning(self):
         from src.editorial_providers import visible_text
 
@@ -175,25 +144,20 @@ class EditorialAlternativeRoutingTests(unittest.TestCase):
         article.task = lambda stage, provider, inputs, action, **kwargs: action("synthetic-task")
         return article
 
-    def test_kilo_failure_routes_to_ovh_and_never_groq_or_openrouter_writer(self):
-        from src.editorial_providers import ProviderError
-        cfg = {"EDITORIAL_ALT_MODELS_TEST":"true",
-               "EDITORIAL_ISOLATED_VALIDATION":"true", "GITHUB_ACTIONS":"true",
-               "GROQ_API_KEY":"", "EDITORIAL_GROQ_FALLBACK_ONLY":"false"}
+    def test_kilo_failure_never_triggers_retired_ovh_fallback(self):
+        cfg = {"EDITORIAL_ALT_MODELS_TEST": "true",
+               "EDITORIAL_ISOLATED_VALIDATION": "true", "GITHUB_ACTIONS": "true",
+               "GROQ_API_KEY": "", "EDITORIAL_GROQ_FALLBACK_ONLY": "false"}
         observed = []
         def fake_text_call(provider, prompt, max_tokens):
             observed.append(provider)
-            if provider == "kilo":
-                raise ProviderError("call_budget_exhausted")
-            return {"text":"SYNTHETIC-FIXTURE-ONLY", "model":"synthetic",
-                    "usage":{}, "telemetry":{}}
+            raise ProviderError("call_budget_exhausted")
         with patch.dict(os.environ, cfg), patch("src.editorial_brain.text_call", fake_text_call):
             article = self.synthetic_article("legends")
-            self.assertEqual(article.model("draft", "groq", "synthetic test"),
-                             "SYNTHETIC-FIXTURE-ONLY")
-        self.assertEqual(observed, ["kilo", "ovh"])
-
-    def test_no_openrouter_audit_falls_back_only_to_the_other_ovh_model(self):
+            with self.assertRaisesRegex(ProviderError, "call_budget_exhausted"):
+                article.model("draft", "groq", "synthetic test")
+        self.assertEqual(observed, ["kilo"])
+    def test_old_no_openrouter_audit_does_not_contact_ovh(self):
         cfg = {"EDITORIAL_ALT_MODELS_TEST": "true", "EDITORIAL_ISOLATED_VALIDATION": "true",
                "GITHUB_ACTIONS": "true", "EDITORIAL_TEST_WITHOUT_OPENROUTER": "true",
                "GROQ_API_KEY": "", "EDITORIAL_GROQ_FALLBACK_ONLY": "false"}
@@ -201,8 +165,8 @@ class EditorialAlternativeRoutingTests(unittest.TestCase):
                                               side_effect=ProviderError("empty_visible_content")) as send:
             with self.assertRaisesRegex(Blocked, "empty_visible_content"):
                 self.synthetic_article("science").model("editorial-audit", "groq", "fixture")
-        self.assertEqual([call.args[0] for call in send.call_args_list], ["ovh-gptoss", "ovh"])
-
+        self.assertNotIn("ovh", [call.args[0] for call in send.call_args_list])
+        self.assertNotIn("ovh-gptoss", [call.args[0] for call in send.call_args_list])
     def test_ovh_catalog_rejects_unavailable_model(self):
         from src.editorial_alt_models import _ovh_available, OVH_ID
         with self.assertRaisesRegex(Blocked, "ovh_model_unavailable"):
