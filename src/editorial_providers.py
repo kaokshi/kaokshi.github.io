@@ -200,6 +200,10 @@ def gemini_limit(name, default, ceiling):
 
 
 def gemini_model():
+    # 3.5 is the owner-selected API identifier. Google may serve 3.6 on this alias;
+    # response.modelVersion remains authoritative in the run report.
+    if os.environ.get("EDITORIAL_GROQ_GEMINI_KLEIN_PILOT") == "true":
+        return "gemini-3.5-flash"
     return "gemini-3.6-flash" if os.environ.get("EDITORIAL_GEMINI_COMBINED_FALLBACK") == "true" else GEMINI
 
 
