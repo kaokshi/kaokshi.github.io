@@ -25,7 +25,7 @@ KLEIN = "@cf/black-forest-labs/flux-2-klein-4b"
 KILO = "nvidia/nemotron-3.5-lightning:free"
 KILO_REVIEW = "inclusionai/ling-3.2-flash:free"
 MODELS = {"groq": GROQ, "gemini": GEMINI, "openrouter": NEMOTRON, "klein": KLEIN,
-          "kilo": KILO, "kilo-review": KILO_REVIEW, "ovh": "qwen3.6-35b-a3b", "ovh-gptoss": "gpt-oss-120b"}
+          "kilo": KILO, "kilo-review": KILO_REVIEW}
 USER_AGENT = "ZenEditorial/1.0 (+https://github.com/kaokshi/kaokshi.github.io)"
 
 
