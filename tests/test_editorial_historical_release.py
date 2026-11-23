@@ -4,11 +4,18 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
-from src.editorial_historical_release import recover_or_call, materialize_verified_selection
+from src.editorial_historical_release import materialize_verified_selection, parse_compositions, recover_or_call
 from src.editorial_providers import Blocked
 
 
 class HistoricalReleaseTests(unittest.TestCase):
+    def test_saved_kilo_fragments_are_reused_without_a_new_request(self):
+        response = b'{"01": ["Synthetic amber switch", "Empty synthetic room"]}'
+        self.assertEqual(parse_compositions(response, {"01"}, "kilo"),
+                         {"01": "Synthetic amber switch. Empty synthetic room"})
+        with self.assertRaisesRegex(Blocked, "composition_contract_invalid"):
+            parse_compositions(response, {"01", "05"}, "kilo")
+
     def test_json_response_and_receipt_do_not_overwrite_each_other(self):
         with TemporaryDirectory() as work:
             response = b'{"01": "test data"}'

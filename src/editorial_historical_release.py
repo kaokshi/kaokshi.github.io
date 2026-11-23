@@ -106,6 +106,21 @@ def recover_or_call(memory, operation, provider, callback, path):
     return raw
 
 
+def parse_compositions(response, slots, provider):
+    compositions = json_reply({"text": response.decode()})
+    if provider == "kilo":
+        # The saved result can express one composition as adjacent visual
+        # fragments. Preserve the provider's words and original order.
+        for slot, value in compositions.items():
+            if isinstance(value, list) and 1 <= len(value) <= 8 and all(
+                    isinstance(part, str) and len(part.strip()) >= 3 for part in value):
+                compositions[slot] = ". ".join(part.strip().rstrip(".") for part in value)
+    if set(compositions) != set(slots) or not all(
+            isinstance(value, str) and 20 <= len(value) <= 900 for value in compositions.values()):
+        raise Blocked("final_repair_composition_contract_invalid")
+    return compositions
+
+
 def run_repairs(base, sync, *, generate=False):
     selected, pending = cards_and_selections(base)
     work = base / WORK
@@ -178,10 +193,7 @@ def run_repairs(base, sync, *, generate=False):
             _kilo_free(parse_json(request(KILO_URL + "/models", ("ai-gateway.kilo.ai",),
                                           headers=candidate_headers("kilo"))))
         response = recover_or_call(memory, operation, provider, compose, raw_path)
-        composition = json_reply({"text": response.decode()})
-        if set(composition) != set(grouped) or not all(isinstance(value, str) and 20 <= len(value) <= 900
-                                                     for value in composition.values()):
-            raise Blocked("final_repair_composition_contract_invalid")
+        composition = parse_compositions(response, grouped, provider)
         payload = json.dumps(composition).encode()
         write(descriptions, payload)
         write_json(receipt_path(descriptions), {"sha256": digest(payload), "input_sha256": digest(response)})

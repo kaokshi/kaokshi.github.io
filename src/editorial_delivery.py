@@ -196,8 +196,12 @@ def verify_review(data, *, allow_incomplete=False):
                                                         for x in expected)):
             raise Blocked("invalid_review_article_index")
         present = {name.split("/")[0] for name in names if name.endswith("/SHA256SUMS.txt")}
+        ready = {article for article, status in expected.items()
+                 if status in {"review_pending", "rights_review_pending"}}
         if not allow_incomplete and (present != expected.keys() or any(
                 value not in {"review_pending", "rights_review_pending"} for value in expected.values())):
+            raise Blocked("review_packet_incomplete")
+        if not ready <= present:
             raise Blocked("review_packet_incomplete")
         if not present <= expected.keys() or any(name != "Статус комплекта.json" and
                 ("/" not in name or name.split("/", 1)[0] not in present) for name in names):
@@ -217,6 +221,9 @@ def verify_review(data, *, allow_incomplete=False):
                     article + "/SHA256SUMS.txt"}:
                 raise Blocked("review_manifest_incomplete")
             report = json.loads(archive.read(article + "/Статус и проверки.json"))
+            if (article in ready or report.get("status") in {"review_pending", "rights_review_pending"}) \
+                    and report.get("status") != expected[article]:
+                raise Blocked("review_article_status_mismatch")
             canonical = archive.read(article + "/Текст для SHA-256.txt")
             if digest(canonical) != report["text_sha256"]:
                 raise Blocked("review_canonical_text_sha_mismatch")
