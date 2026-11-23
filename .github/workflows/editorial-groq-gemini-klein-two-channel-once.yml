@@ -114,6 +114,14 @@ jobs:
           day="$(TZ=Europe/Moscow date +%F)"
           echo "$day" > "$RUNNER_TEMP/editorial-day"
           command=daily
+          if [ -z "$RESUME_RUN" ] && [ "$GITHUB_EVENT_NAME" = push ]; then
+            RESUME_RUN="$(python - <<'PY_LATEST'
+          import os
+          from src.editorial_delivery import latest_alt_checkpoint
+          print(latest_alt_checkpoint(os.environ["GITHUB_RUN_ID"]) or "")
+          PY_LATEST
+            )"
+          fi
           if [ -n "$RESUME_RUN" ]; then
             python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" --date "$day" --run-id "$RESUME_RUN"
             command=retry
