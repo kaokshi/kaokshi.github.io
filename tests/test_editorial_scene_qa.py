@@ -124,16 +124,33 @@ class SceneTests(unittest.TestCase):
                     self.assertFalse((root / "result.jpg").exists())
 
     def test_private_write_recovers_from_concurrent_branch_update(self):
-        seen = []
+        seen, pushes = [], []
         def execute(args, env, timeout=60):
             seen.append(args)
-            if len(seen) == 1:
-                raise Blocked("private_review_transport_rejected")
+            if "push" in args:
+                pushes.append(args)
+                if len(pushes) == 1:
+                    raise Blocked("private_review_transport_rejected")
+            if "rev-parse" in args:
+                return ("a" if args[-1] == "FETCH_HEAD" else "b") * 40
         push_private_main(["git", "-C", "/fixture"], {}, execute=execute)
-        self.assertIn("fetch", seen[1])
-        self.assertEqual(seen[2][-2:], ["rebase", "FETCH_HEAD"])
-        self.assertEqual(seen[0], seen[3])
-        self.assertNotIn("--force", seen[3])
+        self.assertEqual(sum("fetch" in item for item in seen), 2)
+        self.assertEqual(sum(item[-2:] == ["rebase", "a" * 40] for item in seen), 2)
+        self.assertEqual(pushes[0], pushes[1])
+        self.assertNotIn("--force", pushes[1])
+
+    def test_clip_low_does_not_refute_direct_visual_confirmation(self):
+        report = qa.judge(card(), object(), "test", {"passed": False},
+                          vision=vision("present", "present", "absent"))
+        self.assertEqual(report["status"], "accepted")
+        self.assertEqual(report["clip"]["decision_weight"], "advisory_low_similarity")
+
+    def test_setting_requires_two_observable_cues(self):
+        value = {**card(), "location_cues": ["a steel door", "a brick wall"]}
+        for state, expected in (("present", "accepted"), ("absent", "needs_review")):
+            report = qa.judge(value, object(), "test", CLIP,
+                              vision=vision("absent", "present", "present", state, "absent"))
+            self.assertEqual(report["status"], expected)
 
     def test_standalone_generator_cannot_spend_without_scene_card(self):
         with patch("src.editorial_images.klein") as provider:

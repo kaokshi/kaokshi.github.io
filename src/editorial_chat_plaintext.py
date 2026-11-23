@@ -61,24 +61,37 @@ def run(argv, env, *, timeout=60):
 
 
 
-def push_private_main(args, env, *, execute=run):
-    """Preserve private writes when another writer advanced main."""
-    try:
-        execute([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=120)
-        return
-    except Blocked:
-        execute([*args, "fetch", "origin", "main"], env, timeout=90)
-    try:
-        execute([*args, "-c", "user.name=Zen Editorial Bot",
-                 "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
-                 "rebase", "FETCH_HEAD"], env, timeout=90)
-    except Blocked:
+def push_private_main(args, env, *, execute=run, branch="main"):
+    """Push a prepared commit with a fresh remote SHA and bounded conflict recovery."""
+    if not re.fullmatch(r"main|codex/v1-storage-probe-[0-9]+-[0-9]+", branch):
+        raise Blocked("private_review_unsupported_write_ref")
+    remote_ref = f"refs/heads/{branch}"
+    upload = [*args, "push", "origin", f"HEAD:{remote_ref}"]
+    for attempt in range(3):
+        execute([*args, "fetch", "origin", remote_ref], env, timeout=90)
+        fetched = execute([*args, "rev-parse", "FETCH_HEAD"], env)
+        if not re.fullmatch(r"[0-9a-f]{40}", fetched):
+            raise Blocked("private_review_remote_sha_invalid")
+        local = execute([*args, "rev-parse", "HEAD"], env)
+        if local == fetched:
+            return fetched
         try:
-            execute([*args, "rebase", "--abort"], env)
+            execute([*args, "-c", "user.name=Zen Editorial Bot",
+                     "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+                     "rebase", fetched], env, timeout=90)
         except Blocked:
-            pass
-        raise
-    execute([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=120)
+            try:
+                execute([*args, "rebase", "--abort"], env)
+            except Blocked:
+                pass
+            raise Blocked("private_review_write_conflict_pending") from None
+        try:
+            execute(upload, env, timeout=120)
+            return execute([*args, "rev-parse", "HEAD"], env)
+        except Blocked:
+            if attempt == 2:
+                raise
+    raise AssertionError("unreachable private write retry")
 
 
 def connect(token, root, *, execute=run):
@@ -238,7 +251,7 @@ def publish(root, day, *, token, execute=run, now=None, ready_only=False):
             execute([*args, "-c", "user.name=Zen Editorial Bot",
                      "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                      "commit", "-m", "Owner-approved private chat review transport"], env)
-            execute([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=90)
+            push_private_main(args, env, execute=execute)
         return {"status": "private_chat_review_available", "day": day,
                 "channels": published, "expired_live_dates": removed,
                 "repository": PRIVATE_REPO,
@@ -261,7 +274,7 @@ def cleanup(*, token, today=None, execute=run):
             execute([*args, "-c", "user.name=Zen Editorial Bot",
                      "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                      "commit", "-m", "Expire private live review copies"], env)
-            execute([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=90)
+            push_private_main(args, env, execute=execute)
         return {"status": "private_chat_review_cleanup_done", "expired_dates": removed,
                 "git_history_may_retain_deleted_content": True}
 

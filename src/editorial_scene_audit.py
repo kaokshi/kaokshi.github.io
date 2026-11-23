@@ -68,8 +68,8 @@ def manifest_by_file(folder):
     return {row.get("filename", row.get("file")): row for row in values}
 
 
-def audit_image(channel, key, slot, card, error, meta, folder, all_hashes):
-    path = folder / "illustrations" / f"{slot}.jpg"
+def audit_image(channel, key, slot, card, error, meta, folder, all_hashes, *, candidate=None):
+    path = candidate or folder / "illustrations" / f"{slot}.jpg"
     raw = path.read_bytes()
     sha = digest(raw)
     row = {"article_id": channel, "section_id": key, "slot": slot, "image_sha256": sha,
@@ -118,7 +118,7 @@ def audit(root, day):
     if len({x[0] for x in all_hashes}) != 23:
         raise Blocked("audit_reused_slot")
     article_reports = {}
-    reference = read_json(base / "image-qa-reference-v3.json") or {}
+    reference = read_json(base / "image-qa-reference-v4.json") or {}
     elapsed = monotonic()
     # Audit the owner's priority channel first.
     for channel in ("legends-01", "science-01", "cinema-01"):
@@ -164,15 +164,37 @@ def audit(root, day):
                 row["reasons"].append("section_contains_no_concrete_film_episode")
                 if row["status"] == "accepted":
                     row["status"] = "needs_review"
+            row["section_text"] = sections[key]
             rows.append(row)
         article_reports[channel] = {"source_text_sha256": source, "card_provider": provider, "images": rows}
         print(json.dumps({"channel": channel, "images": len(rows),
                           "statuses": dict(Counter(row["status"] for row in rows)),
                           "reason_counts": dict(Counter(reason for row in rows for reason in row["reasons"])),
                           "seconds": round(monotonic() - elapsed, 2)}), flush=True)
+    measured = {(channel, picture["slot"]): picture for channel, report in article_reports.items()
+                for picture in report["images"]}
+    controls = [{**label, "observed": measured[(label["article"], label["slot"])]["status"]}
+                for label in reference.get("control_labels", [])]
+    for label in controls:
+        label["image_sha256"] = measured[(label["article"], label["slot"])]["image_sha256"]
+    saved = base / "image-qa-targeted-repair" / "images" / "image-qa" / "08" / "klein-1.candidate"
+    saved_request = read_json(saved.with_suffix(".request.json"))
+    old = next(p for p in article_reports["legends-01"]["images"] if p["slot"] == "08")
+    replacement = audit_image("legends-01", old["section_id"], "08", old.get("scene_card"), None,
+                              {"sha256": saved_request["sha256"], "kind": "illustration",
+                               "rights_status": "rights_review_pending"}, base / "legends-01",
+                              all_hashes, candidate=saved)
+    replacement["section_text"] = old["section_text"]
+    if old["status"] != "rejected":
+        raise Blocked("lantern_wrong_original_not_rejected")
     results = {"schema": qa.SCHEMA, "date": day, "articles": article_reports,
                "elapsed_seconds": round(monotonic() - elapsed, 2), "klein_calls": 0,
-               "gemini_calls": 0, "publication_authorized": False}
+               "gemini_calls": 0, "publication_authorized": False, "controls": controls,
+               "false_rejections_on_controls": sum(l["expected"] == "accept" and l["observed"] == "rejected"
+                                                   for l in controls),
+               "false_acceptances_on_controls": sum(l["expected"] == "reject" and l["observed"] == "accepted"
+                                                    for l in controls),
+               "saved_lantern_replacement": replacement}
     write_json(output, results)
     return output
 
@@ -204,7 +226,11 @@ def main(day, *, legacy=False):
             images = [row for article in results["articles"].values() for row in article["images"]]
             pixel_checks = sum(bool(image.get("vision")) for image in images)
             print(json.dumps({"private_report_saved": True, "pixel_checks": pixel_checks,
-                              "elapsed_seconds": results["elapsed_seconds"], "klein_calls": 0}), flush=True)
+                              "elapsed_seconds": results["elapsed_seconds"], "klein_calls": 0,
+                              "controls": len(results["controls"]),
+                              "false_rejections_on_controls": results["false_rejections_on_controls"],
+                              "false_acceptances_on_controls": results["false_acceptances_on_controls"],
+                              "saved_lantern_replacement": results["saved_lantern_replacement"]["status"]}), flush=True)
             if pixel_checks != 23 or len(images) != 23:
                 raise Blocked("audit_did_not_complete_all_23_pixel_checks")
 

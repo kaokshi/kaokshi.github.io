@@ -86,6 +86,8 @@ class PrivateChatReviewTests(unittest.TestCase):
                 (preserved / "01.jpg").write_bytes(b"OWNER-SAVED-ILLUSTRATION-FIXTURE")
                 return ["git"], {}
             def fake_run(argv, env, timeout=60):
+                if "rev-parse" in argv:
+                    return ("a" if argv[-1] == "FETCH_HEAD" else "b") * 40
                 if "status" in argv:
                     return " M editorial-chat-review/2026-11-23/science-01/Статья.html"
                 if "push" in argv:

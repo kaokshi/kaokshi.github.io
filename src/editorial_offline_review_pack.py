@@ -21,7 +21,7 @@ from .editorial_chat_plaintext import approval, checked_day, connect, push_priva
 from .editorial_providers import Blocked
 from .editorial_scene_qa import SCHEMA
 
-AUDIT_DIR = "image-qa-audit-v3"
+AUDIT_DIR = "image-qa-audit-v4"
 CHANNELS = ("legends-01", "cinema-01", "science-01")
 TITLES = {
     "legends-01": "Тени над подземным парком",
@@ -29,7 +29,7 @@ TITLES = {
     "science-01": "Как капли воды строят каменные колонны в пещерах",
 }
 FILE_NAME = "Статья со встроенными ссылками на изображения.md"
-OUTPUT = "Полный_комплект_3_статей_с_изображениями.zip"
+OUTPUT = "Проверенный_комплект_3_статей_v1.zip"
 IMAGE_LINK = re.compile(r"!\[([^\]\n]*)\]\(illustrations/(\d{2})\.jpg\)")
 BAD_EXTERNAL_IMAGE = re.compile(r"!\[[^\]\n]*\]\((?:https?://|/)", re.I)
 

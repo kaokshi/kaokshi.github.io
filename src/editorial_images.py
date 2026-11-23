@@ -219,6 +219,10 @@ class ImageIndex:
         qa.apply_channel_policy(decision, scene["channel"], metadata,
                                 film=scene.get("film"), spoilers=scene.get("spoilers", False))
         with self.memory.lock:
+            saved = read_json(path.with_suffix(".json"))
+            if (path.is_file() and saved and qa.accepted_for(saved, card, is_cover=scene["is_cover"])
+                    and digest(path.read_bytes()) == saved["sha256"] and saved["sha256"] != sha):
+                raise Blocked("verified_review_image_replacement_conflict")
             hashes = list(self.archive)
             vectors = []
             for existing in self.memory.root.glob("*/*/images/*.json"):
