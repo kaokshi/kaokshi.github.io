@@ -1,4 +1,4 @@
-name: One-time OVHcloud Qwen official lowercase model ID probe
+name: One-time OVHcloud Qwen low-reasoning JSON output probe
 on:
   push:
     branches:
@@ -50,7 +50,7 @@ jobs:
           try:
               response=generate("ovh",
                   'Верни строго JSON-объект с полями kind="synthetic", number=42 и ok=true. Ничего больше.',
-                  max_tokens=160)
+                  max_tokens=700)
               raw=response["text"].strip()
               if raw.startswith("```"):
                   raw=raw.partition("\n")[2].removesuffix("```").strip()
