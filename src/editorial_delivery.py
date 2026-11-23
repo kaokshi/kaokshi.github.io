@@ -289,7 +289,9 @@ def restore_checkpoint(root, day, command):
 
 
 def alternate_checkpoint_prefix(one_article):
-    from .editorial_alt_models import groq_ovh_klein_pilot
+    from .editorial_alt_models import groq_gemini_klein_pilot, groq_ovh_klein_pilot
+    if groq_gemini_klein_pilot():
+        return "groq-gemini35-klein-two-channel-encrypted"
     if groq_ovh_klein_pilot():
         return "agent-groq-ovh-klein-encrypted"
     return "agent-ovh-one-encrypted" if one_article else "agent-alt-kilo-ovh-encrypted"
@@ -309,8 +311,10 @@ def latest_alt_checkpoint(current_run_id, *, one_article=False):
                 or datetime.fromisoformat(run["created_at"]).astimezone(tz).date() != edition):
             continue
         prefix = alternate_checkpoint_prefix(one_article)
-        name = f"{prefix}-{run['id']}-{run['run_attempt']}"
-        if not one_article and str(run["id"]) == "45150195798":
+        from .editorial_alt_models import groq_gemini_klein_pilot
+        name = (prefix if groq_gemini_klein_pilot() else
+                f"{prefix}-{run['id']}-{run['run_attempt']}")
+        if not groq_gemini_klein_pilot() and not one_article and str(run["id"]) == "45150195798":
             name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
         rows = json.loads(gh("api", f"{path}/runs/{run['id']}/artifacts?per_page=100"))["artifacts"]
         if any(row["name"] == name and not row["expired"] for row in rows):
@@ -323,15 +327,19 @@ def restore_alt_checkpoint(root, day, run_id):
     if not run_id or not re.fullmatch(r"[1-9][0-9]{0,19}", run_id):
         raise Blocked("invalid_validation_checkpoint_run")
     run = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}"))
-    if (run["path"] != ".github/workflows/editorial-alt-three-articles-v4-once.yml"
+    from .editorial_alt_models import groq_gemini_klein_pilot
+    is_new_pilot = groq_gemini_klein_pilot()
+    expected_workflow = (".github/workflows/editorial-groq-gemini-klein-two-channel-once.yml"
+                         if is_new_pilot else ".github/workflows/editorial-alt-three-articles-v4-once.yml")
+    if (run["path"] != expected_workflow
             or run["head_repository"]["full_name"] != PUBLIC_REPOSITORY
             or run["head_branch"] != "assistant/kilo-modelscope-openrouter-isolated-20261123"
             or run["status"] != "completed" or run["event"] not in {"workflow_dispatch", "push"}):
         raise Blocked("validation_checkpoint_run_untrusted")
     from .editorial_alt_models import ovh_trial
     prefix = alternate_checkpoint_prefix(ovh_trial())
-    name = f"{prefix}-{run_id}-{run['run_attempt']}"
-    if not ovh_trial() and run_id == "45150195798":
+    name = (prefix if is_new_pilot else f"{prefix}-{run_id}-{run['run_attempt']}")
+    if not is_new_pilot and not ovh_trial() and run_id == "45150195798":
         name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
     artifacts = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"))
     if not any(row["name"] == name and not row["expired"] for row in artifacts["artifacts"]):
