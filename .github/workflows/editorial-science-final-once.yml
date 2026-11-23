@@ -5,6 +5,7 @@ on:
       - assistant/kilo-modelscope-openrouter-isolated-20261123
     paths:
       - .github/workflows/editorial-science-final-once.yml
+      - src/editorial_science_finish.py
 permissions:
   contents: read
 concurrency:
