@@ -329,6 +329,18 @@ jobs:
             if [ "$EDITORIAL_VALIDATE_CINEMA" = true ]; then args+=(--validate-cinema); fi
           fi
           python -m src.editorial_brain "${args[@]}"
+      - name: Deliver agent-produced review files only to owner-approved PRIVATE ChatGPT repository
+        if: >-
+          always() && (env.EDITORIAL_EFFECTIVE_COMMAND == 'daily' ||
+          env.EDITORIAL_EFFECTIVE_COMMAND == 'retry') &&
+          steps.command.outcome != 'skipped'
+        continue-on-error: false
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+        run: |
+          umask 077
+          python -m src.editorial_chat_plaintext publish \
+            --root "$EDITORIAL_STATE_DIR" --date "$EDITORIAL_MOSCOW_DAY"
       - name: Send sanitized test diagnostics to private GitHub review issue
         if: >-
           always() && inputs.isolated_validation &&
