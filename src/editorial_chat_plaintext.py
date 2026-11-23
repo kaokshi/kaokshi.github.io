@@ -63,13 +63,18 @@ def run(argv, env, *, timeout=60):
 
 def push_private_main(args, env, *, execute=run, branch="main"):
     """Push a prepared commit with a fresh remote SHA and bounded conflict recovery."""
-    if not re.fullmatch(r"main|codex/v1-storage-probe-[0-9]+-[0-9]+", branch):
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*", branch):
         raise Blocked("private_review_unsupported_write_ref")
     remote_ref = f"refs/heads/{branch}"
     upload = [*args, "push", "origin", f"HEAD:{remote_ref}"]
     for attempt in range(3):
-        execute([*args, "fetch", "origin", remote_ref], env, timeout=90)
-        fetched = execute([*args, "rev-parse", "FETCH_HEAD"], env)
+        try:
+            execute([*args, "fetch", "origin", remote_ref], env, timeout=90)
+            fetched = execute([*args, "rev-parse", "FETCH_HEAD"], env)
+        except Blocked:
+            if attempt == 2:
+                raise
+            continue
         if not re.fullmatch(r"[0-9a-f]{40}", fetched):
             raise Blocked("private_review_remote_sha_invalid")
         local = execute([*args, "rev-parse", "HEAD"], env)

@@ -23,6 +23,7 @@ class ArticleHTML(HTMLParser):
         self.lines = []
         self.images = []
         self.all_images = []
+        self.extra_media = False
         self.placement = []
 
     def handle_starttag(self, tag, attrs):
@@ -31,6 +32,8 @@ class ArticleHTML(HTMLParser):
         if self.inside and tag in {"h2", "p"}:
             self.placement.append(tag)
             self.pending = []
+        if tag in {"source", "object", "embed", "svg", "iframe"} or "srcset" in dict(attrs):
+            self.extra_media = True
         if tag == "img":
             image = dict(attrs).get("src")
             self.all_images.append(image)
@@ -97,7 +100,9 @@ def final_visual_gate(article, rows, source_sha, article_id, read_asset, *, enco
             if digest(raw) != row["sha256"]:
                 raise Blocked("review_image_sha_mismatch")
             with Image.open(io.BytesIO(raw)) as image:
-                image.verify()
+                if image.width * image.height > 22_000_000:
+                    raise Blocked("review_image_dimensions_exceed_limit")
+                image.load()
         except (OSError, ValueError, KeyError):
             raise Blocked("review_image_file_missing_or_invalid") from None
     if encoded:
@@ -121,6 +126,9 @@ def _verify_exported_visual_order(article, ordered, encoded):
     try:
         checker.feed(html.decode("utf-8"))
         doc = Document(io.BytesIO(word))
+        with ZipFile(io.BytesIO(word)) as archive:
+            embedded = Counter(digest(archive.read(name)) for name in archive.namelist()
+                               if name.startswith("word/media/"))
         actual_word, body = [], []
         for p in doc.paragraphs:
             matches = p._p.xpath(".//a:blip")
@@ -133,7 +141,8 @@ def _verify_exported_visual_order(article, ordered, encoded):
                 body.append(p.text)
     except Exception as exc:
         raise Blocked("review_document_unreadable_" + type(exc).__name__) from None
-    if (checker.placement != expected_html or checker.all_images != checker.images
+    if (checker.placement != expected_html or checker.all_images != checker.images or checker.extra_media
+            or embedded != Counter(row["sha256"] for row in ordered)
             or actual_word != expected_word or len(doc.inline_shapes) != len(ordered)
             or "\n".join(checker.lines) != canonical(article)
             or "\n".join(body) != canonical(article)):

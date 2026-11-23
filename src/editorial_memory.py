@@ -148,8 +148,19 @@ class PrivateGit:
                          "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                          "commit", "-m", "Checkpoint editorial state")
         if self.command(*command, "rev-list", f"origin/{self.branch}..HEAD"):
+            from .editorial_chat_plaintext import push_private_main
+            from .editorial_providers import Blocked
+
             self.verify()
-            self.command(*command, "push", "origin", f"HEAD:refs/heads/{self.branch}")
+            def execute(args, env, timeout=60):
+                try:
+                    return self.command(*args)
+                except StorageError as exc:
+                    raise Blocked("private_checkpoint_git_operation_failed") from exc
+            try:
+                push_private_main(command, self.env, execute=execute, branch=self.branch)
+            except Blocked as exc:
+                raise StorageError("private_checkpoint_write_pending") from exc
 
     def owner_packet(self, day):
         self.verify()
