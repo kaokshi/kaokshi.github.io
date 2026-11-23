@@ -16,10 +16,11 @@ from src.editorial_subscription import approved_url, split_cta
 
 
 class SubscriptionTests(unittest.TestCase):
-    def test_unverified_channel_url_is_not_invented(self):
-        self.assertIsNone(approved_url("science"))
-        self.assertIsNone(approved_url("legends"))
-        self.assertIsNone(approved_url("cinema"))
+    def test_owner_supplied_channel_urls_are_exact(self):
+        self.assertEqual(approved_url("science"), "https://dzen.ru/sciencebox")
+        self.assertEqual(approved_url("legends"), "https://dzen.ru/darklegends")
+        self.assertEqual(approved_url("cinema"), "https://dzen.ru/kadrzkadr")
+        self.assertIsNone(approved_url("unknown"))
 
     def test_untrusted_urls_are_rejected(self):
         cases = ("http://dzen.ru/id-example", "https://evil.example/channel",
@@ -77,7 +78,8 @@ class SubscriptionTests(unittest.TestCase):
             report = {"article": article, "text_sha256": digest(canonical(article)),
                       "facts": {"evidence": []}}
             folder = root / "science-01"
-            package(folder, "Тест", [], report, [], root, {})
+            with patch("src.editorial_package.approved_url", return_value=None):
+                package(folder, "Тест", [], report, [], root, {})
             document = Document(folder / "Статья.docx")
             self.assertFalse(document.paragraphs[-1].hyperlinks)
             checks = json.loads((folder / "Статус и проверки.json").read_text(encoding="utf-8"))
