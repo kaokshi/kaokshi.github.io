@@ -68,7 +68,7 @@ def manifest_by_file(folder):
     return {row.get("filename", row.get("file")): row for row in values}
 
 
-def audit_image(channel, key, slot, card, error, meta, folder, all_hashes, *, candidate=None):
+def audit_image(channel, key, slot, card, error, meta, folder, all_hashes, *, candidate=None, film=None):
     path = candidate or folder / "illustrations" / f"{slot}.jpg"
     raw = path.read_bytes()
     sha = digest(raw)
@@ -89,8 +89,8 @@ def audit_image(channel, key, slot, card, error, meta, folder, all_hashes, *, ca
                         quality={"passed": True, "size": list(image.size), "contrast": round(contrast, 2)})
     decision["duplicate_slots"] = dupes
     qa.apply_channel_policy(decision, channel.split("-")[0], meta,
-                            film={"original_title": "Prisoners", "year": 2013, "imdb": "tt1392214"}
-                            if channel == "cinema-01" else None)
+                            film=film or ({"original_title": "Prisoners", "year": 2013, "imdb": "tt1392214"}
+                                          if channel == "cinema-01" else None))
     kind = meta.get("kind") or ("illustration" if channel == "legends-01" else "photo")
     if decision["status"] == "rejected":
         if kind == "illustration":
