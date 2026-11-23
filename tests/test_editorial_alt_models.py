@@ -1,0 +1,59 @@
+"""Safety regressions for isolated Kilo + ModelScope writers and OpenRouter editor.
+
+No real text or image content; no network or provider calls in these tests.
+"""
+import os
+import unittest
+from unittest.mock import patch
+
+from src.editorial_alt_models import require_isolated, preflight, generate
+from src.editorial_providers import Blocked, ProviderError, text_call
+
+
+class AlternativeProviderSafetyTests(unittest.TestCase):
+    def config(self, **extra):
+        data={"EDITORIAL_ALT_MODELS_TEST":"true",
+              "EDITORIAL_ISOLATED_VALIDATION":"true",
+              "GITHUB_ACTIONS":"true",
+              "EDITORIAL_GROQ_FALLBACK_ONLY":"false",
+              "GROQ_API_KEY":"",
+              "MODELSCOPE_API_TOKEN":"synthetic-token"}
+        return {**data, **extra}
+
+    def test_groq_is_hard_blocked_even_when_called_directly(self):
+        with patch.dict(os.environ, self.config(), clear=False):
+            with self.assertRaisesRegex(ProviderError, "groq_forbidden"):
+                text_call("groq", "SYNTHETIC TEST FIXTURE")
+
+    def test_standalone_not_permitted(self):
+        with patch.dict(os.environ, self.config(GITHUB_ACTIONS="false"), clear=False):
+            with self.assertRaisesRegex(Blocked, "isolated_validation"):
+                require_isolated()
+
+    def test_groq_key_must_not_be_present(self):
+        with patch.dict(os.environ, self.config(GROQ_API_KEY="TEST-NOT-REAL"), clear=False):
+            with self.assertRaisesRegex(Blocked, "groq_secret_must_be_absent"):
+                require_isolated()
+
+    def test_modelscope_requires_explicit_token(self):
+        with patch.dict(os.environ, self.config(MODELSCOPE_API_TOKEN=""), clear=False):
+            with self.assertRaisesRegex(Blocked, "modelscope_api_token_missing"):
+                preflight()
+
+    def test_bad_provider_never_routes_to_paid_model(self):
+        with patch.dict(os.environ, self.config(), clear=False):
+            with self.assertRaisesRegex(Blocked, "invalid_alt_provider"):
+                generate("unknown", "SYNTHETIC TEST FIXTURE")
+
+    def test_no_generation_after_preflight_unavailable(self):
+        # Kilo catalog says the named free tier is unavailable: fail before
+        # any actual model requests or creative content can be produced.
+        fake={"data":[{"id":"paid/model","pricing":{"prompt":"1","completion":"1"}}]}
+        with patch.dict(os.environ, self.config(), clear=False), \
+             patch("src.editorial_alt_models.request", return_value=b'{"data":[{"id":"paid/model"}]}'):
+            with self.assertRaisesRegex(Blocked, "kilo_explicit_free_model_unavailable"):
+                preflight()
+
+
+if __name__ == "__main__":
+    unittest.main()
