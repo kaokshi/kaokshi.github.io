@@ -26,7 +26,7 @@
   (66 входных и 361 выходной), Groq вызовов 0.
 - Диагностика OVH до исправления:
   [№45146930379](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45146930379)
-  неактуальный фильм? Нет — несуществующий model ID Llama, 
+  недоступная модель Llama,
   [№45147190477](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45147190477)
   ошибочный Qwen catalog slug (404),
   [№45147604708](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45147604708)
