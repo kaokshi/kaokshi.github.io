@@ -288,7 +288,7 @@ def restore_checkpoint(root, day, command):
     return {"status": "checkpoint_restored"}
 
 
-def latest_alt_checkpoint(current_run_id):
+def latest_alt_checkpoint(current_run_id, *, one_article=False):
     """Locate a completed run from the current workflow within the same Moscow edition."""
     path = f"repos/{PUBLIC_REPOSITORY}/actions"
     current = json.loads(gh("api", f"{path}/runs/{current_run_id}"))
@@ -301,8 +301,9 @@ def latest_alt_checkpoint(current_run_id):
         if (run["created_at"] >= current["created_at"]
                 or datetime.fromisoformat(run["created_at"]).astimezone(tz).date() != edition):
             continue
-        name = f"agent-alt-kilo-ovh-encrypted-{run['id']}-{run['run_attempt']}"
-        if str(run["id"]) == "45150195798":
+        prefix = "agent-ovh-one-encrypted" if one_article else "agent-alt-kilo-ovh-encrypted"
+        name = f"{prefix}-{run['id']}-{run['run_attempt']}"
+        if not one_article and str(run["id"]) == "45150195798":
             name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
         rows = json.loads(gh("api", f"{path}/runs/{run['id']}/artifacts?per_page=100"))["artifacts"]
         if any(row["name"] == name and not row["expired"] for row in rows):
@@ -320,8 +321,10 @@ def restore_alt_checkpoint(root, day, run_id):
             or run["head_branch"] != "assistant/kilo-modelscope-openrouter-isolated-20261123"
             or run["status"] != "completed" or run["event"] not in {"workflow_dispatch", "push"}):
         raise Blocked("validation_checkpoint_run_untrusted")
-    name = f"agent-alt-kilo-ovh-encrypted-{run_id}-{run['run_attempt']}"
-    if run_id == "45150195798":
+    from .editorial_alt_models import ovh_trial
+    prefix = "agent-ovh-one-encrypted" if ovh_trial() else "agent-alt-kilo-ovh-encrypted"
+    name = f"{prefix}-{run_id}-{run['run_attempt']}"
+    if not ovh_trial() and run_id == "45150195798":
         name = "agent-alt-kilo-ovh-two-models-original-encrypted-20261123"
     artifacts = json.loads(gh("api", f"repos/{PUBLIC_REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"))
     if not any(row["name"] == name and not row["expired"] for row in artifacts["artifacts"]):

@@ -128,7 +128,8 @@ def generate(provider, prompt, max_tokens=3000):
         model = OVH_GPTOSS_MODEL if provider == "ovh-gptoss" else OVH_MODEL
     else:
         raise Blocked("invalid_alt_provider")
-    if type(max_tokens) is not int or not 1 <= max_tokens <= 7900:
+    token_cap = 14000 if ovh_trial() and provider == "ovh" else 7900
+    if type(max_tokens) is not int or not 1 <= max_tokens <= token_cap:
         raise Blocked("alt_max_tokens_invalid")
     payload = {"model": model, "max_tokens": max_tokens, "stream": False,
                "messages": [
@@ -142,7 +143,8 @@ def generate(provider, prompt, max_tokens=3000):
     raw = request(base + "/chat/completions", (host,),
                   data=json.dumps(payload).encode(),
                   headers={**candidate_headers(provider), "Content-Type": "application/json"},
-                  timeout=100, limit=3_000_000, retry_transient=True)
+                  timeout=150 if ovh_trial() and provider == "ovh" else 100,
+                  limit=3_000_000, retry_transient=True)
     response = parse_json(raw)
     try:
         result = visible_text(response["choices"][0], {})

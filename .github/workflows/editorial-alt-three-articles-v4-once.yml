@@ -176,6 +176,7 @@ jobs:
           EDITORIAL_PRIVATE_REPOSITORY: ''
           GH_TOKEN: ${{ github.token }}
           RESUME_RUN: ${{ inputs.resume_run }}
+          RESUME_OVH_TRIAL: ${{ contains(github.event.head_commit.message, '[ovh-continue]') }}
           EDITION_DAY: ${{ inputs.edition_day }}
           INCLUDE_CINEMA: ${{ inputs.include_cinema || (github.event_name == 'push' && contains(github.event.head_commit.message, '[cinema]')) }}
         run: |
@@ -186,13 +187,18 @@ jobs:
             export EDITORIAL_STATE_DIR="$RUNNER_TEMP/editorial-ovh-one"
             echo "EDITORIAL_STATE_DIR=$EDITORIAL_STATE_DIR" >>"$GITHUB_ENV"
           fi
-          if [ "$EDITORIAL_OVH_ONE_ARTICLE" != true ] && [ -z "$RESUME_RUN" ] && [ "$GITHUB_EVENT_NAME" = push ]; then
+          if [ -z "$RESUME_RUN" ] && [ "$GITHUB_EVENT_NAME" = push ] && { [ "$EDITORIAL_OVH_ONE_ARTICLE" != true ] || [ "$RESUME_OVH_TRIAL" = true ]; }; then
             RESUME_RUN="$(python - <<'PY_RESTORE'
           import os
           from src.editorial_delivery import latest_alt_checkpoint
-          print(latest_alt_checkpoint(os.environ["GITHUB_RUN_ID"]) or "")
+          from src.editorial_alt_models import ovh_trial
+          print(latest_alt_checkpoint(os.environ["GITHUB_RUN_ID"], one_article=ovh_trial()) or "")
           PY_RESTORE
           )"
+          fi
+          if [ "$RESUME_OVH_TRIAL" = true ] && [ -z "$RESUME_RUN" ]; then
+            echo 'No encrypted OVH trial checkpoint found'
+            exit 2
           fi
           if [ -n "$RESUME_RUN" ]; then
             python -m src.editorial_delivery restore --root "$EDITORIAL_STATE_DIR" \

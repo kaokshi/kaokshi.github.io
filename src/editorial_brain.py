@@ -100,7 +100,8 @@ class Article:
         if alternate_enabled():
             require_isolated()
             if ovh_trial():
-                route = {"draft": "ovh-gptoss", "full-edit": "ovh", "editorial-audit": "ovh"}
+                route = {"draft": "ovh-gptoss", "full-edit": "ovh", "editorial-audit": "ovh",
+                         "full-edit-with-audit": "ovh"}
                 if route.get(stage) != provider:
                     raise Blocked("ovh_trial_stage_or_provider_outside_budget")
             if provider == "groq":
@@ -136,7 +137,7 @@ class Article:
                          and stage.startswith(("full-edit", "repair-")))
         if tokens is None:
             tokens = 3700 if provider == "groq" else 7800
-        if without_openrouter() and provider in {"ovh", "ovh-gptoss", "kilo-review"}:
+        if without_openrouter() and not ovh_trial() and provider in {"ovh", "ovh-gptoss", "kilo-review"}:
             tokens = min(tokens, 7800)
 
         def send(task, ceiling):
@@ -367,10 +368,12 @@ class Article:
         self.memory.save()
         return {"raw": raw, "article": structured, "text_sha256": sha, "report": report}
 
-    def inspect(self, candidate, reference=None, *, repair=False):
+    def inspect(self, candidate, reference=None, *, repair=False, submitted_audit=None):
         raw, sha = candidate["raw"], candidate["text_sha256"]
         facts = source_context(self.records)
         def audit(text, language_issues):
+            if submitted_audit is not None:
+                return submitted_audit
             prompt = ("Проверь конкретные недостатки текста. Оцени связность, оригинальность, "
                       "смысловые повторы, естественность, достаточность раскрытия и сохранность важных "
                       "смысловых элементов. Учитывай замечания LanguageTool, оставляй только реальные ошибки. "
@@ -423,7 +426,8 @@ class Article:
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
                             "length_exception_reason": candidate["article"].get("length_exception_reason"),
-                            **({"reviewer": "ovh-qwen-with-image-plan"} if ovh_trial() else
+                            **({"reviewer": "ovh-qwen-combined" if submitted_audit is not None else
+                                "ovh-qwen-with-image-plan"} if ovh_trial() else
                                {"reviewer": "ovhcloud"} if without_openrouter() else {})},
                            lambda _: qa(raw, self.channel, self.prior[1], self.records,
                                         audit, self.memory.time_left), minimum_seconds=20 * 60,
@@ -462,10 +466,34 @@ class Article:
             prompt = (brief + format_rules + "\nОтредактируй черновик до готового текста. "
                       "Сохрани проверяемые факты и поддержанные источниками выводы. "
                       "Верни только полный текст.\nЧЕРНОВИК:\n" + raw)
-            edited = self.model("full-edit", "ovh", prompt,
-                                metadata={"source_sha256": original["text_sha256"]})
-            self.current = self.remember_version(edited)
-            self.current = self.inspect(self.current, original)
+            if self.memory.retry:
+                prompt = prompt.replace("Верни только полный текст.", "")
+                prompt += (
+                    '\nОтвет верни единым JSON без Markdown-обрамления. Поле article содержит полный '
+                    'отредактированный текст с буквальными Markdown-заголовками и переносами, '
+                    'закодированными в JSON. Проверь именно текст в article. Поле issues — список '
+                    'оставшихся редакционных замечаний или []. Поле claims — все проверяемые '
+                    'утверждения из article, включая числа и причинность. У каждого четыре поля: '
+                    'claim (дословно из article), source (S1, S2 и т. д.), quote (дословная цитата '
+                    'из указанного источника), verdict (supported или unsupported). '
+                    'Поле image_plan — объект с subject и images: всего семь разных изображений, '
+                    'два для раздела 1 и по одному для разделов 2–6. Для каждого укажи section, kind '
+                    '(photo или illustration), subject, brief и query для Wikimedia Commons. '
+                    'Используй оба вида. Не придумывай URL, лицензии или факты.')
+                verdict = self.model("full-edit-with-audit", "ovh", prompt,
+                                     validate=lambda data: None, tokens=14000,
+                                     metadata={"source_sha256": original["text_sha256"]})
+                edited = verdict.get("article")
+                if not isinstance(edited, str) or not edited.strip():
+                    raise Blocked("empty_visible_content")
+                self.memory.article(self.id, trial_image_plan=verdict.get("image_plan"))
+                self.current = self.remember_version(edited)
+                self.current = self.inspect(self.current, original, submitted_audit=verdict)
+            else:
+                edited = self.model("full-edit", "ovh", prompt,
+                                    metadata={"source_sha256": original["text_sha256"]})
+                self.current = self.remember_version(edited)
+                self.current = self.inspect(self.current, original)
             return self.current
         from .editorial_alt_models import enabled as alternative_test
         author, editor = ("kilo", "openrouter") if alternative_test() else ("groq", "openrouter")
