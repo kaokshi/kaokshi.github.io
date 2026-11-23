@@ -199,6 +199,8 @@ class Article:
             prompt += (" Для каждой темы верни дополнительно film_title, year, qid (если известен), "
                        "format (retelling, review, critique или plot_analysis), spoilers (boolean). "
                        "Дай ссылки на студийные или независимые источники о конкретном фильме. "
+                       "Не угадывай QID: если не уверен в нём, оставь поле пустым; "
+                       "независимый каталог проверит фильм сам. "
                        f"Публичные сигналы интереса: {json.dumps(signals, ensure_ascii=False)}. "
                        f"Недавние релизы: {json.dumps(releases, ensure_ascii=False)}.")
         for shift in range(2):
@@ -212,9 +214,22 @@ class Article:
             def is_valid(plan):
                 if not isinstance(plan.get("topics"), list):
                     raise Blocked("topic_list_missing")
-            result = self.model(f"topics-{shift + 1}", "groq",
-                                prompt + (f" В этот раз выбери иные предметы для набора {shift}." if shift else ""),
-                                validate=is_valid, tokens=3200)
+            topic_prompt = prompt + (f" В этот раз выбери иные предметы для набора {shift}." if shift else "")
+            try:
+                result = self.model(f"topics-{shift + 1}", "groq", topic_prompt,
+                                    validate=is_valid, tokens=3200)
+            except Blocked as exc:
+                # Retry malformed JSON as a new, metered model task. Never
+                # insert any assistant-authored topic or other creative data.
+                if str(exc) not in {"model_json_invalid", "model_json_not_object",
+                                    "topic_list_missing"}:
+                    raise
+                strict_prompt = (topic_prompt + " Ответь строго одним JSON-объектом "
+                                 "с массивом topics; без Markdown, пояснений или "
+                                 "текста до/после JSON. Не придумывай идентификаторы "
+                                 "каталога фильмов, если не уверен.")
+                result = self.model(f"topics-json-retry-{shift + 1}", "groq",
+                                    strict_prompt, validate=is_valid, tokens=3200)
             for row in result["topics"][:8]:
                 if not isinstance(row, dict):
                     continue
