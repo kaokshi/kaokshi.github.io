@@ -1,0 +1,70 @@
+name: Private provider quota monitor (read-only)
+on:
+  push:
+    branches:
+      - feature/read-only-provider-quotas-20261123
+    paths:
+      - .github/workflows/provider-quota-monitor.yml
+  workflow_dispatch:
+  # Schedule is active only when this workflow is merged into the default branch.
+  # 07:30 and 10:30 Moscow time (UTC+3), before drafting and owner review.
+  schedule:
+    - cron: '30 4,7 * * *'
+permissions:
+  contents: read
+  id-token: write # optional, short-lived Google Cloud read-only OIDC
+concurrency:
+  group: editorial-private-provider-quota-monitor
+  cancel-in-progress: false
+jobs:
+  read-quotas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.GOOGLE_GEMINI_API_KEY || secrets.GOOGLE_AI_API_KEY || secrets.GOOGLE_API_KEY || secrets.GEMINI_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ANALYTICS_API_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_API_TOKEN }}
+      EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+      GOOGLE_WIF_PROVIDER: ${{ secrets.GOOGLE_WIF_PROVIDER }}
+      GOOGLE_QUOTA_VIEWER_SA_EMAIL: ${{ secrets.GOOGLE_QUOTA_VIEWER_SA_EMAIL }}
+      GOOGLE_QUOTA_MONITOR_PROJECT: ${{ vars.GOOGLE_QUOTA_MONITOR_PROJECT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify safe quota monitor and no production changes
+        run: |
+          python -m py_compile src/editorial_quota_monitor.py
+          python -m unittest discover -s tests -p 'test_quota_monitor.py' -q
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          assert json.loads(Path("config/site.json").read_text())["publication_enabled"] is False
+          PY
+      - name: Get short-lived Google Cloud read-only identity if configured
+        id: google_auth
+        if: env.GOOGLE_WIF_PROVIDER != '' && env.GOOGLE_QUOTA_VIEWER_SA_EMAIL != '' && env.GOOGLE_QUOTA_MONITOR_PROJECT != ''
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ env.GOOGLE_QUOTA_MONITOR_PROJECT }}
+          workload_identity_provider: ${{ env.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ env.GOOGLE_QUOTA_VIEWER_SA_EMAIL }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/monitoring.read
+          create_credentials_file: false
+      - name: Capture Groq and Cloudflare quotas and optional Google Monitoring
+        env:
+          GOOGLE_CLOUD_ACCESS_TOKEN: ${{ steps.google_auth.outputs.access_token }}
+        run: python src/editorial_quota_monitor.py
+      - name: Save sanitized emergency report as protected Actions artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-quota-private-snapshot
+          path: quota-monitor-out/quota-snapshot.json
+          if-no-files-found: warn
+          retention-days: 7
