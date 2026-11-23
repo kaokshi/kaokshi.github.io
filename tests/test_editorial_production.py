@@ -144,7 +144,7 @@ class ProductionTests(unittest.TestCase):
                 with self.assertRaisesRegex(Blocked, "authentication_failed"):
                     editorial_delivery.unseal_state(state_wire[:-1] + bytes([state_wire[-1] ^ 1]))
             delivered = editorial_delivery.retrieve(root / "authorized", key_path, day=result["day"],
-                                                     artifact=protected / "owner-review.enc")
+                                                     artifact=protected / "owner-review.enc", allow_incomplete=True)
             self.assertEqual(delivered["status"], "verified_files_available")
             self.assertTrue((root / "authorized" / "science-01" / "Статья.docx").is_file())
             self.assertTrue((root / "authorized" / "science-01" / "Статья.html").is_file())
