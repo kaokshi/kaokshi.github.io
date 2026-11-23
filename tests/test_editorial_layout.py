@@ -121,6 +121,34 @@ class LayoutTests(unittest.TestCase):
             self.assertLess(md.index("**Оглавление**"), md.index("![Сцена 2]"))
             self.assertIn("**Раздел 1**\n\n![Сцена 1]", md)
 
+    def test_photo_license_does_not_overwrite_subscription_url(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            source, images = image_fixture(root)
+            first = images[0]
+            first.update({
+                "kind": "photo",
+                "source": "Wikimedia Commons",
+                "creator": "Research photographer",
+                "license": "CC-BY-4.0",
+                "license_url": "https://creativecommons.org/licenses/by/4.0/",
+                "attribution": "Research photographer",
+                "source_page": "https://commons.wikimedia.org/wiki/File:Example.jpg",
+            })
+            article = article_six()
+            article["sections"][-1]["paragraphs"].append(
+                "Подписывайтесь на «Легенды тёмных улиц», чтобы читать новые истории.")
+            report = {"article": article, "text_sha256": digest(canonical(article)),
+                      "facts": {"evidence": []}}
+            folder = root / "legends-01"
+            package(folder, "Тест фото", [], report, images, source, {})
+            checks = json.loads((folder / "Статус и проверки.json").read_text(encoding="utf-8"))
+            self.assertEqual(checks["subscription_link_status"], "linked")
+            self.assertEqual(checks["subscription_url"], "https://dzen.ru/darklegends")
+            html = (folder / "Статья.html").read_text(encoding="utf-8")
+            self.assertIn("https://creativecommons.org/licenses/by/4.0/", html)
+            self.assertIn('href="https://dzen.ru/darklegends"', html)
+
     def test_intro_is_valid_before_first_heading(self):
         raw = ("Вступительный абзац.\n\n" +
                "\n\n".join(f"**Раздел {i}**\n\nТекст раздела {i}."
