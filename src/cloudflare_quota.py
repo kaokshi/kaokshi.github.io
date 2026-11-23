@@ -117,13 +117,19 @@ def check_quota(token: str, account_id: str, now: dt.datetime | None = None) -> 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--require-free-neurons", type=float, default=0.0)
     args = parser.parse_args()
+    if not math.isfinite(args.require_free_neurons) or args.require_free_neurons < 0:
+        parser.error("invalid required free neurons")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     try:
         result = check_quota(
             os.environ.get("CLOUDFLARE_QUOTA_TOKEN", ""),
             os.environ.get("CLOUDFLARE_ACCOUNT_ID", ""),
         )
+        if (args.require_free_neurons > 0
+                and result["estimated_free_remaining_neurons"] < args.require_free_neurons):
+            raise QuotaCheckError("cloudflare_insufficient_estimated_free_neurons_for_cycle")
         print("Workers AI daily estimate (UTC):")
         print("Date:", result["period_utc"])
         print("Used neurons:", result["estimated_used_neurons"])
