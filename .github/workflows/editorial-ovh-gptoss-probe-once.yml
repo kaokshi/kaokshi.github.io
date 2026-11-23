@@ -1,0 +1,72 @@
+name: One-time OVHcloud GPT-OSS 120B anonymous capability test
+on:
+  push:
+    branches:
+      - assistant/kilo-modelscope-openrouter-isolated-20261123
+    paths:
+      - .github/workflows/editorial-ovh-gptoss-probe-once.yml
+permissions:
+  contents: read
+jobs:
+  gptoss-anonymous:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      EDITORIAL_ALT_MODELS_TEST: 'true'
+      EDITORIAL_ISOLATED_VALIDATION: 'true'
+      GITHUB_ACTIONS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify anonymous GPT-OSS 120B availability and test Russian JSON
+        run: |
+          python - <<'PY'
+          import json,os,time
+          from pathlib import Path
+          from src.editorial_alt_models import OVH_URL,OVH_CATALOG_URL,require_isolated
+          from src.editorial_providers import request,parse_json,Blocked
+          assert not os.environ.get("GROQ_API_KEY")
+          assert not os.environ.get("OVH_AI_ENDPOINTS_ACCESS_TOKEN")
+          assert json.loads(Path("config/site.json").read_text())["publication_enabled"] is False
+          require_isolated()
+          catalog=parse_json(request(OVH_CATALOG_URL,("catalog.endpoints.ai.ovh.net",)))
+          model=next((x for x in catalog if isinstance(x,dict) and x.get("id")=="gpt-oss-120b" and x.get("available") is True),None)
+          if model is None: raise Blocked("gpt_oss_120b_not_available")
+          print("GPTOSS_CATALOG=available")
+          messages=[
+              {"role":"system","content":"Отвечай по-русски. Верни только точный JSON, без Markdown."},
+              {"role":"user","content":"Это синтетическая проверка, не статья. Верни JSON с полями kind=\"synthetic\", count=7, ok=true и russian=\"проверка\". Никакого дополнительного текста."}]
+          payload={"model":"gpt-oss-120b","max_tokens":850,"reasoning_effort":"low",
+                   "stream":False,"messages":messages}
+          started=time.monotonic()
+          raw=request(OVH_URL+"/chat/completions",
+                      ("oai.endpoints.kepler.ai.cloud.ovh.net",),
+                      data=json.dumps(payload).encode(),
+                      headers={"Content-Type":"application/json"},timeout=100)
+          response=parse_json(raw)
+          choices=response.get("choices") or []
+          choice=choices[0] if choices else {}
+          content=(choice.get("message") or {}).get("content") or ""
+          content=content.strip() if isinstance(content,str) else ""
+          if content.startswith("```"):
+              content=content.partition("\n")[2].removesuffix("```").strip()
+          try:
+              obj=json.loads(content)
+          except (ValueError,TypeError):
+              obj=None
+          usage=response.get("usage") or {}
+          safe_usage={k:v for k,v in usage.items() if isinstance(v,int) and not isinstance(v,bool)}
+          result={"model":response.get("model"),"json_valid":isinstance(obj,dict),
+                  "schema_passed":obj=={"kind":"synthetic","count":7,"ok":True,"russian":"проверка"},
+                  "visible_content":bool(content),
+                  "finish_reason":choice.get("finish_reason"),
+                  "seconds":round(time.monotonic()-started,2),"usage":safe_usage,
+                  "groq_calls":0,"publication_authorized":False}
+          print("GPTOSS_TEST_RESULT="+json.dumps(result,sort_keys=True,ensure_ascii=False))
+          if not result["schema_passed"]: raise SystemExit(2)
+          PY
