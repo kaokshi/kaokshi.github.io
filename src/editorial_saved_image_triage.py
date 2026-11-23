@@ -85,7 +85,8 @@ def review(base):
             result.update(candidate_source_slot=source, recheck=audit)
             if audit["status"] == "accepted":
                 staged = output / "selected" / channel / f"{dest}.jpg"
-                if staged.exists() and digest(staged.read_bytes()) != audit["image_sha256"]:
+                already_selected = staged.exists()
+                if already_selected and digest(staged.read_bytes()) != audit["image_sha256"]:
                     raise Blocked("triage_preexisting_selection_changed")
                 write(staged, path.read_bytes())
                 # Recheck the staged bytes at the actual destination and reapply
@@ -93,7 +94,8 @@ def review(base):
                 final = audit_image(channel, section, dest, card, None, metadata, folder,
                                     occupied, candidate=staged, film=FILM if channel == "cinema-01" else None)
                 if final["status"] != "accepted":
-                    staged.unlink()
+                    if not already_selected:
+                        staged.unlink()
                     result["staged_recheck"] = final
                 else:
                     occupied.append(((channel, dest), *image_hashes(staged)))

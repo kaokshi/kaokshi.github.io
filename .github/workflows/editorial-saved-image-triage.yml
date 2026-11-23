@@ -32,7 +32,7 @@ jobs:
         run: |
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.7.1 torchvision==0.22.1
           python -m pip install transformers==4.57.3 ImageHash==4.3.2 'Pillow>=11,<13' markdown-it-py python-docx num2words
-      - name: Reaudit the 18 flagged slots and verify any staged selections
+      - name: Verify staged choices and remaining grounded alternatives
         env:
           EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
         run: |
