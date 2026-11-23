@@ -1,0 +1,41 @@
+name: Gemini API access and quota visibility (read-only)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '35 6 * * *'
+  pull_request:
+    paths:
+      - '.github/workflows/gemini-quota.yml'
+      - 'src/editorial_gemini_quota.py'
+      - 'tests/test_editorial_gemini_quota.py'
+permissions:
+  contents: read
+jobs:
+  unit-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest -v tests.test_editorial_gemini_quota
+  read-gemini:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest -v tests.test_editorial_gemini_quota
+      - name: List Gemini-accessible models without inference requests
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python -m src.editorial_gemini_quota --output "$RUNNER_TEMP/gemini-status.json"
