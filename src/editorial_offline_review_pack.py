@@ -149,7 +149,84 @@ def require_audited_bundle(base):
             seen.add(row["image_sha256"])
 
 
-def package(day, token):
+def build_archive(base, path, zipfile):
+    summary=[]
+    with ZipFile(zipfile,"w",ZIP_DEFLATED,compresslevel=7) as archive:
+        for channel in CHANNELS:
+            folder=base/channel
+            doc=folder/FILE_NAME
+            if not doc.is_file():
+                raise Blocked("offline_review_source_missing_"+channel)
+            raw=with_contents(doc.read_text(encoding="utf-8"))
+            refs=IMAGE_LINK.findall(raw)
+            expected=7 if channel=="science-01" else 8
+            if BAD_EXTERNAL_IMAGE.search(raw) or len(refs)!=expected:
+                raise Blocked("offline_review_image_reference_invalid_"+channel)
+            ids=[int(num) for _,num in refs]
+            if sorted(ids)!=list(range(1,expected+1)):
+                raise Blocked("offline_review_image_sequence_invalid_"+channel)
+            images=[]
+            for image_num in range(1,expected+1):
+                image=folder/"illustrations"/f"{image_num:02d}.jpg"
+                if not image.is_file():
+                    raise Blocked("offline_review_photo_missing_"+channel)
+                with Image.open(image) as im:
+                    im.verify()
+                with Image.open(image) as im:
+                    if min(im.size)<320:
+                        raise Blocked("offline_review_photo_too_small_"+channel)
+                images.append(image)
+            html=path/(channel+".html")
+            html.write_text(text_to_html(TITLES[channel],raw),encoding="utf-8")
+            word=path/(channel+".docx")
+            write_docx(raw,folder,word)
+            from .editorial_package import ArticleHTML
+
+            expected_refs = [f"illustrations/{slot}.jpg" for _, slot in refs]
+            html_check = ArticleHTML()
+            html_check.feed(html.read_text(encoding="utf-8"))
+            reopened = Document(word)
+            if html_check.all_images != expected_refs or html_check.extra_media or len(reopened.inline_shapes) != len(refs):
+                raise Blocked("offline_bundle_export_images_invalid_" + channel)
+            media_hashes = []
+            for p in reopened.paragraphs:
+                for image_xml in p._p.xpath(".//a:blip"):
+                    rel = image_xml.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+                    media_hashes.append(sha256(reopened.part.related_parts[rel].blob).hexdigest())
+            if media_hashes != [sha256((folder / ref).read_bytes()).hexdigest() for ref in expected_refs]:
+                raise Blocked("offline_bundle_docx_image_order_invalid_" + channel)
+            name={
+                "legends-01":"01_Мистика",
+                "cinema-01":"02_Кино",
+                "science-01":"03_Научпоп",
+            }[channel]
+            archive.writestr(name+"/Статья.md",raw)
+            archive.write(html,arcname=name+"/Открыть статью.html")
+            archive.write(word,arcname=name+"/Статья_с_фотографиями.docx")
+            for img in images:
+                archive.write(img,arcname=name+"/illustrations/"+img.name)
+            manifest=folder/"illustrations"/"source-manifest.json"
+            if manifest.is_file():
+                archive.write(manifest,arcname=name+"/illustrations/source-manifest.json")
+            summary.append({"channel":channel,"images":len(images),
+                            "document":True,"html":True,
+                            "offline_relative_images":True})
+        archive.write(base / AUDIT_DIR / "image_qa.json", arcname="image_qa.json")
+        archive.writestr("НАЧНИТЕ_ЗДЕСЬ.txt",
+            "Редакция Дзен — тестовые статьи для личного согласования.\n\n"
+            "Откройте файл «Открыть статью.html» в каждой папке или "
+            "«Статья_с_фотографиями.docx». Для просмотра интернет не нужен.\n"
+            "Исходные .md используют ссылки на соседнюю папку illustrations, "
+            "не перемещайте фотографии отдельно от Markdown.\n"
+            "В архиве 3 статьи и 23 изображения. Не является разрешением на "
+            "публичную публикацию без финальной проверки.\n"
+            "Кадры фильма могут быть защищены авторским правом.\n"
+        )
+    assert len(summary)==3 and sum(x["images"] for x in summary)==23
+    return summary
+
+
+def package(day, token, *, historical_repair=False):
     approval()
     checked_day(day)
     if not token:
@@ -159,81 +236,18 @@ def package(day, token):
         repo=path/"private"
         git,env=connect(token,repo)
         base=repo/"editorial-chat-review"/day
-        require_audited_bundle(base)
-        zipfile=base/OUTPUT
-        summary=[]
-        with ZipFile(zipfile,"w",ZIP_DEFLATED,compresslevel=7) as archive:
-            for channel in CHANNELS:
-                folder=base/channel
-                doc=folder/FILE_NAME
-                if not doc.is_file():
-                    raise Blocked("offline_review_source_missing_"+channel)
-                raw=with_contents(doc.read_text(encoding="utf-8"))
-                refs=IMAGE_LINK.findall(raw)
-                expected=7 if channel=="science-01" else 8
-                if BAD_EXTERNAL_IMAGE.search(raw) or len(refs)!=expected:
-                    raise Blocked("offline_review_image_reference_invalid_"+channel)
-                ids=[int(num) for _,num in refs]
-                if sorted(ids)!=list(range(1,expected+1)):
-                    raise Blocked("offline_review_image_sequence_invalid_"+channel)
-                images=[]
-                for image_num in range(1,expected+1):
-                    image=folder/"illustrations"/f"{image_num:02d}.jpg"
-                    if not image.is_file():
-                        raise Blocked("offline_review_photo_missing_"+channel)
-                    with Image.open(image) as im:
-                        im.verify()
-                    with Image.open(image) as im:
-                        if min(im.size)<320:
-                            raise Blocked("offline_review_photo_too_small_"+channel)
-                    images.append(image)
-                html=path/(channel+".html")
-                html.write_text(text_to_html(TITLES[channel],raw),encoding="utf-8")
-                word=path/(channel+".docx")
-                write_docx(raw,folder,word)
-                from .editorial_package import ArticleHTML
+        zipfile = base / OUTPUT
+        input_base = base
+        if historical_repair:
+            from .editorial_historical_release import materialize_verified_selection
 
-                expected_refs = [f"illustrations/{slot}.jpg" for _, slot in refs]
-                html_check = ArticleHTML()
-                html_check.feed(html.read_text(encoding="utf-8"))
-                reopened = Document(word)
-                if html_check.all_images != expected_refs or html_check.extra_media or len(reopened.inline_shapes) != len(refs):
-                    raise Blocked("offline_bundle_export_images_invalid_" + channel)
-                media_hashes = []
-                for p in reopened.paragraphs:
-                    for image_xml in p._p.xpath(".//a:blip"):
-                        rel = image_xml.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
-                        media_hashes.append(sha256(reopened.part.related_parts[rel].blob).hexdigest())
-                if media_hashes != [sha256((folder / ref).read_bytes()).hexdigest() for ref in expected_refs]:
-                    raise Blocked("offline_bundle_docx_image_order_invalid_" + channel)
-                name={
-                    "legends-01":"01_Мистика",
-                    "cinema-01":"02_Кино",
-                    "science-01":"03_Научпоп",
-                }[channel]
-                archive.writestr(name+"/Статья.md",raw)
-                archive.write(html,arcname=name+"/Открыть статью.html")
-                archive.write(word,arcname=name+"/Статья_с_фотографиями.docx")
-                for img in images:
-                    archive.write(img,arcname=name+"/illustrations/"+img.name)
-                manifest=folder/"illustrations"/"source-manifest.json"
-                if manifest.is_file():
-                    archive.write(manifest,arcname=name+"/illustrations/source-manifest.json")
-                summary.append({"channel":channel,"images":len(images),
-                                "document":True,"html":True,
-                                "offline_relative_images":True})
-            archive.write(base / AUDIT_DIR / "image_qa.json", arcname="image_qa.json")
-            archive.writestr("НАЧНИТЕ_ЗДЕСЬ.txt",
-                "Редакция Дзен — тестовые статьи для личного согласования.\n\n"
-                "Откройте файл «Открыть статью.html» в каждой папке или "
-                "«Статья_с_фотографиями.docx». Для просмотра интернет не нужен.\n"
-                "Исходные .md используют ссылки на соседнюю папку illustrations, "
-                "не перемещайте фотографии отдельно от Markdown.\n"
-                "В архиве 3 статьи и 23 изображения. Не является разрешением на "
-                "публичную публикацию без финальной проверки.\n"
-                "Кадры фильма могут быть защищены авторским правом.\n"
-            )
-        assert len(summary)==3 and sum(x["images"] for x in summary)==23
+            input_base = path / "verified"
+            materialize_verified_selection(base, input_base)
+        require_audited_bundle(input_base)
+        summary = build_archive(input_base, path, zipfile)
+        with ZipFile(zipfile) as archive:
+            if archive.testzip():
+                raise Blocked("offline_bundle_crc_invalid")
         rel=zipfile.relative_to(repo).as_posix()
         args=[*git,"-C",str(repo)]
         run([*args,"add","--",rel],env)
@@ -253,6 +267,7 @@ def package(day, token):
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--date",required=True)
+    p.add_argument("--historical-repair", action="store_true")
     a=p.parse_args()
     import os
-    package(a.date,os.environ.get("EDITORIAL_PRIVATE_TOKEN"))
+    package(a.date, os.environ.get("EDITORIAL_PRIVATE_TOKEN"), historical_repair=a.historical_repair)

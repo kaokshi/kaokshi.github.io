@@ -208,6 +208,45 @@ def run_repairs(base, sync, *, generate=False):
     return result
 
 
+def materialize_verified_selection(base, destination):
+    path = base / WORK / "image_qa.json"
+    report = read_json(path)
+    if (not report or report.get("schema") != qa.SCHEMA or report.get("ready") is not True
+            or report.get("accepted") != 23 or report.get("failures")
+            or set(report.get("articles", {})) != set(CHANNELS)):
+        raise Blocked("historical_release_full_audit_not_ready")
+    for channel, article in report["articles"].items():
+        source_folder = base / channel
+        output = destination / channel
+        source_text = (source_folder / FILE_NAME).read_bytes()
+        sections, slots = input_sections(source_text.decode("utf-8"))
+        if article["source_text_sha256"] != digest("\n\n".join(sections.values())):
+            raise Blocked("historical_release_saved_text_changed")
+        rows = article["images"]
+        if len(rows) != len(slots):
+            raise Blocked("historical_release_slot_count_changed")
+        manifest = []
+        for row in rows:
+            slot = row["slot"]
+            if (row.get("status") != "accepted" or slots.get(row["section_id"]) != slot
+                    or not row.get("clip", {}).get("model")
+                    or not (row.get("vision") or {}).get("models", {}).get("blip")):
+                raise Blocked("historical_release_image_not_verified")
+            source = (base / row["selected_path"]).resolve()
+            if not source.is_relative_to(base.resolve()):
+                raise Blocked("historical_release_selected_path_invalid")
+            raw = source.read_bytes()
+            if digest(raw) != row["image_sha256"]:
+                raise Blocked("historical_release_selected_image_changed")
+            name = f"{slot}.jpg"
+            write(output / "illustrations" / name, raw)
+            entry = {key: value for key, value in row["provenance"].items() if key not in {"file", "filename"}}
+            manifest.append({**entry, "filename": name, "sha256": row["image_sha256"]})
+        write(output / FILE_NAME, source_text)
+        write_json(output / "illustrations" / "source-manifest.json", manifest)
+    write(destination / AUDIT_DIR / "image_qa.json", path.read_bytes())
+
+
 def main(*, generate=False):
     approval()
     if read_json(Path("config/site.json"))["publication_enabled"] is not False:
