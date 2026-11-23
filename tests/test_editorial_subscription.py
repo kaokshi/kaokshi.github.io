@@ -52,7 +52,7 @@ class SubscriptionTests(unittest.TestCase):
                       "facts": {"evidence": []}}
             test_url = "https://dzen.ru/id-test"
             with patch("src.editorial_package.approved_url", return_value=test_url):
-                package(folder, "Тестовая статья", [], report, [], root, {"status": "review_pending"})
+                package(folder, "Тестовая статья", [], report, [], root, {"status": "partial_review_pending"})
             html = (folder / "Статья.html").read_text(encoding="utf-8")
             self.assertIn('<a href="' + test_url + '">За гранью очевидного</a>', html)
             document = Document(folder / "Статья.docx")

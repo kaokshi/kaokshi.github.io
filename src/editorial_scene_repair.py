@@ -1,6 +1,7 @@
 """Single owner-private end-to-end repair of an audited, rejected scene."""
 
 from datetime import datetime, timedelta, timezone
+import argparse
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,7 @@ ARTICLE = "legends-01"
 SECTION = "7"
 
 
-def main():
+def main(*, continue_once=False):
     approval()
     config = settings()
     with TemporaryDirectory(prefix="zen-audited-repair-") as work:
@@ -55,36 +56,54 @@ def main():
                  "commit", "-m", message], env)
             run([*args, "push", "origin", "HEAD:refs/heads/main"], env, timeout=120)
 
-        receipt = output / "result.json"
+        initial_receipt = output / "result.json"
+        receipt = output / ("result-retry.json" if continue_once else "result.json")
         if receipt.is_file():
             existing = read_json(receipt)
             print(json.dumps({"status": existing["status"], "klein_calls_this_run": 0}), flush=True)
             return
         request_record = output / "request.json"
-        if request_record.is_file():
-            raise Blocked("previous_targeted_repair_request_outcome_unknown")
         card = original["scene_card"]
-        prompt = (
-            "Уточни композицию одного нового кадра. Верни JSON с единственным полем visual_description. "
-            "Опиши на английском видимое место, предметы и действия, не совмещая разные моменты. "
-            "Строго соблюдай обязательные и запрещённые элементы проверки. "
-            "Не добавляй деталей без подтверждения в тексте.\nПРОВЕРКА:\n"
-            + json.dumps({key: card[key] for key in ("location", "must_have", "must_not_have")})
-            + "\nРАЗДЕЛ:\n" + section_text
-        )
-        plan = text_call("groq", prompt, max_tokens=650)
-        description = json_reply(plan).get("visual_description")
-        if not isinstance(description, str) or not 20 <= len(description.strip()) <= 1100:
-            raise Blocked("repair_composition_missing")
-        write_json(request_record, {"article_id": ARTICLE, "slot": slot, "source_text_sha256": source,
-                                    "prior_image_sha256": original["image_sha256"], "max_klein_calls": 1,
-                                    "model": plan["model"], "usage": plan["usage"], "description": description})
+        ceiling = 2 if continue_once else 1
+        if continue_once:
+            first = read_json(initial_receipt)
+            first_request = read_json(request_record)
+            if (not first_request or first_request.get("source_text_sha256") != source
+                    or not first or first.get("status") != "image_review_required"
+                    or first.get("klein_calls") != 1):
+                raise Blocked("retry_requires_one_completed_unsuccessful_repair")
+            retry_record = output / "request-retry.json"
+            if retry_record.is_file():
+                raise Blocked("previous_targeted_repair_retry_outcome_unknown")
+            description = first_request["description"]
+            write_json(retry_record, {"max_total_klein_calls": ceiling, "source_text_sha256": source,
+                                      "prior_image_sha256": original["image_sha256"]})
+        else:
+            if request_record.is_file():
+                raise Blocked("previous_targeted_repair_request_outcome_unknown")
+            prompt = (
+                "Уточни композицию одного нового кадра. Верни JSON с единственным полем visual_description. "
+                "Опиши на английском видимое место, предметы и действия, не совмещая разные моменты. "
+                "Строго соблюдай обязательные и запрещённые элементы проверки. "
+                "Не добавляй деталей без подтверждения в тексте.\nПРОВЕРКА:\n"
+                + json.dumps({key: card[key] for key in ("location", "must_have", "must_not_have")})
+                + "\nРАЗДЕЛ:\n" + section_text
+            )
+            plan = text_call("groq", prompt, max_tokens=650)
+            description = json_reply(plan).get("visual_description")
+            if not isinstance(description, str) or not 20 <= len(description.strip()) <= 1100:
+                raise Blocked("repair_composition_missing")
+            write_json(request_record, {"article_id": ARTICLE, "slot": slot, "source_text_sha256": source,
+                                        "prior_image_sha256": original["image_sha256"], "max_klein_calls": ceiling,
+                                        "model": plan["model"], "usage": plan["usage"], "description": description})
         commit("Reserve one audited illustration correction")
-        # This private test reserves one request before touching Klein, and
-        # disallows a new allocation if a runner lost the request outcome.
-        config["daily_calls"]["klein"] = 1
-        config["per_article_calls"]["klein"] = 1
-        memory = Memory(output / "checkpoint", DAY, datetime.now(timezone.utc) + timedelta(minutes=12), config)
+        config["daily_calls"]["klein"] = ceiling
+        config["per_article_calls"]["klein"] = ceiling
+        memory = Memory(output / "checkpoint", DAY, datetime.now(timezone.utc) + timedelta(minutes=12), config,
+                        retry=continue_once)
+        prior_calls = sum(row["provider"] == "klein" for row in memory.data["calls"])
+        if prior_calls != ceiling - 1:
+            raise Blocked("repair_checkpoint_quota_mismatch")
         prior = sorted(base.glob("*/illustrations/[0-9][0-9].jpg"))
         index = ImageIndex(memory, prior)
         target = output / "images" / f"{slot}.jpg"
@@ -107,4 +126,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--continue-once", action="store_true")
+    main(continue_once=parser.parse_args().continue_once)

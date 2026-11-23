@@ -1003,10 +1003,21 @@ class Article:
     def run(self):
         existing = self.memory.data["articles"].get(self.id, {})
         from .editorial_alt_models import enabled as alternative_test
-        if existing.get("status") == "review_pending" and alternative_test():
-            return existing["status"]
-        if existing.get("status") in ("review_pending", "rights_review_pending") and not self.memory.retry:
-            return existing["status"]
+        if existing.get("status") in {"review_pending", "rights_review_pending"} and (
+                not self.memory.retry or alternative_test()):
+            review = self.memory.folder / "review" / self.id
+            saved = read_json(review / "Статус и проверки.json")
+            if saved and saved.get("text_sha256") == existing.get("text_sha256"):
+                rows = saved.get("images", [])
+                try:
+                    scene_qa.require_packet_rows(rows, saved["text_sha256"], article_id=self.id)
+                    scene_qa.require_ready_rows(rows)
+                    intact = all(digest((review / "images" / row["file"]).read_bytes()) == row["sha256"]
+                                 for row in rows)
+                    if intact and saved.get("layout_status") == "verified":
+                        return existing["status"]
+                except (Blocked, OSError):
+                    pass
         if os.environ.get("EDITORIAL_IMAGE_RECOVERY_ONLY") == "true":
             if not self.memory.retry or self.channel != "cinema":
                 raise Blocked("image_recovery_requires_cinema_retry")

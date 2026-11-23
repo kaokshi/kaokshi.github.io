@@ -19,7 +19,7 @@ from tempfile import TemporaryDirectory
 
 from .editorial_memory import digest
 from .editorial_providers import Blocked
-from .editorial_scene_qa import require_packet_rows
+from .editorial_scene_qa import require_packet_rows, require_ready_rows
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_REPO = "kaokshi/zen-editorial-review"
@@ -120,8 +120,10 @@ def inputs(root, day, *, ready_only=False):
         if digest(source) != report.get("text_sha256"):
             raise Blocked("private_review_canonical_sha_mismatch")
         require_packet_rows(rows, report["text_sha256"], article_id=channel)
-        if ready_only and (report.get("layout_status") != "verified" or not 7 <= len(rows) <= 8):
-            raise Blocked("private_review_visual_layout_incomplete")
+        if report.get("status") in {"review_pending", "rights_review_pending"}:
+            require_ready_rows(rows)
+            if report.get("layout_status") != "verified":
+                raise Blocked("private_review_visual_layout_incomplete")
         expected = {}
         for line in manifest.read_text(encoding="utf-8").splitlines():
             parts = line.split("  ", 1)

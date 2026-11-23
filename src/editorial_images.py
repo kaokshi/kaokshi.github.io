@@ -339,6 +339,9 @@ def generated_scene(scene, subject, path, index, task, article, channel, style):
             details = []
             if row["absent"]:
                 details.append("Clearly show these missing items: " + ", ".join(row["absent"]))
+            if card["location"] in row["absent"]:
+                details.append("Use a wide establishing view that includes the full setting and the required objects "
+                               "in the same frame. Avoid a close-up that hides the surrounding location.")
             if row["contradictions"]:
                 details.append("Exclude these conflicting items: " + ", ".join(row["contradictions"]))
             if row["duplicate"]:

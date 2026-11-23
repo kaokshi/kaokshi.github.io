@@ -256,7 +256,9 @@ class Memory:
                     details["reason_code"] = code(task.get("error"))
                 print(json.dumps(details), flush=True)
             if status in {"completed", "failed", "blocked"}:
-                task["used_calls"] = sum(call["task"] == task["id"] for call in self.data["calls"])
+                task["used_calls"] = sum(call["task"] == task["id"]
+                                         or call["task"].startswith(task["id"] + ".candidate-")
+                                         for call in self.data["calls"])
             self.save(durable)
 
     def time_left(self):

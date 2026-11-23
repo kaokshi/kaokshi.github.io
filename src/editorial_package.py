@@ -8,9 +8,10 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from .editorial_memory import digest, write, write_json
 from .editorial_review import canonical
-from .editorial_scene_qa import require_packet_rows
+from .editorial_scene_qa import require_packet_rows, require_ready_rows
 from .editorial_images import select_cover
 from .editorial_layout import layout_issues
+from .editorial_providers import Blocked
 from .editorial_subscription import approved_url, channel_from_folder, split_cta
 
 
@@ -81,6 +82,10 @@ def package(folder, title, version, report, images, image_folder, summary):
     document.add_heading(title, 0)
     article = report["article"]
     problems = layout_issues(article, images)
+    if summary.get("status") in {"review_pending", "rights_review_pending"}:
+        require_ready_rows(images)
+        if problems:
+            raise Blocked("review_visual_layout_incomplete")
     cover = select_cover(images)
     hero = next((row for row in images if row["file"] == cover), None)
     ordered = ([hero] if hero else []) + sorted(

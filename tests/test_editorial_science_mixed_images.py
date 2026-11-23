@@ -3,6 +3,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.editorial_scene_fixtures import proposal
+from src import editorial_scene_qa as qa
+from src.editorial_memory import digest
 from src.editorial_images import photo, validate_plan
 from src.editorial_providers import Blocked
 
@@ -37,7 +40,8 @@ class ScienceMixedImagesTests(unittest.TestCase):
 
     def test_science_photo_search_falls_back_to_nasa_without_pretending_rights_verified(self):
         scene = {"section": 3, "kind": "photo", "query": "real observatory photo",
-                 "subject": "Observatory science"}
+                 "subject": "Observatory science", "scene_card": qa.make_card(
+                     "science-01", 3, digest("Example section"), "Example section", proposal("Example section"))}
         candidate = {"asset_url": "https://images-assets.nasa.gov/example.jpg",
                      "domains": ("images-assets.nasa.gov",),
                      "source": "NASA", "rights_status": "rights_review_pending"}
@@ -58,7 +62,8 @@ class ScienceMixedImagesTests(unittest.TestCase):
 
     def test_strict_commons_route_must_not_use_nasa(self):
         scene = {"section": 2, "kind": "photo", "query": "research microscope photo",
-                 "subject": "Microscope photo"}
+                 "subject": "Microscope photo", "scene_card": qa.make_card(
+                     "science-01", 2, digest("Example section"), "Example section", proposal("Example section"))}
         index = SimpleNamespace(memory=SimpleNamespace(time_left=lambda: 300))
         with patch("src.editorial_images.warm_visual_matcher"), \
              patch("src.editorial_images.commons_photos", return_value=iter(())), \

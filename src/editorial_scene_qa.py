@@ -252,7 +252,13 @@ def apply_channel_policy(report, channel, metadata, *, film=None, spoilers=False
     issue = None
     if channel == "science":
         if kind == "photo":
-            checks["photo_provenance"] = source_valid and metadata.get("rights_status") == "license_metadata_verified"
+            license_url = urlsplit(metadata.get("license_url") or "")
+            checks["photo_provenance"] = (
+                source_valid and metadata.get("rights_status") == "license_metadata_verified"
+                and license_url.hostname == "creativecommons.org"
+                and license_url.scheme in ("http", "https")
+                and bool(metadata.get("attribution") or metadata.get("artist") or metadata.get("creator"))
+            )
             if not checks["photo_provenance"]:
                 issue = "scientific_photo_source_or_license_unverified"
         elif kind == "illustration":
@@ -267,8 +273,9 @@ def apply_channel_policy(report, channel, metadata, *, film=None, spoilers=False
                 (metadata.get("original_title") == film.get("original_title")
                  and metadata.get("year") == film.get("year") and metadata.get("film_id") == film.get("qid") and
                  bool(film.get("qid")))
-                or (bool(film.get("imdb")) and urlsplit(url).hostname in ("www.imdb.com", "imdb.com")
-                    and f"/title/{film['imdb']}/mediaviewer/" in urlsplit(url).path)
+                or (bool(film.get("imdb_id") or film.get("imdb"))
+                    and urlsplit(url).hostname in ("www.imdb.com", "imdb.com")
+                    and f"/title/{film.get('imdb_id') or film.get('imdb')}/mediaviewer/" in urlsplit(url).path)
             )
         )
         checks["film_provenance"] = bool(identity)
@@ -315,3 +322,13 @@ def require_packet_rows(rows, source_sha, *, article_id=None):
                 or not evidence.get("vision") or evidence.get("duplicate")
                 or not evidence.get("policy") or evidence.get("visual_quality", {}).get("passed") is not True):
             raise Blocked("image_review_required_before_packaging")
+
+
+
+def require_ready_rows(rows):
+    sections = sorted(row["section"] for row in rows)
+    if (not 7 <= len(rows) <= 8 or sections != [1, *range(1, len(rows))]
+            or len({row["sha256"] for row in rows}) != len(rows)
+            or sum(row["is_cover"] and row["section"] == 1 for row in rows) != 1
+            or sum(row["is_cover"] for row in rows) != 1):
+        raise Blocked("review_visual_layout_incomplete")
