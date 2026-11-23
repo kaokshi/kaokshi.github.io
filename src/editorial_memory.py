@@ -22,6 +22,42 @@ def now():
 def digest(value):
     return sha256(value.encode("utf-8") if isinstance(value, str) else value).hexdigest()
 
+def gemini_cooldown_seconds(calls, at=None):
+    """Fail closed during Gemini's transient overload without spending another call.
+
+    Only account-local, durable failed attempts are considered; this is not
+    a claim about Google's upstream rate-limit counters.
+    """
+    at = at or datetime.now(timezone.utc)
+    for row in reversed(calls):
+        if row.get("provider") != "gemini" or row.get("status") != "failed":
+            continue
+        error = row.get("error", "")
+        window = (240 if error in {"http_503_transient", "http_502_transient",
+                                  "http_504_transient"} else
+                  120 if error in {"connection_failed", "connection_timeout"} else
+                  90 if error == "http_429_transient" else 0)
+        if not window:
+            continue
+        stamp = row.get("completed_at")
+        try:
+            recorded = datetime.fromisoformat(stamp)
+            if recorded.tzinfo is None:
+                continue
+        except (TypeError, ValueError):
+            continue
+        seconds = (at - recorded).total_seconds()
+        if seconds < 0:
+            continue
+        # A server-provided Retry-After may require longer than our default.
+        retry_after = row.get("retry_after_seconds", 0)
+        if isinstance(retry_after, (int, float)) and retry_after > 0:
+            window = max(window, min(retry_after, 3600))
+        if seconds < window:
+            return int(window - seconds + 0.999)
+    return 0
+
+
 
 def read_json(path, default=None):
     if not path.exists():
@@ -278,6 +314,10 @@ class Memory:
             if any(row["task"] == task_id and row["provider"] == provider
                    and row["status"] == "reserved" for row in self.data["calls"]):
                 raise ProviderError("previous_provider_request_outcome_unknown", stop=True)
+            if provider == "gemini":
+                cooldown = gemini_cooldown_seconds(self.data["calls"])
+                if cooldown:
+                    raise ProviderError("gemini_transient_cooldown", retry_after=cooldown)
             stopped = self.data["provider_stops"].get(provider)
             if stopped:
                 raise ProviderError("provider_stopped_" + stopped, stop=True)
@@ -302,6 +342,8 @@ class Memory:
         except ProviderError as exc:
             with self.lock:
                 reservation.update(status="failed", error=str(exc), completed_at=now(), **exc.telemetry)
+                if exc.retry_after is not None:
+                    reservation["retry_after_seconds"] = exc.retry_after
                 if exc.stop:
                     self.data["provider_stops"][provider] = str(exc)
                 self.save()
