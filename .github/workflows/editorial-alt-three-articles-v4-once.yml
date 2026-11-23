@@ -172,7 +172,7 @@ jobs:
           if "ovh" in providers:
               sleep(35)
           PY
-      - name: Install project editorial, QA, documents and image dependencies
+      - name: Install pinned editorial and image dependencies
         run: |
           python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0'
           python -m pip install -r requirements-production.txt
