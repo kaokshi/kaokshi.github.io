@@ -1,0 +1,36 @@
+name: One-time free provider headroom inspection (no generation)
+on:
+  push:
+    branches:
+      - assistant/three-channel-agent-validation-20261123
+    paths:
+      - .github/workflows/editorial-free-headroom-once.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  free-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read free request count only without calling any text model
+        run: |
+          python - <<'PY'
+          import json
+          from src.editorial_free_fallback import free_remaining, verify_fallback
+          print(json.dumps({
+              "status": "free_quota_inspected_only",
+              "free_router": verify_fallback(),
+              "remaining_requests": free_remaining(),
+              "article_generation_requested": False,
+              "publication_authorized": False,
+          }))
+          PY
