@@ -1,4 +1,4 @@
-"""Safety regressions for isolated Kilo + ModelScope writers and OpenRouter editor.
+"""Safety regressions for isolated Kilo writer + OVH anonymous backup and OpenRouter editor.
 
 No real text or image content; no network or provider calls in these tests.
 """
@@ -17,7 +17,7 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
               "GITHUB_ACTIONS":"true",
               "EDITORIAL_GROQ_FALLBACK_ONLY":"false",
               "GROQ_API_KEY":"",
-              "MODELSCOPE_API_TOKEN":"synthetic-token"}
+              "OVH_AI_ENDPOINTS_ACCESS_TOKEN":""}
         return {**data, **extra}
 
     def test_groq_is_hard_blocked_even_when_called_directly(self):
@@ -35,10 +35,10 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(Blocked, "groq_secret_must_be_absent"):
                 require_isolated()
 
-    def test_modelscope_requires_explicit_token(self):
-        with patch.dict(os.environ, self.config(MODELSCOPE_API_TOKEN=""), clear=False):
-            with self.assertRaisesRegex(Blocked, "modelscope_api_token_missing"):
-                preflight()
+    def test_ovh_authentication_is_forbidden_in_free_test(self):
+        with patch.dict(os.environ, self.config(OVH_AI_ENDPOINTS_ACCESS_TOKEN="TEST-NOT-REAL"), clear=False):
+            with self.assertRaisesRegex(Blocked, "ovh_anonymous_test_must_not_use_paid_api_key"):
+                require_isolated()
 
     def test_bad_provider_never_routes_to_paid_model(self):
         with patch.dict(os.environ, self.config(), clear=False):
@@ -51,7 +51,7 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
         fake={"data":[{"id":"paid/model","pricing":{"prompt":"1","completion":"1"}}]}
         with patch.dict(os.environ, self.config(), clear=False), \
              patch("src.editorial_alt_models.request", return_value=b'{"data":[{"id":"paid/model"}]}'):
-            with self.assertRaisesRegex(Blocked, "kilo_explicit_free_model_unavailable"):
+            with self.assertRaisesRegex(Blocked, "kilo_free_model_not_in_catalog"):
                 preflight()
 
 
@@ -91,7 +91,7 @@ class EditorialAlternativeRoutingTests(unittest.TestCase):
                              "SYNTHETIC-FIXTURE-ONLY")
             self.assertEqual(mystery.model("editorial-audit", "groq", "test"),
                              "SYNTHETIC-FIXTURE-ONLY")
-        self.assertEqual(observed, ["kilo", "modelscope", "modelscope", "openrouter"])
+        self.assertEqual(observed, ["kilo", "kilo", "kilo", "openrouter"])
         self.assertNotIn("groq", observed)
 
 if __name__ == "__main__":
