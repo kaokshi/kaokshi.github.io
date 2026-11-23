@@ -129,8 +129,18 @@ def run_repairs(base, sync, *, generate=False):
             "не длиннее 65 слов. Данные:\n" + json.dumps(grouped, ensure_ascii=False)
         )
 
+        output_budget = 950
+        if prior_groq:
+            compact = {slot: [entry["scene"]["location"], *entry["scene"]["must_have"],
+                              *entry["scene"].get("location_cues", [])]
+                       for slot, entry in grouped.items()}
+            message = ("Return a JSON object of short English illustration compositions by slot, "
+                       "20 words each. Show all stated details. "
+                       + json.dumps(compact, separators=(",", ":")))
+            output_budget = 240
+
         def compose():
-            reply = text_call("groq", message, max_tokens=950, response_json=True)
+            reply = text_call("groq", message, max_tokens=output_budget, response_json=True)
             composition = json_reply(reply)
             if set(composition) != set(grouped) or not all(isinstance(value, str) and 20 <= len(value) <= 900
                                                          for value in composition.values()):
