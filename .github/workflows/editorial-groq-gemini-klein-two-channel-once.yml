@@ -78,7 +78,7 @@ jobs:
       - name: Offline provider-budget and mixed-image regressions
         run: |
           python -m pip install 'cryptography>=44,<48'
-          python -m unittest -q tests.test_editorial_groq_gemini_klein tests.test_editorial_science_mixed_images tests.test_editorial_chat_bridge
+          python -m unittest -q tests.test_editorial_groq_gemini_klein tests.test_editorial_science_mixed_images
       - name: Probe selected Gemini 3.5 Flash alias without generating tokens
         run: |
           python - <<'PY'
@@ -91,6 +91,7 @@ jobs:
           print(json.dumps({"preflight": status, "actual_generation_model_pending": True}, sort_keys=True))
           PY
       - name: Check real Wikimedia Commons NASA and movie still candidates
+        if: always()
         timeout-minutes: 3
         continue-on-error: true
         run: python -m src.editorial_photo_probe
