@@ -100,7 +100,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, os
-          from time import monotonic
+          from time import monotonic, sleep
           from src.editorial_brain import json_reply
           from src.editorial_providers import Blocked, text_call
           providers = ("kilo",) if os.environ["KILO_PROBE_ONLY"] == "true" else (
@@ -115,6 +115,10 @@ jobs:
               except Blocked as exc:
                   status.update(passed=False, reason=str(exc))
               print(json.dumps({**status, "seconds": round(monotonic() - started, 2)}), flush=True)
+          # Generation runs in a new process. Drain the probe's rolling window
+          # before it can issue another anonymous OVH request.
+          if "ovh" in providers:
+              sleep(35)
           PY
       - name: Install project editorial, QA, documents and image dependencies
         run: |

@@ -19,7 +19,8 @@ OVH_GPTOSS_MODEL = "gpt-oss-120b"
 OVH_URL = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
 OVH_CATALOG_URL = "https://catalog.endpoints.ai.ovh.net/rest/v1/models_v2"
 _ovh_lock = Lock()
-_ovh_last_request = {}
+OVH_MIN_INTERVAL = 35.0
+_ovh_last_request = float("-inf")
 
 
 def enabled():
@@ -93,6 +94,16 @@ def preflight():
             "groq_allowed": False, "publication_authorized": False}
 
 
+def reserve_ovh_slot():
+    """Share two requests per minute across both OVH models and parallel channels."""
+    global _ovh_last_request
+    with _ovh_lock:
+        wait = OVH_MIN_INTERVAL - (monotonic() - _ovh_last_request)
+        if wait > 0:
+            sleep(wait)
+        _ovh_last_request = monotonic()
+
+
 def generate(provider, prompt, max_tokens=3000):
     """Only Kilo's explicitly free tier or OVH anonymous endpoint."""
     require_isolated()
@@ -113,11 +124,7 @@ def generate(provider, prompt, max_tokens=3000):
         payload["reasoning"] = {"enabled": False}
     else:
         payload["reasoning_effort"] = "low"
-        with _ovh_lock:
-            wait = 36.0 - (monotonic() - _ovh_last_request.get(model, float("-inf")))
-            if wait > 0:
-                sleep(wait)
-            _ovh_last_request[model] = monotonic()
+        reserve_ovh_slot()
     raw = request(base + "/chat/completions", (host,),
                   data=json.dumps(payload).encode(),
                   headers={**candidate_headers(provider), "Content-Type": "application/json"},

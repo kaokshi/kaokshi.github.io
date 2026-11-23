@@ -55,6 +55,25 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
                 preflight()
 
 
+    def test_ovh_models_share_the_same_rate_window(self):
+        from src import editorial_alt_models as models
+
+        requests = []
+
+        def send(url, domains, *, data, **kwargs):
+            import json
+            requests.append(json.loads(data)["model"])
+            return b'{"choices":[{"message":{"content":"SYNTHETIC FIXTURE"}}]}'
+
+        with patch.dict(os.environ, self.config()), patch.object(models, "request", side_effect=send), \
+                patch.object(models, "_ovh_last_request", float("-inf")), \
+                patch.object(models, "monotonic", side_effect=[0, 0, 1, 35]), \
+                patch.object(models, "sleep") as pause:
+            generate("ovh", "fixture")
+            generate("ovh-gptoss", "fixture")
+        self.assertEqual(requests, [models.OVH_MODEL, models.OVH_GPTOSS_MODEL])
+        pause.assert_called_once_with(34)
+
     def test_visible_content_parts_exclude_reasoning(self):
         from src.editorial_providers import visible_text
 
