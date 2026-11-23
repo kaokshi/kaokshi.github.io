@@ -55,5 +55,43 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
                 preflight()
 
 
+
+class EditorialAlternativeRoutingTests(unittest.TestCase):
+    def synthetic_article(self, channel):
+        from src.editorial_brain import Article
+        from types import SimpleNamespace
+        article = Article.__new__(Article)
+        article.channel = channel
+        article.id = channel + "-01"
+        article.memory = SimpleNamespace(call=lambda task, aid, provider, callback: callback())
+        article.task = lambda stage, provider, inputs, action, **kwargs: action("synthetic-task")
+        return article
+
+    def test_writers_and_editor_are_separated_without_groq(self):
+        from src.editorial_brain import Article
+        cfg = {"EDITORIAL_ALT_MODELS_TEST": "true",
+               "EDITORIAL_ISOLATED_VALIDATION": "true",
+               "GITHUB_ACTIONS": "true",
+               "GROQ_API_KEY": "", "EDITORIAL_GROQ_FALLBACK_ONLY": "false"}
+        observed = []
+        def fake_text_call(provider, prompt, max_tokens):
+            observed.append(provider)
+            return {"text": "SYNTHETIC-FIXTURE-ONLY",
+                    "model": "test-model", "usage": {}, "telemetry": {}}
+        with patch.dict(os.environ, cfg), patch("src.editorial_brain.text_call", fake_text_call):
+            mystery = self.synthetic_article("legends")
+            science = self.synthetic_article("science")
+            cinema = self.synthetic_article("cinema")
+            self.assertEqual(mystery.model("draft", "groq", "test"),
+                             "SYNTHETIC-FIXTURE-ONLY")
+            self.assertEqual(science.model("draft", "groq", "test"),
+                             "SYNTHETIC-FIXTURE-ONLY")
+            self.assertEqual(cinema.model("draft", "groq", "test"),
+                             "SYNTHETIC-FIXTURE-ONLY")
+            self.assertEqual(mystery.model("editorial-audit", "groq", "test"),
+                             "SYNTHETIC-FIXTURE-ONLY")
+        self.assertEqual(observed, ["kilo", "modelscope", "modelscope", "openrouter"])
+        self.assertNotIn("groq", observed)
+
 if __name__ == "__main__":
     unittest.main()
