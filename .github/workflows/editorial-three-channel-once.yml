@@ -52,8 +52,8 @@ jobs:
               raise SystemExit("encrypted_storage_or_free_text_provider_secret_missing")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as out:
               out.write("EDITORIAL_REVIEW_PUBLIC_KEY=" + cfg["schedule"]["owner_public_key"] + "\n")
-              out.write("EDITORIAL_STATE_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-agent-only-20261123\\n")
-              out.write("EDITORIAL_SEALED_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-three-sealed-20261123\\n")
+              out.write("EDITORIAL_STATE_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-agent-only-20261123\n")
+              out.write("EDITORIAL_SEALED_DIR=" + os.environ["RUNNER_TEMP"] + "/editorial-three-sealed-20261123\n")
           print("Agent-only and publication freeze preflight passed; no content generated here.")
           PY
       - name: Install verified encryption dependency
