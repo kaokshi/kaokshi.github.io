@@ -79,6 +79,9 @@ class PrivateChatReviewTests(unittest.TestCase):
             def fake_connect(token, destination, execute):
                 self.assertEqual(token, "FAKE-NOT-REAL")
                 destination.mkdir()
+                preserved = destination / "editorial-chat-review" / "2026-11-23" / "science-01" / "illustrations"
+                preserved.mkdir(parents=True)
+                (preserved / "01.jpg").write_bytes(b"OWNER-SAVED-ILLUSTRATION-FIXTURE")
                 return ["git"], {}
             def fake_run(argv, env, timeout=60):
                 if "status" in argv:
@@ -89,6 +92,8 @@ class PrivateChatReviewTests(unittest.TestCase):
                     capture["text"] = (output / "Статья.html").read_text()
                     capture["has_history"] = (output / "Версии").exists()
                     capture["image"] = (output / "images" / "fixture.jpg").read_bytes()
+                    capture["preexisting_illustration"] = (
+                        output / "illustrations" / "01.jpg").read_bytes()
                 return ""
             with patch("src.editorial_chat_plaintext.connect", fake_connect):
                 result = publish(root, "2026-11-23", token="FAKE-NOT-REAL",
@@ -98,6 +103,8 @@ class PrivateChatReviewTests(unittest.TestCase):
             self.assertEqual(capture["text"], "<p>TEST-FIXTURE-ONLY</p>")
             self.assertFalse(capture["has_history"])
             self.assertEqual(capture["image"], b"FAKE-IMAGE-TEST")
+            self.assertEqual(capture["preexisting_illustration"],
+                             b"OWNER-SAVED-ILLUSTRATION-FIXTURE")
             self.assertTrue(result["git_history_may_retain_deleted_content"])
 
     def test_retention_prunes_live_files_only_and_not_git_history(self):
