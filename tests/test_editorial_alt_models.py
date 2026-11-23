@@ -25,6 +25,18 @@ class AlternativeProviderSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ProviderError, "groq_forbidden"):
                 text_call("groq", "SYNTHETIC TEST FIXTURE")
 
+    def test_preflight_verifies_separate_free_kilo_reviewer(self):
+        import json
+        from src.editorial_alt_models import KILO_ID, KILO_REVIEW, OVH_ID, OVH_GPTOSS_ID
+
+        free = {"prompt": "0", "completion": "0"}
+        catalog = {"data": [{"id": model, "pricing": free} for model in (KILO_ID, KILO_REVIEW)]}
+        ovh = [{"id": model, "available": True} for model in (OVH_ID, OVH_GPTOSS_ID)]
+        responses = [json.dumps(catalog).encode(), json.dumps(ovh).encode()]
+        with patch.dict(os.environ, self.config(EDITORIAL_TEST_WITHOUT_OPENROUTER="true")), \
+                patch("src.editorial_alt_models.request", side_effect=responses):
+            self.assertEqual(preflight()["status"], "preflight_passed")
+
     def test_openrouter_disabled_before_any_network_call(self):
         with patch.dict(os.environ, self.config(EDITORIAL_TEST_WITHOUT_OPENROUTER="true")), \
                 patch("src.editorial_providers.request") as request:

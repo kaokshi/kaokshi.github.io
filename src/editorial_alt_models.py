@@ -8,7 +8,7 @@ import os
 from threading import Lock
 from time import monotonic, sleep
 
-from .editorial_providers import Blocked, KILO, ProviderError, parse_json, request, visible_text
+from .editorial_providers import Blocked, KILO, KILO_REVIEW, ProviderError, parse_json, request, visible_text
 
 KILO_ID = KILO
 KILO_URL = "https://ai-gateway.kilo.ai/api/v1"
