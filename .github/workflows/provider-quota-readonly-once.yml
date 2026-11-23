@@ -1,0 +1,35 @@
+name: Read provider limits without production changes
+on:
+  push:
+    branches:
+      - experiment/image-generators-compare-20261123
+    paths:
+      - .github/workflows/provider-quota-readonly-once.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    if: github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.GOOGLE_GEMINI_API_KEY || secrets.GOOGLE_AI_API_KEY || secrets.GOOGLE_API_KEY || secrets.GEMINI_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Inspect current provider counters; no editorial generation
+        run: python experiments/provider_quota_snapshot.py
+      - name: Attach quota snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-quota-snapshot-20261123
+          path: quota-out/quota-snapshot.json
+          retention-days: 7
+          if-no-files-found: warn
