@@ -11,7 +11,7 @@ class ControlTest(unittest.TestCase):
     def test_control_observation_never_implicitly_authorizes_execution(self):
         now = 1795536000000
         row = {"schema": "zen-core/control-v1", "jobId": "fixture", "observedAt": now,
-               "version": 2, "mode": "autonomous", "jobMode": "autonomous", "stopped": False,
+               "version": 2, "modeRevision": 2, "mode": "autonomous", "jobMode": "autonomous", "stopped": False,
                "controlClear": True, "reason": None, "executionEnabled": False,
                "publicationAuthorized": False, "rssEnabled": False}
         self.assertEqual(validate_control(row, "fixture", "autonomous", now=now, require_execution=False), 2)
