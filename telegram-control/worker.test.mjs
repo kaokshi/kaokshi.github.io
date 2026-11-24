@@ -323,3 +323,40 @@ test("budget endpoints deny non-owner",async()=>{
  assert.equal(r.status,401);
  }
 });
+
+import {opsState,updateOps,opsView,notifyTimer} from "./ops.mjs";
+test("emergency pause persists and rejects new paid chat and timer reactivation",async()=>{
+ const map=new Map();let alarm=null;
+ const storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),delete:async k=>map.delete(k),list:async({prefix})=>new Map([...map].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage),getAlarm:async()=>alarm,setAlarm:async n=>alarm=n,deleteAlarm:async()=>alarm=null};
+ const core=new CoreHandler({storage});
+ const req=(path,d)=>new Request("https://core.internal"+path,{method:"POST",body:JSON.stringify(d)});
+ assert.equal((await core.fetch(req("/core/ops/settings",{action:"stop",version:0,confirm:false}))).status,400);
+ await storage.put("core:settings",plan);
+ assert.equal((await core.fetch(req("/core/ops/settings",{action:"stop",version:0,confirm:true}))).status,200);
+ assert.equal((await core.state()).paused,true);assert.equal(await storage.getAlarm(),null);
+ assert.equal((await opsState(storage)).stopped,true);
+ assert.equal((await core.fetch(req("/core/schedule",{settings:plan,version:1}))).status,409);
+ const agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},core);
+ const orig=globalThis.fetch;globalThis.fetch=async()=>{throw Error("must not contact provider");};
+ try{assert.equal((await agent.chat({id:"9b00a000-1111-4222-8333-444444444444",text:"test",consent:true})).body.error,"emergency_paused");}finally{globalThis.fetch=orig;}
+ assert.equal((await core.fetch(req("/core/ops/settings",{action:"resume",version:1,confirm:true}))).status,200);
+ assert.equal((await core.state()).paused,true);assert.equal(await storage.getAlarm(),null);
+ assert.equal((await opsView(storage)).events.filter(x=>x.type==="control").length,2);
+});
+test("timer notifications are opt-in and ambiguous delivery is not repeated",async()=>{
+ const map=new Map(),storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),transaction:async fn=>fn(storage)};
+ const env={TELEGRAM_BOT_TOKEN:"fake",TELEGRAM_OWNER_ID:"123"},batch=[{channel:"science",type:"prepare",id:"science:2026-11-24:09:00:prepare"}],now=Date.now();
+ const orig=globalThis.fetch;let sends=0;globalThis.fetch=async()=>{sends++;return new Response("unavailable",{status:502});};
+ try{
+ await notifyTimer(storage,env,batch,now);assert.equal(sends,0);
+ await updateOps(storage,{action:"notifications",enabled:true,version:0,confirm:true},now,initial);
+ await notifyTimer(storage,env,batch,now);await notifyTimer(storage,env,batch,now);assert.equal(sends,1);
+ assert.equal((await storage.get("ops:notification:"+String(now).padStart(15,"0"))).status,"unconfirmed");
+ }finally{globalThis.fetch=orig;}
+});
+test("operational endpoints reject non-owner",async()=>{
+ for(const path of ["/api/core/ops","/api/core/ops/settings"]){
+ const r=await worker.fetch(new Request("https://example.test"+path,{method:"POST",body:JSON.stringify({initData:signed(124)})}),env);
+ assert.equal(r.status,401);
+ }
+});
