@@ -30,6 +30,7 @@ from .editorial_visual_matching import compare_pixels, describe_pixels, load_mod
 PRIVATE_REPO = "kaokshi/zen-editorial-review"
 PREFIX = "routerai-validation"
 BUDGET = Decimal("70")
+BALANCE_PRECISION = Decimal("0.000001")
 DAILY = Decimal("300")
 MONTHLY = DAILY * 30
 MODELS = {
@@ -172,8 +173,8 @@ class Spend:
         entry.update(cost_rub=str(actual), outcome="metered")
         after = credits(self.token)
         self.report["balance_delta_rub"] = str(self.initial - after)
-        if (actual > bound or before - after > bound
-                or max(self.total, self.initial - after) > BUDGET or after > before):
+        if (actual > bound or before - after > bound + BALANCE_PRECISION
+                or max(self.total, self.initial - after) > BUDGET or after > before + BALANCE_PRECISION):
             raise UnsafeToTest("actual_spend_outside_estimate")
         return answer
 
@@ -272,7 +273,7 @@ def plan_images(answer, sections):
     return visual, result
 
 
-def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, *, skip_cover=False):
+def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, *, skip_cover=False, prior_section_attempt=False):
     rows, previews = [], []
     failed = [0] if skip_cover else []
     for slot, scene in enumerate(scenes):
@@ -285,7 +286,8 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
             + ("Strong editorial cover, coherent with the whole article." if not slot else
                "Depict the specific section, use a distinct composition.")
         )
-        for attempt in range(1, 4):
+        first_attempt = 2 if slot == 1 and prior_section_attempt else 1
+        for attempt in range(first_attempt, 4):
             stage = f"image-{slot:02d}-attempt-{attempt}"
             report["stage"] = f"{channel}/{stage}"
             raw = spend.generate(channel, stage, prompt, reserve)
@@ -493,13 +495,14 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     visual, scenes = plan_images(audit, article["sections"])
     status["image_qa"] = "running"
     rows, previews, failed = illustrate(spend, save, report, channel, article, title, visual, scenes,
-                                        index, path, other_images, skip_cover=skip_cover)
+                                        index, path, other_images, skip_cover=skip_cover,
+                                        prior_section_attempt=bool(resume and resume.get("lost_image")))
     status["accepted_images"] = len(rows)
     if failed:
         status.update(image_qa="failed", failed_slots=failed)
         save(f"{channel}/image-qa.json", json_bytes({
             "status": "failed", "failed_slots": failed, "accepted_images": rows,
-            "prior_cover_attempts": report.get("continued_from") if skip_cover else None,
+            "prior_cover_attempts": report.get("cover_attempts_path") if skip_cover else None,
         }))
         return
     report["stage"] = channel + "/article_visual_review"
@@ -594,11 +597,17 @@ def evaluate(prefix, token, secret, report, resume_id=""):
                                   f"image-00-attempt-{i}{suffix}"
                                   for i in range(1, 4) for suffix in ("", "-qas")
                               ] and previous.get("reason") == "image_qa_failed_after_two_retries")
-            if (not (first_edit or visual_plan or wrong_genre or rejected_acceptance or cover_rejected)
-                    or (not (wrong_genre or rejected_acceptance or cover_rejected) and previous.get("reason") != "routerai_incomplete_chat_response")
+            lost_image = (stage == "legends/image-01-attempt-1"
+                          and steps[-1:] == ["image-01-attempt-1"]
+                          and len(steps) == len(same_stage_calls) + 7
+                          and previous.get("resumed_failed_cover") is True
+                          and previous.get("reason") == "actual_spend_outside_estimate"
+                          and money(calls[-1]["cost_rub"]) == money(calls[-1]["upper_estimate_rub"]))
+            if (not (first_edit or visual_plan or wrong_genre or rejected_acceptance or cover_rejected or lost_image)
+                    or (not (wrong_genre or rejected_acceptance or cover_rejected or lost_image) and previous.get("reason") != "routerai_incomplete_chat_response")
                     or previous.get("spend", {}).get("unmetered_calls") != 0
                     or abs(money(previous["balance_delta_rub"])
-                           - money(previous["spend"]["metered_total_rub"])) > Decimal("0.000001")):
+                           - money(previous["spend"]["metered_total_rub"])) > BALANCE_PRECISION):
                 raise UnsafeToTest("private_resume_checkpoint_invalid")
             plan_file = json.loads(github_private(old, token, "legends/qwen-plan.json"))
             draft = github_private(old, token, "legends/claude-draft.md").decode()
@@ -606,14 +615,14 @@ def evaluate(prefix, token, secret, report, resume_id=""):
             if digest(plan_file["output"]) != plan_file["sha256"] or digest(draft) != qa_file["text_sha256"]:
                 raise UnsafeToTest("private_resume_checkpoint_hash_mismatch")
             resume = {"plan": plan_file["output"], "draft": draft}
-            if visual_plan or wrong_genre or rejected_acceptance or cover_rejected:
+            if visual_plan or wrong_genre or rejected_acceptance or cover_rejected or lost_image:
                 edited = github_private(old, token, "legends/deepseek-edited.md").decode()
                 qa_file = json.loads(github_private(old, token, "legends/text-structural-qa.json"))
                 if digest(edited) != qa_file["text_sha256"] or qa_file.get("issues") != []:
                     raise UnsafeToTest("private_resume_edit_hash_mismatch")
                 resume["edited"] = edited
                 report["resumed_edited_text"] = True
-            if rejected_acceptance or cover_rejected:
+            if rejected_acceptance or cover_rejected or lost_image:
                 audit = json.loads(github_private(old, token, "legends/qwen-visual-plan.json"))
                 if audit.get("issues") != [
                     "Отсутствуют существенные проблемы, мешающие публикации в жанре художественной городской мистики."
@@ -621,12 +630,17 @@ def evaluate(prefix, token, secret, report, resume_id=""):
                     raise UnsafeToTest("private_resume_editorial_pass_unverified")
                 resume["audit"] = audit
                 report["resumed_visual_plan"] = True
-            if cover_rejected:
-                verdict = json.loads(github_private(old, token, "legends/attempts/image-00-attempt-3-qa.json"))
+            if cover_rejected or lost_image:
+                cover_path = previous.get("continued_from") if lost_image else old
+                verdict = json.loads(github_private(cover_path, token, "legends/attempts/image-00-attempt-3-qa.json"))
                 if verdict.get("status") != "rejected" or verdict.get("attempt") != 3:
                     raise UnsafeToTest("private_resume_cover_failure_unverified")
                 resume["failed_cover"] = True
                 report["resumed_failed_cover"] = True
+                report["cover_attempts_path"] = cover_path
+            if lost_image:
+                resume["lost_image"] = True
+                report["lost_image_attempt"] = "legends/image-01-attempt-1"
             github_private(old, token, "resume-receipt.json", json_bytes({"continued_at": prefix}))
             report["calls"] = calls
             report["continued_from"] = old
