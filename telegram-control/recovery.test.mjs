@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {recoverTimer} from "./recovery.mjs";
+import {recoverTimer,recoverInterrupted} from "./recovery.mjs";
 import {initial,nextSlots,CoreHandler} from "./core.mjs";
 import worker from "./worker.mjs";
 const now=Date.parse("2026-11-24T15:00:00Z");
@@ -29,3 +29,23 @@ test("scheduled worker calls only internal watchdog; public requests cannot invo
  const r=await worker.fetch(new Request("https://example.test/core/watchdog",{method:"POST",body:"{}"}),env);assert.equal(r.status,404);assert.equal(calls,1);
 });
 test("real internal core watchdog uses persisted state",async()=>{const s=fixture();const c=new CoreHandler({storage:s});const result=await c.watchdog(now);assert.equal(result.status,"rearmed");assert.equal(await s.getAlarm(),now+1000);});
+
+test("interrupted paid chat is quarantined once without releasing reservation across midnight",async()=>{
+ const s=fixture(),id="fixture-chat",startedAt=now-600000;
+ const message={id,status:"pending",text:"fixture",reserved:1,cost:null};
+ await s.put("agent:charge-hold",{id,startedAt,status:"pending"});
+ await s.put("agent:id:"+id,message);
+ await s.put("agent:budget:2026-11-24",{reserved:1,calls:1});
+ const [a,b]=await Promise.all([recoverInterrupted(s,now),recoverInterrupted(s,now)]);
+ assert.equal(a.status,"quarantined");assert.equal(b.status,"nothing_to_recover");
+ assert.equal((await s.get("agent:id:"+id)).status,"failed");
+ assert.equal((await s.get("agent:charge-hold")).status,"unknown");
+ assert.equal((await s.get("agent:budget:2026-11-24")).reserved,1);
+ assert.equal((await recoverInterrupted(s,now+86400000)).status,"nothing_to_recover");
+ assert.equal((await s.get("agent:charge-hold")).status,"unknown");
+});
+test("in-flight chat inside grace period is not modified",async()=>{
+ const s=fixture();await s.put("agent:charge-hold",{id:"fixture",startedAt:now-1000,status:"pending"});
+ assert.equal((await recoverInterrupted(s,now)).status,"nothing_to_recover");
+ assert.equal((await s.get("agent:charge-hold")).status,"pending");
+});
