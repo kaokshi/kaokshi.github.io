@@ -7,7 +7,7 @@ import {recordReceipt} from "./receipt.mjs";
 import {notifyReceipt} from "./notifications.mjs";
 import {readMemory,writeMemory} from "./memory.mjs";
 import {diagnose} from "./diagnostics.mjs";
-import {recoverTimer} from "./recovery.mjs";
+import {recoverTimer,recoverInterrupted} from "./recovery.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
 // No calls to RouterAI, editorial workflows, or publishing systems.
 export const CHANNELS=["cinema","legends","science"];
@@ -52,7 +52,9 @@ export class CoreHandler {
   return diagnose({ops,settings,alarmAt,next:nextSlots(settings,now),budget,jobs:jobView.jobs,readiness,messages:[...rows.values()]},now);
  }
  async watchdog(now=Date.now()){
-  return recoverTimer(this.storage,initial,nextSlots,now);
+  const interrupted=await recoverInterrupted(this.storage,now);
+  const timer=await recoverTimer(this.storage,initial,nextSlots,now);
+  return {...timer,interrupted};
  }
  async scheduleAlarm(now){
   const next=(await opsState(this.storage)).stopped?null:nextSlots(await this.state(),now)[0];
