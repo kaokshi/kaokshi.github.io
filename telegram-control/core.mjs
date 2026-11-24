@@ -6,6 +6,7 @@ import {intakeView} from "./intake.mjs";
 import {recordReceipt} from "./receipt.mjs";
 import {notifyReceipt} from "./notifications.mjs";
 import {readMemory,writeMemory} from "./memory.mjs";
+import {diagnose} from "./diagnostics.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
 // No calls to RouterAI, editorial workflows, or publishing systems.
 export const CHANNELS=["cinema","legends","science"];
@@ -45,6 +46,10 @@ export class CoreHandler {
   const settings=await this.state(),events=await this.storage.list({prefix:"core:event:",reverse:true,limit:60}),orders=await this.storage.list({prefix:"core:order:",reverse:true,limit:30});
   return {settings,requestedMode:(await opsState(this.storage)).requestedMode,mode:"dry_run",productionEnabled:false,rssEnabled:false,next:nextSlots(settings,now),events:[...events.values()],orders:[...orders.values()],lastTick:await this.storage.get("core:lastTick")||null,alarmAt:await this.storage.getAlarm()};
  }
+ async diagnostics(now=Date.now(),verifyConfig=false){
+  const [ops,settings,alarmAt,budget,jobView,rows,readiness]=await Promise.all([opsState(this.storage),this.state(),this.storage.getAlarm(),readBudget(this.storage,now),jobsView(this.storage),this.storage.list({prefix:"agent:message:",reverse:true,limit:30}),verifyConfig?productionReadiness():null]);
+  return diagnose({ops,settings,alarmAt,next:nextSlots(settings,now),budget,jobs:jobView.jobs,readiness,messages:[...rows.values()]},now);
+ }
  async scheduleAlarm(now){
   const next=(await opsState(this.storage)).stopped?null:nextSlots(await this.state(),now)[0];
   if(next)await this.storage.setAlarm(next.at);else await this.storage.deleteAlarm();
@@ -74,6 +79,7 @@ export class CoreHandler {
  async fetch(request){
   const url=new URL(request.url),now=Date.now();
   if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
+  if(request.method==="GET"&&url.pathname==="/core/diagnostics")return Response.json(await this.diagnostics(now,true));
   if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
