@@ -4,6 +4,9 @@ on:
     branches: [integration/zen-core-routerai-20261124]
     paths: ['.github/workflows/zen-core-intake-runner.yml']
   workflow_dispatch:
+  schedule:
+    # Scheduled workflows only run from the default branch after integration.
+    - cron: '7,22,37,52 * * * *'
 permissions:
   contents: read
 concurrency:
@@ -11,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   intake:
-    if: github.ref == 'refs/heads/integration/zen-core-routerai-20261124'
+    if: (github.ref == 'refs/heads/integration/zen-core-routerai-20261124' && github.event_name != 'schedule') || (github.ref == 'refs/heads/main' && vars.ZEN_CORE_INTAKE_SCHEDULE_ENABLED == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
