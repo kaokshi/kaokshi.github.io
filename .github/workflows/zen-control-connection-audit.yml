@@ -47,7 +47,7 @@ jobs:
             return r.json();
           }
           async function probe(name,fn){try{const ok=await fn();status(name,ok===true);return ok===true;}catch{status(name,false);return false;}}
-          let endpoint=null;
+          let endpoint=null,existingHookBinding=false;
           const cf=await probe("CLOUDFLARE_EXISTING_WORKER",async()=>{
             if(!checks.CLOUDFLARE_WORKERS_TOKEN||!checks.CLOUDFLARE_ACCOUNT_ID)return false;
             const root="https://api.cloudflare.com/client/v4/accounts/"+e.CF_ACCOUNT+"/workers";
@@ -56,6 +56,7 @@ jobs:
             const settings=await json(root+"/scripts/zen-editorial-control/settings",headers);
             if(sub.success!==true||settings.success!==true||!/^[a-z0-9][a-z0-9-]{0,62}$/.test(sub.result?.subdomain||""))return false;
             endpoint="https://zen-editorial-control."+sub.result.subdomain+".workers.dev";
+            existingHookBinding=settings.result?.bindings?.some(b=>b.name==="TELEGRAM_WEBHOOK_SECRET"&&b.type==="secret_text")===true;
             return settings.result?.bindings?.some(b=>b.name==="REVIEW_JOURNAL"&&b.type==="durable_object_namespace"&&b.class_name==="ReviewJournal")===true;
           });
           const telegram=await probe("TELEGRAM_EXISTING_WEBHOOK",async()=>{
@@ -83,7 +84,8 @@ jobs:
             const n=d.data?.credits??d.data?.total_credits;
             return n!==null&&n!==undefined&&n!==""&&Number.isFinite(Number(n))&&Number(n)>=0;
           });
-          status("PREFLIGHT_CREDENTIALS_READY",Object.values(checks).every(Boolean)&&cf&&telegram&&hook&&review&&router);
+          status("EXISTING_WEBHOOK_BINDING",existingHookBinding);
+          status("PREFLIGHT_CREDENTIALS_READY",Object.entries(checks).every(([k,v])=>k==="TELEGRAM_WEBHOOK_SECRET"||v)&&cf&&telegram&&existingHookBinding&&(!e.WEBHOOK_SECRET||hook)&&review&&router);
           console.log("NO_DEPLOYMENT_NO_PAID_REQUEST_NO_PUBLICATION");
           JS
 
