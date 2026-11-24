@@ -25,12 +25,14 @@ export async function intakeView(storage,id){
  });
 }
 export async function bridgeRequest(request,env){
- if(new URL(request.url).pathname!=="/internal/zen-core/intake")return null;
+ const path=new URL(request.url).pathname;
+ if(!["/internal/zen-core/intake","/internal/zen-core/receipt"].includes(path))return null;
+ const receipt=path.endsWith("/receipt");
  const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"};
  if(request.method!=="POST")return Response.json({error:"method_not_allowed"},{status:405,headers});
  if(!await matches(env.ZEN_CORE_INTAKE_SECRET,request.headers.get("Authorization")))return Response.json({error:"unauthorized"},{status:401,headers});
- let d;try{const raw=await request.text();if(raw.length>512)throw Error();d=JSON.parse(raw);}catch{return Response.json({error:"invalid_request"},{status:400,headers});}
+ let d;try{const raw=await request.text();if(raw.length>(receipt?16384:512))throw Error();d=JSON.parse(raw);}catch{return Response.json({error:"invalid_request"},{status:400,headers});}
  const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName("zen-core-scheduler-v1"));
  if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
- try{const r=await stub.fetch("https://core.internal/core/intake",{method:"POST",body:JSON.stringify({id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
+ try{const r=await stub.fetch("https://core.internal/core/"+(receipt?"receipt":"intake"),{method:"POST",body:JSON.stringify(receipt?d:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
 }
