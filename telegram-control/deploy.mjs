@@ -3,7 +3,7 @@
 import {readFile} from "node:fs/promises";
 import {createHmac} from "node:crypto";
 import {buildSnapshot,snapshotBindings} from "./snapshot.mjs";
-import {activeDeployment,latestVersion} from "./deploy-guard.mjs";
+import {activeDeployment,latestVersion,readBridgeProbe} from "./deploy-guard.mjs";
 const SCRIPT="zen-editorial-control";
 const account=process.env.CLOUDFLARE_ACCOUNT_ID||"";
 const cfToken=process.env.CLOUDFLARE_API_TOKEN||"";
@@ -237,9 +237,9 @@ async function main(){
  stage="verify_private_bridge";
  const bridge=async(path,body,auth)=>fetch(endpoint+"/internal/zen-core/"+path,{method:"POST",headers:{"Content-Type":"application/json",...(auth?{Authorization:"Bearer "+intakeSecret}:{})},body:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(10000)});
  requireOk((await bridge("queue",{},false)).status===401,"bridge_auth_failed");
- const qr=await bridge("queue",{},true);requireOk(qr.ok,"bridge_queue_unavailable");const qb=await qr.json();requireOk(qb.schema==="zen-core/queue-v1"&&qb.executionEnabled===false&&qb.rssEnabled===false&&qb.publicationAuthorized===false,"bridge_queue_gate_failed");
- const ar=await bridge("account",{action:"status"},true);requireOk(ar.ok,"bridge_account_unavailable");const ab=await ar.json();requireOk(ab.schema==="zen-core/account-status-v1"&&ab.executionEnabled===false,"bridge_account_gate_failed");
- const cr=await bridge("control",{id:"deploy-probe-not-a-real-job"},true);requireOk(cr.ok,"bridge_control_unavailable");const cb=await cr.json();requireOk(cb.controlClear===false&&cb.executionEnabled===false,"bridge_control_gate_failed");
+ await readBridgeProbe(()=>bridge("queue",{},true),v=>v.schema==="zen-core/queue-v1"&&Array.isArray(v.ids)&&v.executionEnabled===false&&v.rssEnabled===false&&v.publicationAuthorized===false);
+ await readBridgeProbe(()=>bridge("account",{action:"status"},true),v=>v.schema==="zen-core/account-status-v1"&&v.executionEnabled===false);
+ await readBridgeProbe(()=>bridge("control",{id:"deploy-probe-not-a-real-job"},true),v=>v.schema==="zen-core/control-v1"&&v.controlClear===false&&v.executionEnabled===false&&v.publicationAuthorized===false&&v.rssEnabled===false);
  console.log("PRIVATE_BRIDGE_READ_ONLY_CONFIRMED");
  const diag=await journalRequest("/api/core/diagnostics",{initData:params.toString()});
  requireOk(diag.ok,"diagnostics_unavailable");
