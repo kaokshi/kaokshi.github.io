@@ -43,13 +43,14 @@ export class AgentHandler{
  async view(now=Date.now()){
   const rows=await this.storage.list({prefix:"agent:message:",reverse:true,limit:30});
   const ledger=await this.storage.get("agent:budget:"+dayKey(now))||{reserved:0,calls:0};
-  return {messages:[...rows.values()].reverse(),limit:DAILY,perCall:PER_CALL,chargedOrReserved:ledger.reserved,calls:ledger.calls,enabled:Boolean(this.env.ROUTERAI_API_KEY)&&!(await opsState(this.storage)).stopped&&!(await this.storage.get("agent:charge-hold")),chargeHold:Boolean(await this.storage.get("agent:charge-hold")),mode:"owner_chat_only"};
+  return {messages:[...rows.values()].reverse(),limit:DAILY,perCall:PER_CALL,chargedOrReserved:ledger.reserved,calls:ledger.calls,enabled:Boolean(this.env.ROUTERAI_API_KEY)&&!(await opsState(this.storage)).stopped&&!(await this.storage.get("agent:charge-hold"))&&!(await this.storage.get("account:production-hold")),chargeHold:Boolean(await this.storage.get("agent:charge-hold")),productionHold:Boolean(await this.storage.get("account:production-hold")),mode:"owner_chat_only"};
  }
  async chat(d,now=Date.now()){
   if(d.consent!==true||typeof d.text!=="string"||!d.text.trim()||d.text.length>1200||!/^[a-f0-9-]{36}$/.test(d.id||""))return {status:400,body:{error:"invalid_chat"}};
   const text=d.text.trim(),id=d.id,existing=await this.storage.get("agent:id:"+id);
   if(existing)return {status:existing.text===text&&existing.status==="complete"?200:409,body:existing.text===text&&existing.status==="complete"?{message:existing}:{error:"already_submitted"}};
   const ops=await opsState(this.storage);if(ops.stopped)return {status:409,body:{error:"emergency_paused"}};
+  if(await this.storage.get("account:production-hold"))return {status:409,body:{error:"account_charge_hold"}};
   if(await this.storage.get("agent:charge-hold"))return {status:409,body:{error:"charge_reconciliation_required"}};
   const state=await this.core.state(),history=(await this.view(now)).messages.filter(x=>x.status==="complete").slice(-3).map(x=>({user:x.text.slice(0,400),assistant:x.reply.slice(0,500)}));
   let snapshot=null;
@@ -65,7 +66,7 @@ export class AgentHandler{
   if(bound===null||bound>PER_CALL||balance===null||balance<bound)return {status:409,body:{error:"budget_or_price_unavailable"}};
   const budgetKey="agent:budget:"+dayKey(now);
   const reserved=await this.storage.transaction(async tx=>{
-   if(await tx.get("agent:charge-hold")||(await readMemory(tx)).version!==memory.version||await tx.get("agent:id:"+id)||(await opsState(tx)).stopped||(await opsState(tx)).version!==ops.version)return false;
+   if(await tx.get("account:production-hold")||await tx.get("agent:charge-hold")||(await readMemory(tx)).version!==memory.version||await tx.get("agent:id:"+id)||(await opsState(tx)).stopped||(await opsState(tx)).version!==ops.version)return false;
    const ledger=await tx.get(budgetKey)||{reserved:0,calls:0};
    if(ledger.reserved+bound>DAILY||ledger.calls>=20)return false;
    await tx.put(budgetKey,{reserved:ledger.reserved+bound,calls:ledger.calls+1});
