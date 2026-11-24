@@ -4,6 +4,7 @@ import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from 
 import {previewJob} from "./adapter.mjs";
 import {intakeView} from "./intake.mjs";
 import {recordReceipt} from "./receipt.mjs";
+import {readMemory,writeMemory} from "./memory.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
 // No calls to RouterAI, editorial workflows, or publishing systems.
 export const CHANNELS=["cinema","legends","science"];
@@ -72,11 +73,13 @@ export class CoreHandler {
  async fetch(request){
   const url=new URL(request.url),now=Date.now();
   if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
+  if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
   if(request.method==="GET"&&url.pathname==="/core/jobs"){const [jobs,readiness,budget]=await Promise.all([jobsView(this.storage),productionReadiness(),readBudget(this.storage,now)]);return Response.json({...jobs,readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict:!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop,ownerDailyRub:budget.policy.mainKop/100}});}
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/memory/settings"){const r=await writeMemory(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/receipt"){const r=await recordReceipt(this.storage,d,now);return Response.json(r.body,{status:r.status});}
