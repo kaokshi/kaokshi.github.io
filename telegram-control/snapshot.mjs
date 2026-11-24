@@ -50,9 +50,23 @@ export async function buildSnapshot(token){
   const files=Array.isArray(row.accepted_files)?row.accepted_files.filter(x=>/^image-[0-9]{2}\.(?:jpg|jpeg|png)$/.test(x)).slice(0,12):[];
   articles.push({channel,name,text,assembled:row.assembled===true,assembledVerified:Boolean(assembled&&row.assembled===true),textQA:safeText(row.text_qa),imageQA:safeText(row.image_qa),accepted:num(row.accepted_images),rub:num(report.spend?.by_channel_rub?.[channel]),sourceUrl:"https://github.com/"+REPO+"/tree/"+head.sha+"/"+dir,images:files.map(file=>({name:file,path:dir+"/images/"+file,url:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+dir+"/images/"+file}))});
  }
+ // Offline assembled previews are distinct from final QA. Never upgrade approval eligibility.
+ const previews=[];
+ if(list.some(x=>x.type==="dir"&&x.name==="pr85-offline-preview")){
+  for(const [channel,name] of [["legends","Легенды тёмных улиц"],["science","За гранью очевидного"]]){
+   const dir=ROOT+"/pr85-offline-preview/"+channel;
+   const [raw,body]=await Promise.all([read(dir+"/review.json",24000),read(dir+"/article.md",30000)]);
+   if(!raw||!body)continue;
+   const review=JSON.parse(raw);
+   if(review.publication_authorized!==false||!Array.isArray(review.visual_assets)||!Array.isArray(review.missing_slots))continue;
+   const assets=review.visual_assets.filter(x=>typeof x.file==="string"&&/^slot-[0-9]{2}\.(?:jpg|jpeg|png)$/.test(x.file)&&Number.isInteger(x.slot)&&/^[a-f0-9]{64}$/.test(x.sha256||"")).slice(0,12);
+   previews.push({channel,name,title:safeText(review.title,300),text:body,accepted:assets.length,missing:review.missing_slots.filter(x=>Number.isInteger(x)&&x>=0&&x<=12),layoutIssues:Array.isArray(review.layout_issues)?review.layout_issues.length:null,visualReview:safeText(review.visual_review),publicationAuthorized:false,sourceUrl:"https://github.com/"+REPO+"/tree/"+head.sha+"/"+dir,docxUrl:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+dir+"/article.docx",images:assets.map(x=>({name:x.file,slot:x.slot,label:safeText(x.label),rights:safeText(x.rights_status),path:dir+"/images/"+x.file,url:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+dir+"/images/"+x.file}))});
+  }
+ }
  const summary=await read(root+"/summary-ru.md",30000);
  const offline=await read(root+"/offline-image-review-ru.md",30000);
  const result={revision:head.sha,run:root.split("/").pop(),checkedAt:new Date().toISOString(),status:safeText(report.status),stage:safeText(report.stage),reason:safeText(report.reason),total:num(report.spend?.metered_total_rub),budget:num(report.budget_rub),models,articles,summary,offline,reportUrl:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+root+"/test-results.json"};
+ if(previews.length){result.previews=previews;if(new TextEncoder().encode(JSON.stringify(result)).length>MAX)delete result.previews;}
  const bytes=new TextEncoder().encode(JSON.stringify(result));
  if(bytes.length>MAX)throw Error("snapshot_too_large");
  return result;
@@ -66,7 +80,7 @@ export function snapshotBindings(snapshot){
 }
 
 export async function readPrivateImage(token,revision,path){
- if(!token||!/^[a-f0-9]{40}$/.test(revision||"")||!/^routerai-validation\/[0-9]{8,20}\/(?:legends|science|cinema)\/images\/image-[0-9]{2}\.(?:jpg|jpeg|png)$/.test(path||""))return null;
+ if(!token||!/^[a-f0-9]{40}$/.test(revision||"")||!(/^routerai-validation\/[0-9]{8,20}\/(?:legends|science|cinema)\/images\/image-[0-9]{2}\.(?:jpg|jpeg|png)$/.test(path||"")||/^routerai-validation\/pr85-offline-preview\/(?:legends|science)\/images\/slot-[0-9]{2}\.(?:jpg|jpeg|png)$/.test(path||"")))return null;
  const opts={headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","User-Agent":"Zen-Control","X-GitHub-Api-Version":"2022-11-28"},redirect:"manual",signal:AbortSignal.timeout(10000)};
  const base="https://api.github.com/repos/"+REPO;
  const info=await fetch(base,opts);
