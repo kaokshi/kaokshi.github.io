@@ -3,6 +3,7 @@
 import {readFile} from "node:fs/promises";
 import {createHmac} from "node:crypto";
 import {buildSnapshot,snapshotBindings} from "./snapshot.mjs";
+import {activeDeployment} from "./deploy-guard.mjs";
 const SCRIPT="zen-editorial-control";
 const account=process.env.CLOUDFLARE_ACCOUNT_ID||"";
 const cfToken=process.env.CLOUDFLARE_API_TOKEN||"";
@@ -34,7 +35,8 @@ async function telegram(method,payload={}){
  return res.result;
 }
 async function main(){
- requireOk(process.env.ZEN_CONTROL_CONFIRM_UPDATE==="true","explicit_update_confirmation_required");
+ const inspectOnly=process.env.ZEN_CONTROL_PREFLIGHT_ONLY==="true";
+ requireOk(inspectOnly||process.env.ZEN_CONTROL_CONFIRM_UPDATE==="true","explicit_update_confirmation_required");
  requireOk(/^[a-fA-F0-9]{64}$/.test(intakeSecret),"intake_secret_required");
  requireOk(/^[a-zA-Z0-9_-]{32,256}$/.test(webhookSecret),"existing_webhook_secret_required");
  requireOk(/^[a-f0-9]{32}$/i.test(account)&&cfToken,"cloudflare_config_missing");
@@ -42,6 +44,7 @@ async function main(){
  requireOk(/^[1-9]\d{0,15}$/.test(owner)&&Number.isSafeInteger(Number(owner)),"owner_id_missing_or_invalid");
  // Only print known-safe labels, never API responses or secret values.
  console.log("::add-mask::"+webhookSecret);
+ console.log("::add-mask::"+intakeSecret);
  stage="telegram_identity";
  const me=await telegram("getMe");
  requireOk(me.is_bot===true&&/^[A-Za-z0-9_]{5,32}$/.test(me.username||""),"bot_identity_invalid");
@@ -65,7 +68,15 @@ async function main(){
  requireOk(snapshot!==null,"private_snapshot_unavailable");
  const privateBindings=snapshotBindings(snapshot);
  console.log("PRIVATE_SNAPSHOT_READY");
- stage="upload_worker";
+ stage="inspect_existing_deployment";
+ const deploymentPath="/scripts/"+SCRIPT+"/deployments";
+ const previousDeployment=activeDeployment(await cf(deploymentPath));
+ console.log("PREVIOUS_DEPLOYMENT_ID="+previousDeployment.id);
+ console.log("PREVIOUS_VERSION_ID="+previousDeployment.version);
+ stage="verify_existing_webhook_secret";
+ const oldProbe=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:"{}",redirect:"error",signal:AbortSignal.timeout(8000)});
+ requireOk(oldProbe.status===200,"existing_webhook_secret_not_verified");
+ stage="prepare_worker";
  const code=await readFile(new URL("./worker.mjs",import.meta.url),"utf8");
  const bindings=[
   {type:"secret_text",name:"TELEGRAM_BOT_TOKEN",text:botToken},
@@ -88,7 +99,15 @@ async function main(){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }
+ if(inspectOnly){console.log("PREFLIGHT_READY_NO_CHANGES");return;}
+ const beforeUpload=activeDeployment(await cf(deploymentPath));
+ requireOk(beforeUpload.id===previousDeployment.id&&beforeUpload.version===previousDeployment.version,"deployment_changed_during_preflight");
+ stage="upload_worker";
  await cf("/scripts/"+SCRIPT,"PUT",form);
+ const updatedDeployment=activeDeployment(await cf(deploymentPath));
+ requireOk(updatedDeployment.id!==previousDeployment.id&&updatedDeployment.version!==previousDeployment.version,"new_deployment_unverified");
+ console.log("NEW_DEPLOYMENT_ID="+updatedDeployment.id);
+ console.log("NEW_VERSION_ID="+updatedDeployment.version);
  stage="enable_worker_subdomain";
  await cf("/scripts/"+SCRIPT+"/subdomain","POST",{enabled:true,previews_enabled:false});
  stage="verify_worker_security";
@@ -111,8 +130,7 @@ async function main(){
  await new Promise(r=>setTimeout(r,2500));
  }
  requireOk(ignored?.status===200,"non_owner_gate_failed_"+ignored?.status);
- stage="register_webhook";
- requireOk(await telegram("setWebhook",{url:endpoint+"/telegram",secret_token:webhookSecret,allowed_updates:["message"],max_connections:2,drop_pending_updates:false})===true,"webhook_registration_failed");
+ // Existing webhook and verified secret are deliberately unchanged.
  stage="verify_webhook";
  const info=await telegram("getWebhookInfo");
  requireOk(info.url===endpoint+"/telegram","webhook_url_mismatch");
