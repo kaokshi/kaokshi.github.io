@@ -6,7 +6,7 @@ const validPath=p=>/^routerai-validation\/[0-9]{8,20}$/.test(p||"");
 export async function buildSnapshot(token){
  if(!token)return null;
  async function get(path){
-  const r=await fetch("https://api.github.com/repos/"+REPO+path,{headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","User-Agent":"Zen-Control-Snapshot","X-GitHub-Api-Version":"2022-11-28"},redirect:"error",signal:AbortSignal.timeout(15000)});
+  const r=await fetch("https://api.github.com/repos/"+REPO+path,{headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","User-Agent":"Zen-Control-Snapshot","X-GitHub-Api-Version":"2022-11-28"},redirect:"manual",signal:AbortSignal.timeout(15000)});
   if(r.status===404)return null;
   if(!r.ok)throw Error("private_snapshot_http_"+r.status);
   return r.json();
@@ -23,7 +23,7 @@ export async function buildSnapshot(token){
   const obj=await get("/contents/"+path+ref);
   if(!obj)return null;
   if(obj.path!==path||obj.encoding!=="base64"||typeof obj.content!=="string"||obj.size>limit)throw Error("private_file_invalid");
-  return Buffer.from(obj.content,"base64").toString("utf8");
+  return new TextDecoder("utf-8",{fatal:true}).decode(Uint8Array.from(atob(obj.content),c=>c.charCodeAt(0)));
  }
  let report=null,root=null;
  for(const dir of dirs){
@@ -45,14 +45,15 @@ export async function buildSnapshot(token){
   if(!row)continue;
   const source=validPath(row.evidence_path)?row.evidence_path:root;
   const dir=source+"/"+channel;
-  const text=await read(dir+"/deepseek-edited.md",30000);
+  const assembled=await read(dir+"/article.md",30000);
+  const text=assembled&&row.assembled===true?assembled:await read(dir+"/deepseek-edited.md",30000);
   const files=Array.isArray(row.accepted_files)?row.accepted_files.filter(x=>/^image-[0-9]{2}\.(?:jpg|jpeg|png)$/.test(x)).slice(0,12):[];
-  articles.push({channel,name,text,assembled:row.assembled===true,textQA:safeText(row.text_qa),imageQA:safeText(row.image_qa),accepted:num(row.accepted_images),rub:num(report.spend?.by_channel_rub?.[channel]),sourceUrl:"https://github.com/"+REPO+"/tree/"+head.sha+"/"+dir,images:files.map(file=>({name:file,url:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+dir+"/images/"+file}))});
+  articles.push({channel,name,text,assembled:row.assembled===true,textQA:safeText(row.text_qa),imageQA:safeText(row.image_qa),accepted:num(row.accepted_images),rub:num(report.spend?.by_channel_rub?.[channel]),sourceUrl:"https://github.com/"+REPO+"/tree/"+head.sha+"/"+dir,images:files.map(file=>({name:file,path:dir+"/images/"+file,url:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+dir+"/images/"+file}))});
  }
  const summary=await read(root+"/summary-ru.md",30000);
  const offline=await read(root+"/offline-image-review-ru.md",30000);
- const result={run:root.split("/").pop(),checkedAt:new Date().toISOString(),status:safeText(report.status),stage:safeText(report.stage),reason:safeText(report.reason),total:num(report.spend?.metered_total_rub),budget:num(report.budget_rub),models,articles,summary,offline,reportUrl:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+root+"/test-results.json"};
- const bytes=Buffer.from(JSON.stringify(result));
+ const result={revision:head.sha,run:root.split("/").pop(),checkedAt:new Date().toISOString(),status:safeText(report.status),stage:safeText(report.stage),reason:safeText(report.reason),total:num(report.spend?.metered_total_rub),budget:num(report.budget_rub),models,articles,summary,offline,reportUrl:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+root+"/test-results.json"};
+ const bytes=new TextEncoder().encode(JSON.stringify(result));
  if(bytes.length>MAX)throw Error("snapshot_too_large");
  return result;
 }
@@ -62,4 +63,22 @@ export function snapshotBindings(snapshot){
  const chunks=data.match(/.{1,3500}/g)||[];
  if(chunks.length>36)throw Error("snapshot_binding_limit");
  return [{type:"plain_text",name:"REVIEW_SNAPSHOT_COUNT",text:String(chunks.length)},...chunks.map((text,i)=>({type:"secret_text",name:"REVIEW_SNAPSHOT_"+i,text}))];
+}
+
+export async function readPrivateImage(token,revision,path){
+ if(!token||!/^[a-f0-9]{40}$/.test(revision||"")||!/^routerai-validation\/[0-9]{8,20}\/(?:legends|science|cinema)\/images\/image-[0-9]{2}\.(?:jpg|jpeg|png)$/.test(path||""))return null;
+ const opts={headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","User-Agent":"Zen-Control","X-GitHub-Api-Version":"2022-11-28"},redirect:"manual",signal:AbortSignal.timeout(10000)};
+ const base="https://api.github.com/repos/"+REPO;
+ const info=await fetch(base,opts);
+ if(!info.ok)return null;
+ const identity=await info.json();
+ if(identity.full_name!==REPO||identity.private!==true||identity.visibility!=="private")return null;
+ const r=await fetch(base+"/contents/"+path+"?ref="+revision,{...opts,headers:{...opts.headers,Accept:"application/vnd.github.raw+json"}});
+ if(!r.ok||!r.body)return null;
+ const reader=r.body.getReader(),parts=[];let size=0;
+ while(true){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>4_000_000){await reader.cancel();return null;}parts.push(value);}
+ const bytes=new Uint8Array(size);let offset=0;for(const p of parts){bytes.set(p,offset);offset+=p.length;}
+ const jpeg=bytes[0]===255&&bytes[1]===216&&bytes[2]===255;
+ const png=[137,80,78,71,13,10,26,10].every((n,i)=>bytes[i]===n);
+ return jpeg||png?{bytes,type:jpeg?"image/jpeg":"image/png"}:null;
 }
