@@ -29,7 +29,7 @@ export async function updateOps(storage,d,now,initialSchedule){
 }
 export async function opsView(storage){
  const state=await opsState(storage);
- const sources=[["ops:event:","control"],["core:event:","timer"],["budget:history:","budget"],["agent:message:","chat"],["production:index:","job"],["ops:notification:","notification"]];
+ const sources=[["ops:event:","control"],["core:event:","timer"],["budget:history:","budget"],["agent:message:","chat"],["production:index:","job"],["ops:notification:","notification"],["recovery:event:","recovery"]];
  const rows=(await Promise.all(sources.map(async([prefix,type])=>{
   const list=await storage.list({prefix,reverse:true,limit:20});
   const events=[];
@@ -39,6 +39,7 @@ export async function opsView(storage){
    if(type==="budget")events.push({type,at:v.updated.updatedAt,mainKop:v.updated.mainKop,reserveKop:v.updated.reserveKop});
    if(type==="chat")events.push({type,at:v.at,status:v.status,cost:v.cost});
    if(type==="job"){const j=await storage.get("production:job:"+v);if(j)events.push({type,at:j.cancelledAt||j.createdAt,status:j.status,items:j.plan.items});}
+   if(type==="recovery")events.push({type,at:new Date(v.attemptAt).toISOString(),status:v.status,kind:v.reason});
    if(type==="notification")events.push({type,at:v.at,status:v.status,count:v.count,kind:v.kind||"timer"});
   }return events;
  }))).flat().sort((a,b)=>String(b.at).localeCompare(String(a.at))).slice(0,60);
