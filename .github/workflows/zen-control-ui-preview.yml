@@ -34,5 +34,12 @@ jobs:
           assert.match(JS,/setHeaderColor\("#ffffff"\)/);
           assert.match(JS,/stage-row/);
           assert.doesNotThrow(()=>new Function(JS));
+          assert.equal((HTML.match(/data-channel-open="/g)||[]).length,3);
+          assert.equal((HTML.match(/data-channel-filter="/g)||[]).length,4);
+          assert.match(JS,/c.channel==="cinema"\|\|s.paused\?"На паузе"/);
+          assert.match(JS,/card.dataset.reviewChannel=a.channel/);
+          assert.match(JS,/filterChannel\(b.dataset.channelOpen\)/);
+          assert.match(JS,/channelScheduleTarget=channelFilter/);
           console.log("LIGHT_THEME_CONTRACT_OK");
+          console.log("CHANNEL_NAVIGATION_CONTRACT_OK");
           JS
