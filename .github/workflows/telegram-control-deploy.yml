@@ -1,4 +1,4 @@
-name: Telegram control deployment
+name: Telegram control deployment (reply fix)
 on:
   push:
     branches: [feature/telegram-control-mvp]
