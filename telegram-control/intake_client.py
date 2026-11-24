@@ -71,7 +71,9 @@ def build_receipt(core, job_id, observed_at=None, command_id=None):
             "observedAt": int(time.time() * 1000) if observed_at is None else observed_at,
             "modeRevision": jobs[0]["modeRevision"], "effectiveMode": jobs[0]["mode"],
             "articles": [{"id": a["id"], "meteredRub": a["meteredRub"],
-                          "stages": [{"id": s["id"], "status": s["status"]} for s in a["stages"]]}
+                          "acceptedImageSlots": a["acceptedImageSlots"],
+                          "stages": [{"id": s["id"], "status": s["status"],
+                                      **({"reason": s["reason"]} if s.get("reason") else {})} for s in a["stages"]]}
                          for a in jobs[0]["articles"]],
             "budget": {k: snapshot["budget"][k] for k in (
                 "day", "timezone", "mainDailyRub", "reserveDailyRub", "mainRemainingRub",
