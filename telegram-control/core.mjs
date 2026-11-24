@@ -1,6 +1,13 @@
 import {opsState,opsView,updateOps,notifyTimer} from "./ops.mjs";
 import {readBudget,writeBudget} from "./budget.mjs";
-import {saveJob,jobsView,cancelJob,productionReadiness} from "./production.mjs";
+import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from "./production.mjs";
+import {previewJob} from "./adapter.mjs";
+import {intakeView} from "./intake.mjs";
+import {recordReceipt} from "./receipt.mjs";
+import {notifyReceipt} from "./notifications.mjs";
+import {readMemory,writeMemory} from "./memory.mjs";
+import {diagnose} from "./diagnostics.mjs";
+import {recoverTimer,recoverInterrupted} from "./recovery.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
 // No calls to RouterAI, editorial workflows, or publishing systems.
 export const CHANNELS=["cinema","legends","science"];
@@ -38,7 +45,16 @@ export class CoreHandler {
  async state(){return await this.storage.get("core:settings")||initial();}
  async view(now=Date.now()){
   const settings=await this.state(),events=await this.storage.list({prefix:"core:event:",reverse:true,limit:60}),orders=await this.storage.list({prefix:"core:order:",reverse:true,limit:30});
-  return {settings,mode:"dry_run",productionEnabled:false,rssEnabled:false,next:nextSlots(settings,now),events:[...events.values()],orders:[...orders.values()],lastTick:await this.storage.get("core:lastTick")||null,alarmAt:await this.storage.getAlarm()};
+  return {settings,requestedMode:(await opsState(this.storage)).requestedMode,mode:"dry_run",productionEnabled:false,rssEnabled:false,next:nextSlots(settings,now),events:[...events.values()],orders:[...orders.values()],lastTick:await this.storage.get("core:lastTick")||null,alarmAt:await this.storage.getAlarm()};
+ }
+ async diagnostics(now=Date.now(),verifyConfig=false){
+  const [ops,settings,alarmAt,budget,jobView,rows,readiness]=await Promise.all([opsState(this.storage),this.state(),this.storage.getAlarm(),readBudget(this.storage,now),jobsView(this.storage),this.storage.list({prefix:"agent:message:",reverse:true,limit:30}),verifyConfig?productionReadiness():null]);
+  return diagnose({ops,settings,alarmAt,next:nextSlots(settings,now),budget,jobs:jobView.jobs,readiness,messages:[...rows.values()]},now);
+ }
+ async watchdog(now=Date.now()){
+  const interrupted=await recoverInterrupted(this.storage,now);
+  const timer=await recoverTimer(this.storage,initial,nextSlots,now);
+  return {...timer,interrupted};
  }
  async scheduleAlarm(now){
   const next=(await opsState(this.storage)).stopped?null:nextSlots(await this.state(),now)[0];
@@ -69,13 +85,20 @@ export class CoreHandler {
  async fetch(request){
   const url=new URL(request.url),now=Date.now();
   if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
+  if(request.method==="GET"&&url.pathname==="/core/diagnostics")return Response.json(await this.diagnostics(now,true));
+  if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
-  if(request.method==="GET"&&url.pathname==="/core/jobs")return Response.json({...await jobsView(this.storage),readiness:await productionReadiness()});
+  if(request.method==="GET"&&url.pathname==="/core/jobs"){const [jobs,readiness,budget]=await Promise.all([jobsView(this.storage),productionReadiness(),readBudget(this.storage,now)]);return Response.json({...jobs,readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict:!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop,ownerDailyRub:budget.policy.mainKop/100}});}
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/watchdog")return Response.json(await this.watchdog(now));
+  if(url.pathname==="/core/memory/settings"){const r=await writeMemory(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/receipt"){const r=await recordReceipt(this.storage,d,now);if(r.receipt&&r.events?.length){try{await notifyReceipt(this.storage,this.env,r.receipt,r.events,now);}catch{}}return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/intake"){const r=await intakeView(this.storage,d.id);return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/jobs/preview"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const r=await previewJob(this.storage,d.id,now,validateJob,STAGES);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/cancel"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const job=await cancelJob(this.storage,d.id);return Response.json(job?{job}:{error:"job_missing"},{status:job?200:404});}
   if(url.pathname==="/core/schedule"){
    const schedule=validateSchedule(d.settings);

@@ -229,12 +229,13 @@ test("Qwen chat consent, persistent receipt, duplicate protection and confirmed 
  const storage={get:async k=>store.get(k),put:async(k,v)=>store.set(k,v),delete:async k=>store.delete(k),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage),getAlarm:async()=>alarm,setAlarm:async n=>alarm=n,deleteAlarm:async()=>alarm=null};
  const core=new CoreHandler({storage}),agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},core);
  const id="9b00a000-1111-4222-8333-444444444444",msg={id,text:"Тест расписания",consent:true};
+ const notes=[{kind:"style",text:"Живой русский язык"}];await writeMemory(storage,{notes,version:0,confirm:true});
  const original=globalThis.fetch;let paid=0;
  globalThis.fetch=async(url,opts)=>{
   if(url.endsWith("/models"))return Response.json({data:[priceRow]});
   if(url.endsWith("/credits"))return Response.json({data:{credits:100}});
   assert.ok(url.endsWith("/chat/completions"));paid++;
-  const payload=JSON.parse(opts.body);assert.equal(payload.model,MODEL);assert.equal(payload.max_tokens,700);
+  const payload=JSON.parse(opts.body);assert.equal(payload.model,MODEL);assert.equal(payload.max_tokens,700);assert.deepEqual(JSON.parse(payload.messages[1].content).editorialMemory,notes);
   return Response.json({model:MODEL,usage:{cost:0.01},choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply:"Предлагаю расписание",proposal:plan})}}]});
  };
  try{
@@ -359,4 +360,109 @@ test("operational endpoints reject non-owner",async()=>{
  const r=await worker.fetch(new Request("https://example.test"+path,{method:"POST",body:JSON.stringify({initData:signed(124)})}),env);
  assert.equal(r.status,401);
  }
+});
+
+test("owner-confirmed preview uses real stage registry without production",async()=>{
+ const map=new Map(),storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),transaction:async fn=>fn(storage)};
+ const h=new CoreHandler({storage});
+ const job=await saveJob(storage,"agent:preview-test",validateJob({items:[{channel:"legends",count:2},{channel:"science",count:1}],day:null,instructions:"Synthetic fixture"}),Date.now());
+ const req=confirm=>new Request("https://core.internal/core/jobs/preview",{method:"POST",body:JSON.stringify({id:job.id,confirm})});
+ const old=globalThis.fetch;globalThis.fetch=async()=>{throw Error("preview must not call network");};
+ try{
+  assert.equal((await h.fetch(req(false))).status,400);
+  const res=await h.fetch(req(true));assert.equal(res.status,200);
+  const {preview}=await res.json();
+  assert.equal(preview.articles.length,3);assert.equal(preview.taskCount,3*(STAGES.length-1));
+  assert.equal(preview.providerCalls,0);assert.equal(preview.publicationAuthorized,false);
+  assert.ok(preview.articles.every(a=>a.tasks.every(t=>t.stage!=="rss")));
+  assert.deepEqual(await (await h.fetch(req(true))).json(),{preview});
+  assert.equal((await storage.get("production:job:"+job.id)).executed,false);
+ }finally{globalThis.fetch=old;}
+});
+test("preview endpoint rejects non-owner before storage and never reaches dispatch",async()=>{
+ const r=await worker.fetch(new Request("https://example.test/api/core/jobs/preview",{method:"POST",body:JSON.stringify({initData:signed(124),id:"agent:test",confirm:true})}),{...env,REVIEW_JOURNAL:{idFromName(){throw Error("must not touch storage");}}});
+ assert.equal(r.status,401);
+});
+
+test("mode choice persists but does not enable production or the scheduler",async()=>{
+ const map=new Map();let alarm=null;
+ const storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),delete:async k=>map.delete(k),list:async({prefix})=>new Map([...map].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage),getAlarm:async()=>alarm,setAlarm:async n=>alarm=n,deleteAlarm:async()=>alarm=null};
+ const core=new CoreHandler({storage});const req=d=>new Request("https://core.internal/core/ops/settings",{method:"POST",body:JSON.stringify(d)});
+ assert.equal((await opsState(storage)).requestedMode,"manual");
+ await storage.put("core:settings",plan);await storage.setAlarm(Date.now()+60000);
+ const choose={action:"mode",mode:"autonomous",version:0,confirm:true};
+ assert.equal((await core.fetch(req({...choose,confirm:false}))).status,400);
+ assert.equal((await core.fetch(req({...choose,mode:"live"}))).status,400);
+ assert.equal((await core.fetch(req(choose))).status,200);
+ assert.equal((await core.fetch(req(choose))).status,409);
+ const view=await core.view();assert.equal(view.requestedMode,"autonomous");assert.equal(view.mode,"dry_run");assert.equal(view.productionEnabled,false);assert.equal(view.rssEnabled,false);assert.equal(view.settings.paused,true);assert.equal(await storage.getAlarm(),null);
+ assert.equal((await opsView(storage)).autonomousExecutionEnabled,false);
+ await core.fetch(req({action:"stop",version:1,confirm:true}));
+ assert.equal((await core.fetch(req({action:"mode",mode:"assisted",version:2,confirm:true}))).status,409);
+ assert.equal((await core.fetch(req({action:"mode",mode:"manual",version:2,confirm:true}))).status,200);
+ assert.equal((await opsState(storage)).stopped,true);
+ assert.equal((await new CoreHandler({storage}).view()).requestedMode,"manual");
+});
+
+import {readMemory,writeMemory} from "./memory.mjs";
+test("owner memory is bounded, confirmed, persistent and revisioned",async()=>{
+ const map=new Map(),storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),transaction:async fn=>fn(storage)};
+ const notes=[{kind:"style",text:"Живой русский язык"}],d={notes,version:0,confirm:true};
+ assert.equal((await readMemory(storage)).version,0);
+ for(const change of [{confirm:false},{notes:[{kind:"unknown",text:"x"}]},{notes:[{kind:"style",text:"x".repeat(241)}]},{notes:[{kind:"style",text:"api key: fixture"}]},{notes:Array(9).fill(notes[0])}])assert.equal((await writeMemory(storage,{...d,...change})).status,400);
+ assert.equal((await writeMemory(storage,d)).status,200);
+ assert.equal((await writeMemory(storage,d)).status,409);
+ assert.deepEqual((await readMemory(storage)).notes,notes);
+ assert.equal((await writeMemory(storage,{notes:[],version:1,confirm:true})).status,200);
+ assert.deepEqual((await readMemory(storage)).notes,[]);
+ assert.equal(JSON.stringify([...map.values()]).includes("Живой русский язык"),false);
+});
+test("memory API rejects non-owner and stores only confirmed owner notes",async()=>{
+ const map=new Map(),storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),transaction:async fn=>fn(storage)};
+ const h=new CoreHandler({storage});
+ for(const path of ["/api/core/memory","/api/core/memory/settings"]){
+ const req=new Request("https://example.test"+path,{method:"POST",body:JSON.stringify({initData:signed(124)})});
+ assert.equal((await worker.fetch(req,env)).status,401);
+ }
+ const d={version:0,confirm:true,notes:[{kind:"illustrations",text:"Проверять соответствие смыслу"}]};
+ const req=new Request("https://core.internal/core/memory/settings",{method:"POST",body:JSON.stringify(d)});
+ assert.equal((await h.fetch(req)).status,200);
+ const get=await h.fetch(new Request("https://core.internal/core/memory"));
+ assert.deepEqual((await get.json()).memory.notes,d.notes);
+});
+
+import {diagnose} from "./diagnostics.mjs";
+test("diagnostics distinguishes expected safety locks from missing timer and conflicting budgets",()=>{
+ const now=Date.parse("2026-11-24T15:00:00Z"),budget={policy:{mainKop:30000},production:{ledgerConnected:false},chat:{accountedRub:10,limitRub:10,calls:20}};
+ const d=diagnose({ops:{requestedMode:"autonomous"},settings:{paused:false},next:[{}],alarmAt:null,budget,readiness:{verified:true,configuredDailyRub:150}},now);
+ const codes=d.findings.map(f=>f.code);
+ for(const code of ["production_locked","mode_not_effective","alarm_missing","budget_mismatch","ledger_disconnected","chat_limit"])assert.ok(codes.includes(code));
+ assert.equal(d.findings[0].severity,"critical");assert.equal(d.productionEnabled,false);assert.equal(d.automaticRecoveryEnabled,false);
+ const paused=diagnose({ops:{stopped:true},settings:{paused:true},next:[{}],budget},now);
+ assert.ok(!paused.findings.some(f=>f.code==="alarm_missing"));
+});
+test("diagnostics flags stale evidence and uncertain charges without guessing root cause",()=>{
+ const now=Date.parse("2026-11-24T15:00:00Z");
+ const d=diagnose({jobs:[{id:"j",preview:{},executorReceipt:{observedAt:now-400000,budget:{day:"2026-11-24",unsettledRequest:true,mainRemainingRub:"0",reserveRemainingRub:"0"},articles:[{id:"j/science/1",stages:[{id:"images",status:"failed"}]}]}},{id:"cancelled",status:"cancelled"},{id:"missing",preview:{}}],messages:[{id:"chat",status:"failed",cost:null}]},now);
+ for(const code of ["receipt_stale","charge_unsettled","main_exhausted","reserve_exhausted","stage_failed","receipt_missing","chat_charge_unknown"])assert.ok(d.findings.some(f=>f.code===code));
+ assert.equal(d.findings.find(f=>f.code==="stage_failed").evidence.stale,true);
+ assert.ok(!d.findings.some(f=>f.scope==="cancelled"));
+ assert.equal(d.publicationAuthorized,false);
+});
+test("diagnostics endpoint rejects non-owner before config or storage access",async()=>{
+ const r=await worker.fetch(new Request("https://example.test/api/core/diagnostics",{method:"POST",body:JSON.stringify({initData:signed(124)})}),{...env,REVIEW_JOURNAL:{idFromName(){throw Error("must not access");}}});
+ assert.equal(r.status,401);
+});
+
+test("unknown Qwen charge persists across Moscow midnight and prevents another paid request",async()=>{
+ const map=new Map(),storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),delete:async k=>map.delete(k),list:async({prefix})=>new Map([...map].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage),getAlarm:async()=>null};
+ const core=new CoreHandler({storage}),agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},core);
+ const now=Date.parse("2026-11-24T20:59:00Z"),id="9b00a000-1111-4222-8333-444444444444";
+ const orig=globalThis.fetch;let paid=0;globalThis.fetch=async(url)=>{if(url.endsWith("/models"))return Response.json({data:[priceRow]});if(url.endsWith("/credits"))return Response.json({data:{credits:100}});paid++;throw Error("fixture timeout");};
+ try{
+ const first=await agent.chat({id,text:"fixture",consent:true},now);assert.equal(first.body.message.status,"failed");
+ assert.equal((await storage.get("agent:charge-hold")).status,"unknown");
+ assert.equal((await agent.chat({id:"9b00a000-1111-4222-8333-555555555555",text:"next",consent:true},now+120000)).body.error,"charge_reconciliation_required");
+ assert.equal(paid,1);assert.equal((await agent.view(now+120000)).enabled,false);
+ }finally{globalThis.fetch=orig;}
 });

@@ -1,0 +1,11 @@
+import {test} from "node:test";
+import assert from "node:assert/strict";
+import {recordReceipt} from "./receipt.mjs";
+import {STAGES} from "./production.mjs";
+const now=1795536000000;
+const job={id:"agent:fixture",status:"blocked_prelaunch",executed:false,publicationAuthorized:false,preview:{mode:"dry_run"},plan:{items:[{channel:"science",count:1}],day:null,instructions:"Fixture"},releaseAt:null};
+const report={schema:"zen-core/receipt-v1",jobId:job.id,observedAt:now,executionEnabled:false,publicationAuthorized:false,rssEnabled:false,articles:[{id:job.id+"/science/1",meteredRub:"0",stages:STAGES.filter(s=>s.id!=="rss").map(s=>({id:s.id,status:"not_started"}))}],budget:{day:"2026-11-24",timezone:"Europe/Moscow",mainDailyRub:"300",reserveDailyRub:"50",mainRemainingRub:"300",reserveRemainingRub:"50",meteredRub:"0",unsettledRequest:false}};
+function storage(){const m=new Map([["production:job:"+job.id,job]]);const s={get:async k=>m.get(k),put:async(k,v)=>m.set(k,v),transaction:async f=>f(s)};return s;}
+test("receipt is informational and repeat-safe",async()=>{const s=storage();assert.equal((await recordReceipt(s,report,now)).status,200);assert.equal((await recordReceipt(s,report,now)).body.replay,true);const j=await s.get("production:job:"+job.id);assert.equal(j.executed,false);assert.equal(j.publicationAuthorized,false);assert.equal(j.executorReceipt.budget.mainRemainingRub,"300");assert.equal((await recordReceipt(s,{...report,observedAt:now-1},now)).status,409);});
+test("reject unsafe, missing, stale or impossible stage reports",async()=>{const s=storage();for(const change of [{executionEnabled:true},{rssEnabled:true},{publicationAuthorized:true},{observedAt:now-400000},{articles:[]},{budget:{...report.budget,mainRemainingRub:"301"}},{articles:[{...report.articles[0],stages:report.articles[0].stages.map((st,i)=>({...st,status:i===2?"passed":"not_started"}))}]}])assert.equal((await recordReceipt(s,{...report,...change},now)).status,409);});
+test("passed stage cannot regress or conflict on replay",async()=>{const s=storage();const r=structuredClone(report);r.articles[0].stages[0].status="passed";assert.equal((await recordReceipt(s,r,now)).status,200);assert.equal((await recordReceipt(s,report,now)).status,409);assert.equal((await recordReceipt(s,{...report,observedAt:now+1},now)).status,409);});

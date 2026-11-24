@@ -1,5 +1,6 @@
 export {ReviewJournal} from "./journal.mjs";
 import {miniApp} from "./miniapp.mjs";
+import {bridgeRequest} from "./intake.mjs";
 // Owner-only, read-only Telegram control interface. No generation or publishing.
 const MENU = {keyboard:[[{text:"Состояние редакции"},{text:"Баланс RouterAI"}],[{text:"Модели"},{text:"Тесты"}],[{text:"Статьи"},{text:"Помощь"}]],resize_keyboard:true};
 const COMMANDS = new Map([
@@ -60,7 +61,13 @@ export async function command(text,env) {
  default:return "Команда не поддерживается. Используйте /help.";
  }
 }
-export default {async fetch(request,env) {
+export default {async scheduled(controller,env) {
+ const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName("zen-core-scheduler-v1"));
+ if(!stub)return;
+ const r=await stub.fetch("https://core.internal/core/watchdog",{method:"POST",body:"{}"});
+ if(!r.ok)throw Error("watchdog_failed");
+},async fetch(request,env) {
+ const bridge=await bridgeRequest(request,env);if(bridge)return bridge;
  const app=await miniApp(request,env,balanceValue);
  if(app)return app;
  const url=new URL(request.url);
