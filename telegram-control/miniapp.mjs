@@ -47,7 +47,7 @@ export async function miniApp(request,env,getBalance){
   if(path==="/app.css")return serve(CSS,"text/css; charset=utf-8");
   if(path==="/app.js")return serve(JS,"application/javascript; charset=utf-8");
  }
- if(!["/api/dashboard","/api/release","/api/image","/api/review","/api/journal","/api/core","/api/core/schedule","/api/core/order","/api/core/agent","/api/core/agent/chat","/api/core/agent/apply","/api/core/jobs","/api/core/jobs/cancel","/api/core/jobs/preview","/api/core/jobs/stage","/api/core/budget","/api/core/budget/settings","/api/core/ops","/api/core/memory","/api/core/diagnostics","/api/core/memory/settings","/api/core/ops/settings","/api/rss"].includes(path))return null;
+ if(!["/api/dashboard","/api/release","/api/image","/api/review","/api/journal","/api/core","/api/core/schedule","/api/core/order","/api/core/agent","/api/core/agent/chat","/api/core/agent/apply","/api/core/jobs","/api/core/jobs/cancel","/api/core/jobs/preview","/api/core/jobs/stage","/api/core/budget","/api/core/budget/settings","/api/core/ops","/api/core/memory","/api/core/diagnostics","/api/core/statistics","/api/core/statistics/import","/api/core/memory/settings","/api/core/ops/settings","/api/rss"].includes(path))return null;
  if(request.method!=="POST")return new Response("Method not allowed",{status:405,headers});
  let data;
  try{if(Number(request.headers.get("Content-Length")||0)>16000)throw Error();const raw=await request.text();if(raw.length>16000)throw Error();data=JSON.parse(raw);}catch{return new Response("Bad request",{status:400,headers});}
@@ -59,7 +59,7 @@ export async function miniApp(request,env,getBalance){
   if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
   try{
    const target="https://core.internal"+path.slice(4);
-   const r=await stub.fetch(target,(path==="/api/core"||path==="/api/core/agent"||path==="/api/core/jobs"||path==="/api/core/budget"||path==="/api/core/ops"||path==="/api/core/memory"||path==="/api/core/diagnostics")?{method:"GET"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({settings:data.settings,version:data.version,text:data.text,id:data.id,consent:data.consent,confirm:data.confirm,budget:data.budget,action:data.action,enabled:data.enabled,mode:data.mode,notes:data.notes,article:data.article,stage:data.stage,observedAt:data.observedAt,modeRevision:data.modeRevision})});
+   const r=await stub.fetch(target,(path==="/api/core"||path==="/api/core/agent"||path==="/api/core/jobs"||path==="/api/core/budget"||path==="/api/core/ops"||path==="/api/core/memory"||path==="/api/core/diagnostics")?{method:"GET"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({settings:data.settings,version:data.version,text:data.text,id:data.id,consent:data.consent,confirm:data.confirm,budget:data.budget,action:data.action,enabled:data.enabled,mode:data.mode,notes:data.notes,article:data.article,stage:data.stage,observedAt:data.observedAt,modeRevision:data.modeRevision,period:data.period,rows:data.rows})});
    return Response.json(await r.json(),{status:r.status,headers});
   }catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
  }
