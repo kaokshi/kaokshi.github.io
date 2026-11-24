@@ -142,7 +142,7 @@ async function main(){
  const info=await telegram("getWebhookInfo");
  requireOk(info.url===endpoint+"/telegram","webhook_url_mismatch");
  stage="verify_miniapp";
- const page=await fetch(endpoint+"/app?v=14",{redirect:"error",signal:AbortSignal.timeout(8000)});
+ const page=await fetch(endpoint+"/app?v=15",{redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(page.ok&&(await page.text()).includes("ZEN CONTROL"),"app_page_unavailable");
  const unauthorized=await fetch(endpoint+"/api/dashboard",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({initData:"invalid"}),redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(unauthorized.status===401,"app_auth_gate_failed");
@@ -281,15 +281,15 @@ async function main(){
  console.log("OWNER_REPLY_CONFIRMED");
  }else console.log("OWNER_WEBHOOK_REPLY_REQUIRES_MANUAL_TEST");
  stage="miniapp_menu";
- requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=14"}}})===true,"miniapp_menu_failed");
+ requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=15"}}})===true,"miniapp_menu_failed");
  const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
- requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=14","miniapp_menu_not_verified");
+ requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=15","miniapp_menu_not_verified");
  console.log("MINIAPP_MENU_CONFIRMED");
  stage="send_inline_launch";
- const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=14"}}]]}});
+ const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=15"}}]]}});
  requireOk(Number.isInteger(launch?.message_id),"inline_launch_failed");
  console.log("INLINE_LAUNCH_SENT");
- console.log("MINIAPP_URL="+endpoint+"/app?v=14");
+ console.log("MINIAPP_URL="+endpoint+"/app?v=15");
  stage="commands";
  try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},
