@@ -40,7 +40,7 @@ export class CoreHandler {
  async state(){return await this.storage.get("core:settings")||initial();}
  async view(now=Date.now()){
   const settings=await this.state(),events=await this.storage.list({prefix:"core:event:",reverse:true,limit:60}),orders=await this.storage.list({prefix:"core:order:",reverse:true,limit:30});
-  return {settings,mode:"dry_run",productionEnabled:false,rssEnabled:false,next:nextSlots(settings,now),events:[...events.values()],orders:[...orders.values()],lastTick:await this.storage.get("core:lastTick")||null,alarmAt:await this.storage.getAlarm()};
+  return {settings,requestedMode:(await opsState(this.storage)).requestedMode,mode:"dry_run",productionEnabled:false,rssEnabled:false,next:nextSlots(settings,now),events:[...events.values()],orders:[...orders.values()],lastTick:await this.storage.get("core:lastTick")||null,alarmAt:await this.storage.getAlarm()};
  }
  async scheduleAlarm(now){
   const next=(await opsState(this.storage)).stopped?null:nextSlots(await this.state(),now)[0];
