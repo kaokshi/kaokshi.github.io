@@ -283,3 +283,15 @@ test("production queue endpoints reject unauthorized access",async()=>{
  assert.equal(r.status,401);
  }
 });
+
+test("offline preview image access permits only fixed raster paths",async()=>{
+ const orig=globalThis.fetch;let calls=0;
+ globalThis.fetch=async(url)=>{calls++;return calls===1?Response.json({full_name:"kaokshi/zen-editorial-review",private:true,visibility:"private"}):new Response(new Uint8Array([255,216,255,0,0]));};
+ try{
+  assert.equal(await readPrivateImage("fake","a".repeat(40),"routerai-validation/pr85-offline-preview/legends/images/../review.json"),null);
+  assert.equal(await readPrivateImage("fake","a".repeat(40),"routerai-validation/pr85-offline-preview/science/images/slot-02.svg"),null);
+  assert.equal(calls,0);
+  const result=await readPrivateImage("fake","a".repeat(40),"routerai-validation/pr85-offline-preview/legends/images/slot-00.jpg");
+  assert.equal(result.type,"image/jpeg");
+ }finally{globalThis.fetch=orig;}
+});
