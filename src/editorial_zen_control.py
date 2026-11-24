@@ -62,3 +62,31 @@ def control_guard(endpoint, secret):
 
 def configured_guard():
     return control_guard(os.getenv("ZEN_CORE_CONTROL_ENDPOINT"), os.getenv("ZEN_CORE_INTAKE_SECRET"))
+
+
+def configured_account():
+    endpoint = os.getenv("ZEN_CORE_CONTROL_ENDPOINT", "")
+    secret = os.getenv("ZEN_CORE_INTAKE_SECRET", "")
+    # Reuse endpoint validation; no redirect or credential fallback.
+    control_guard(endpoint, secret)
+    target = endpoint.removesuffix("/control") + "/account"
+    opener = build_opener(NoRedirect())
+
+    def account(action, job_id, operation, outcome=None):
+        data = {"action": action, "id": job_id, "operation": operation}
+        if outcome is not None:
+            data["outcome"] = outcome
+        req = Request(target, method="POST", data=json.dumps(data).encode(),
+                      headers={"Authorization": "Bearer " + secret, "Content-Type": "application/json"})
+        try:
+            with opener.open(req, timeout=8) as response:
+                raw = response.read(1025)
+                if len(raw) > 1024:
+                    raise ValueError
+                row = json.loads(raw)
+        except (OSError, ValueError):
+            raise CoreBlocked("account_gate_unavailable") from None
+        if not isinstance(row, dict) or row.get("claimed" if action == "claim" else "closed") is not True:
+            raise CoreBlocked("account_gate_denied")
+        return row
+    return account
