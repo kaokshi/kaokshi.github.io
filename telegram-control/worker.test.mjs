@@ -360,3 +360,25 @@ test("operational endpoints reject non-owner",async()=>{
  assert.equal(r.status,401);
  }
 });
+
+test("owner-confirmed preview uses real stage registry without production",async()=>{
+ const map=new Map(),storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),transaction:async fn=>fn(storage)};
+ const h=new CoreHandler({storage});
+ const job=await saveJob(storage,"agent:preview-test",validateJob({items:[{channel:"legends",count:2},{channel:"science",count:1}],day:null,instructions:"Synthetic fixture"}),Date.now());
+ const req=confirm=>new Request("https://core.internal/core/jobs/preview",{method:"POST",body:JSON.stringify({id:job.id,confirm})});
+ const old=globalThis.fetch;globalThis.fetch=async()=>{throw Error("preview must not call network");};
+ try{
+  assert.equal((await h.fetch(req(false))).status,400);
+  const res=await h.fetch(req(true));assert.equal(res.status,200);
+  const {preview}=await res.json();
+  assert.equal(preview.articles.length,3);assert.equal(preview.taskCount,3*(STAGES.length-1));
+  assert.equal(preview.providerCalls,0);assert.equal(preview.publicationAuthorized,false);
+  assert.ok(preview.articles.every(a=>a.tasks.every(t=>t.stage!=="rss")));
+  assert.deepEqual(await (await h.fetch(req(true))).json(),{preview});
+  assert.equal((await storage.get("production:job:"+job.id)).executed,false);
+ }finally{globalThis.fetch=old;}
+});
+test("preview endpoint rejects non-owner before storage and never reaches dispatch",async()=>{
+ const r=await worker.fetch(new Request("https://example.test/api/core/jobs/preview",{method:"POST",body:JSON.stringify({initData:signed(124),id:"agent:test",confirm:true})}),{...env,REVIEW_JOURNAL:{idFromName(){throw Error("must not touch storage");}}});
+ assert.equal(r.status,401);
+});
