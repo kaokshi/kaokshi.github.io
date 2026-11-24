@@ -76,7 +76,8 @@ def build_receipt(core, job_id, observed_at=None):
                          for a in jobs[0]["articles"]],
             "budget": {k: snapshot["budget"][k] for k in (
                 "day", "timezone", "mainDailyRub", "reserveDailyRub", "mainRemainingRub",
-                "reserveRemainingRub", "meteredRub", "unsettledRequest")},
+                "reserveRemainingRub", "meteredRub", "unsettledRequest", "overrun",
+                "rollingStart", "rollingCapRub", "rollingRemainingRub", "rollingMeteredRub", "rollingOverrun")},
             "executionEnabled": False, "publicationAuthorized": False, "rssEnabled": False}
 
 
