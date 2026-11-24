@@ -6,6 +6,11 @@ on:
       - 'src/editorial_routerai_*.py'
       - 'tests/test_editorial_routerai_*.py'
   workflow_dispatch:
+    inputs:
+      resume_run_id:
+        description: Previous private run ID to continue from an incomplete first edit
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -65,4 +70,5 @@ jobs:
         env:
           ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
           EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ROUTERAI_RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: python -m src.editorial_routerai_two_articles

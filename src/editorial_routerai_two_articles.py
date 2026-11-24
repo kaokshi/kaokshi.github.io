@@ -46,7 +46,7 @@ SYSTEM = (
 )
 
 
-def github_private(prefix, token, filename, content):
+def github_private(prefix, token, filename, content=None):
     if not token:
         raise UnsafeToTest("private_storage_secret_missing")
     if not re.fullmatch(r"routerai-validation/[0-9]+", prefix):
@@ -74,6 +74,11 @@ def github_private(prefix, token, filename, content):
     if repo.get("full_name") != PRIVATE_REPO or repo.get("visibility") != "private":
         raise UnsafeToTest("private_storage_visibility_unverified")
     path = f"{prefix}/{filename}"
+    if content is None:
+        receipt = api("/contents/" + path + "?ref=main")
+        if receipt.get("path") != path or receipt.get("encoding") != "base64":
+            raise UnsafeToTest("private_resume_receipt_invalid")
+        return base64.b64decode(receipt["content"])
     receipt = api("/contents/" + path, {
         "message": "Save private RouterAI evaluation evidence",
         "content": base64.b64encode(content).decode(),
@@ -101,8 +106,8 @@ class Spend:
     def __init__(self, token, report):
         self.token = token
         self.report = report
-        self.total = Decimal(0)
-        self.initial = credits(token)
+        self.total = sum((money(row["cost_rub"]) for row in report["calls"]), Decimal(0))
+        self.initial = credits(token) + self.total
         catalog = call("/models", token, limit=8_000_000).get("data", [])
         self.prices = {row["id"]: row for row in catalog if row.get("id") in MODELS.values()}
         if set(self.prices) != set(MODELS.values()):
@@ -114,13 +119,15 @@ class Spend:
         forecast = 14 * self.image_price + 2 * (
             self.text_bound("brain", 4200, 1200)
             + self.text_bound("draft", 8500, 3600)
-            + self.text_bound("edit", 17000, 3800)
-            + self.text_bound("brain", 18000, 3200)
-            + 7 * self.text_bound("brain", 9000, 450)
-            + self.text_bound("brain", 7500, 650)
+            + self.text_bound("edit", 17000, 8000)
+            + self.text_bound("brain", 18000, 4900)
+            + 7 * self.text_bound("brain", 9000, 700)
+            + self.text_bound("brain", 7500, 1000)
         )
-        self.report["forecast_rub"] = str(forecast)
-        if forecast > min(BUDGET, self.initial):
+        if self.total:
+            forecast -= self.text_bound("brain", 4200, 1200) + self.text_bound("draft", 8500, 3600)
+        self.report["forecast_rub"] = str(forecast + self.total)
+        if forecast + self.total > min(BUDGET, self.initial):
             raise UnsafeToTest("initial_run_forecast_exceeds_available_budget")
 
     def price(self, role, name, unit):
@@ -180,7 +187,9 @@ class Spend:
         try:
             choice = answer["choices"][0]
             body = choice["message"]["content"]
-            if choice.get("finish_reason") != "stop" or not isinstance(body, str) or not body.strip():
+            finish = choice.get("finish_reason")
+            self.report["calls"][-1]["finish_reason"] = finish if finish in {"stop", "length", "content_filter"} else "other"
+            if finish != "stop" or not isinstance(body, str) or not body.strip():
                 raise ValueError
         except (KeyError, IndexError, ValueError, TypeError):
             raise UnsafeToTest("routerai_incomplete_chat_response") from None
@@ -307,7 +316,7 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 f"Локальная диагностика {issues}; подпись Florence {captions}. "
                 'Верни JSON {"passed":boolean,"issues":[строки],"fix":строка}. '
                 "При дефекте сформулируй конкретное корректирующее задание для Seedream."
-            ), 450, pictures=tuple(p for p in (preview, previews[0] if previews else None) if p),
+            ), 700, pictures=tuple(p for p in (preview, previews[0] if previews else None) if p),
                 reserve=reserve))
             if type(verdict.get("passed")) is not bool or not isinstance(verdict.get("issues"), list):
                 raise UnsafeToTest("image_qa_invalid")
@@ -357,7 +366,7 @@ def render(article, title, cover, pictures, records):
     return "\n".join(lines) + "\n"
 
 
-def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior):
+def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior, resume):
     name = CHANNELS[channel]
     other_images = 7 if channel == "legends" else 0
     reserve = (other_images + 7) * spend.image_price
@@ -369,7 +378,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
             "Научпоп. Выбери тему из предложенного каталога первичных источников.")
     options = json.dumps([{"title": row["title"], "angle": row["angle"]} for row in catalogue],
                          ensure_ascii=False) if channel == "science" else "[]"
-    raw_plan = spend.chat(channel, "plan", "brain", (
+    raw_plan = resume["plan"] if resume else spend.chat(channel, "plan", "brain", (
         f"Канал «{name}». {mode} Выбери оригинальную тему. Выпусти постановку для Claude "
         "с коротким вступлением, планом ровно шести разделов и требованиями к сюжету или "
         "объяснению. Не повторяй темы из архива. "
@@ -401,7 +410,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
              "Не вставляй URL в текст и не добавляй непроверяемых чисел.\n" + evidence
              if records else "Поддерживай рамку художественного вымысла.")
     report["stage"] = channel + "/draft"
-    draft = spend.chat(channel, "draft", "draft", (
+    draft = resume["draft"] if resume else spend.chat(channel, "draft", "draft", (
         f"Напиши полную самостоятельную статью. {rules}\nТема: {title}\n"
         f"Задание Qwen: {assignment}\n{facts}"
     ), 3600, reserve=reserve)
@@ -413,7 +422,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     revised = spend.chat(channel, "edit", "edit", (
         f"Независимо отредактируй черновик. Исправь логику, повторы, слабые места, "
         f"структуру и ошибки. Верни весь итоговый текст. {rules}\n{facts}\nЧерновик:\n{draft}"
-    ), 3800, reserve=reserve)
+    ), 8000, reserve=reserve)
     save(f"{channel}/deepseek-edited.md", revised.encode())
     report["stage"] = channel + "/text_qa"
     article, checks = check_text(revised, channel, history_text, final=True)
@@ -442,7 +451,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         '"quote":"дословно","verdict":"supported"}],"style":"общая визуальная инструкция",'
         '"images":[{"subject":"короткое описание сцены","brief":"промпт для Seedream"}]}. '
         f"Тема: {title}. Текст: {canonical(article)}\n{facts}"
-    ), 3200, reserve=reserve))
+    ), 4900, reserve=reserve))
     issues = audit.get("issues")
     if not isinstance(issues, list) or any(not isinstance(issue, str) for issue in issues):
         raise UnsafeToTest("text_audit_invalid")
@@ -464,7 +473,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         "героев и локаций, цельность стиля, отсутствие повторов и что слот 0 — сильнейшая "
         f"обложка именно этой статьи. Тема {title}. Стиль {visual}. "
         'Верни JSON {"passed":boolean,"best_cover_slot":целое число,"issues":[строки]}.'
-    ), 650, pictures=(contact_sheet(previews),), reserve=other_images * spend.image_price))
+    ), 1000, pictures=(contact_sheet(previews),), reserve=other_images * spend.image_price))
     good = (review.get("passed") is True and review.get("issues") == []
             and type(review.get("best_cover_slot")) is int and review["best_cover_slot"] == 0)
     status["image_qa"] = "passed" if good else "failed"
@@ -519,14 +528,34 @@ def totals(report):
     }
 
 
-def evaluate(prefix, token, secret, report):
+def evaluate(prefix, token, secret, report, resume_id=""):
     def save(filename, content):
         github_private(prefix, token, filename, content)
 
     report["stage"] = "private_storage_preflight"
     save("preflight.json", json_bytes({"publication_authorized": False, "status": "private_storage_verified"}))
-    report["stage"] = "budget_preflight"
     try:
+        resume = None
+        if resume_id:
+            report["stage"] = "private_resume_preflight"
+            old = f"{PREFIX}/{resume_id}"
+            previous = json.loads(github_private(old, token, "test-results.json"))
+            if (previous.get("stage") != "legends/edit"
+                    or previous.get("reason") != "routerai_incomplete_chat_response"
+                    or [row.get("stage") for row in previous.get("calls", [])] != ["plan", "draft", "edit"]
+                    or previous.get("spend", {}).get("unmetered_calls") != 0
+                    or money(previous["balance_delta_rub"]) != money(previous["spend"]["metered_total_rub"])):
+                raise UnsafeToTest("private_resume_checkpoint_invalid")
+            plan_file = json.loads(github_private(old, token, "legends/qwen-plan.json"))
+            draft = github_private(old, token, "legends/claude-draft.md").decode()
+            qa_file = json.loads(github_private(old, token, "legends/claude-qa.json"))
+            if digest(plan_file["output"]) != plan_file["sha256"] or digest(draft) != qa_file["text_sha256"]:
+                raise UnsafeToTest("private_resume_checkpoint_hash_mismatch")
+            github_private(old, token, "resume-receipt.json", json_bytes({"continued_at": prefix}))
+            report["calls"] = previous["calls"]
+            report["continued_from"] = old
+            resume = {"plan": plan_file["output"], "draft": draft}
+        report["stage"] = "budget_preflight"
         spend = Spend(secret, report)
         catalogue = json.loads((ROOT / "config/editorial_science_sources.json").read_text())
         report["stage"] = "visual_tools_preflight"
@@ -542,7 +571,7 @@ def evaluate(prefix, token, secret, report):
             index = ImageIndex(memory, photos)
             for channel in CHANNELS:
                 evaluate_channel(channel, spend, save, report, index, path, catalogue,
-                                 (titles[channel], prose))
+                                 (titles[channel], prose), resume if channel == "legends" else None)
         report.update(status="completed", stage="complete")
     except (UnsafeToTest, Blocked) as exc:
         report.update(status="blocked_or_incomplete", reason=safe_reason(exc))
@@ -569,7 +598,8 @@ def main():
         if os.getenv("GITHUB_RUN_ATTEMPT", "1") != "1":
             raise UnsafeToTest("repeated_workflow_attempt_disabled")
         evaluate(f"{PREFIX}/{os.getenv('GITHUB_RUN_ID', '')}",
-                 os.getenv("EDITORIAL_PRIVATE_TOKEN", ""), os.getenv("ROUTERAI_API_KEY", ""), report)
+                 os.getenv("EDITORIAL_PRIVATE_TOKEN", ""), os.getenv("ROUTERAI_API_KEY", ""), report,
+                 os.getenv("ROUTERAI_RESUME_RUN_ID", ""))
     except (UnsafeToTest, Blocked) as exc:
         report.update(status="blocked_or_incomplete", reason=safe_reason(exc))
     # Logs and Actions summaries contain status only. Detailed evidence is private.
