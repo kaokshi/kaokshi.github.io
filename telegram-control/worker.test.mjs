@@ -102,3 +102,24 @@ test("client recovers signed launch data from hash without Telegram SDK",async()
  assert.equal(submitted,raw);
  assert.equal(get("auth").textContent,"Владелец");
 });
+
+import {snapshotBindings} from "./snapshot.mjs";
+import {readSnapshot} from "./miniapp.mjs";
+test("private review snapshot handles UTF-8 and rejects incomplete bindings",()=>{
+ const sample={run:"45395283968",articles:[{text:"Мистика — "+ "кириллица ".repeat(1000)}],models:[],total:61.98};
+ const entries=snapshotBindings(sample);
+ const bindings=Object.fromEntries(entries.map(x=>[x.name,x.text]));
+ assert.deepEqual(readSnapshot(bindings),sample);
+ assert.equal(readSnapshot({...bindings,REVIEW_SNAPSHOT_1:undefined}),null);
+});
+test("unsigned browser cannot access private snapshot, signed owner can",async()=>{
+ const sample={run:"45395283968",articles:[{text:"Приватный черновик"}],models:[],total:61.98};
+ const bindings=Object.fromEntries(snapshotBindings(sample).map(x=>[x.name,x.text]));
+ const fullEnv={...env,...bindings};
+ const publicPage=await worker.fetch(new Request("https://example.test/app"),fullEnv);
+ assert.doesNotMatch(await publicPage.text(),/Приватный черновик/);
+ const denied=await worker.fetch(new Request("https://example.test/api/dashboard",{method:"POST",body:JSON.stringify({initData:signed(124)})}),fullEnv);
+ assert.equal(denied.status,401);
+ const allowed=await worker.fetch(new Request("https://example.test/api/dashboard",{method:"POST",body:JSON.stringify({initData:signed()})}),fullEnv);
+ assert.deepEqual((await allowed.json()).review,sample);
+});
