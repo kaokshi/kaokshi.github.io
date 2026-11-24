@@ -256,3 +256,30 @@ test("Qwen endpoints reject non-owner without touching storage or paid provider"
   assert.equal(r.status,401);
  }
 });
+
+import {validateJob,saveJob,cancelJob,jobsView,STAGES} from "./production.mjs";
+test("production jobs are bounded, fixed-stage and never authorize release",async()=>{
+ const plan=validateJob({items:[{channel:"science",count:3}],day:"2026-11-25",instructions:"Проверить факты"});
+ assert.ok(plan);assert.equal(validateJob({...plan,items:[{channel:"science",count:10}]}),null);
+ assert.equal(validateJob({...plan,day:"2026-02-30"}),null);
+ const store=new Map(),storage={get:async k=>store.get(k),put:async(k,v)=>store.set(k,v),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage)};
+ const job=await saveJob(storage,"agent:test",plan,Date.now());
+ assert.equal(job.executed,false);assert.equal(job.publicationAuthorized,false);assert.equal(job.stages.length,STAGES.length);
+ assert.equal((await saveJob(storage,"agent:test",plan,Date.now())).id,job.id);
+ assert.equal((await jobsView(storage)).jobs.length,1);
+ assert.equal((await cancelJob(storage,job.id)).status,"cancelled");
+ assert.equal((await saveJob(storage,"agent:test",plan,Date.now())).status,"cancelled");
+});
+test("Qwen job proposals cannot combine actions or bypass count limits",()=>{
+ const job={items:[{channel:"legends",count:3}],day:null,instructions:"Истории"};
+ const reply=d=>({choices:[{finish_reason:"stop",message:{content:JSON.stringify(d)}}]});
+ assert.deepEqual(parseReply(reply({reply:"План",proposal:null,job})).job,job);
+ assert.throws(()=>parseReply(reply({reply:"План",proposal:plan,job})));
+ assert.throws(()=>parseReply(reply({reply:"План",proposal:null,job:{...job,items:[{channel:"legends",count:100}]}})));
+});
+test("production queue endpoints reject unauthorized access",async()=>{
+ for(const path of ["/api/core/jobs","/api/core/jobs/cancel"]){
+ const r=await worker.fetch(new Request("https://example.test"+path,{method:"POST",body:JSON.stringify({initData:signed(124)})}),env);
+ assert.equal(r.status,401);
+ }
+});
