@@ -21,7 +21,7 @@ test("deployment is manual and carries all imported modules",()=>{
  const deploy=readFileSync(script,"utf8");for(const module of ["account.mjs","intake.mjs","receipt.mjs","recovery.mjs"])assert.ok(deploy.includes('"'+module+'"'));
 });
 
-import {activeDeployment,rollbackBody,latestVersion} from "./deploy-guard.mjs";
+import {activeDeployment,rollbackBody,latestVersion,readBridgeProbe} from "./deploy-guard.mjs";
 const prior={id:"10000000-0000-4000-8000-000000000001",version:"20000000-0000-4000-8000-000000000001"};
 const next={id:"10000000-0000-4000-8000-000000000002",version:"20000000-0000-4000-8000-000000000002"};
 const deployment=(d,created_on)=>({id:d.id,created_on,versions:[{version_id:d.version,percentage:100}]});
@@ -49,4 +49,16 @@ test("latest uploaded version is identified independently of deployment",()=>{
  assert.equal(latestVersion({items:[{id:prior.version,number:1},{id:next.version,number:2}]}),next.version);
  assert.throws(()=>latestVersion({items:[{id:prior.version,number:1},{id:next.version,number:1}]}));
  assert.throws(()=>latestVersion({items:[]}));
+});
+
+test("read-only bridge probes retry transient failures, but never authorization or malformed replies",async()=>{
+ let calls=0;const pause=async()=>{};
+ const valid=v=>v.executionEnabled===false;
+ const result=await readBridgeProbe(async()=>++calls===1?new Response("",{status:503}):Response.json({executionEnabled:false}),valid,{pause});
+ assert.equal(result.executionEnabled,false);assert.equal(calls,2);
+ for(const status of [401,403,400,404,409]){
+  calls=0;await assert.rejects(()=>readBridgeProbe(async()=>{calls++;return new Response("",{status});},valid,{pause}),new RegExp("bridge_http_"+status));assert.equal(calls,1);
+ }
+ calls=0;await assert.rejects(()=>readBridgeProbe(async()=>{calls++;return Response.json({executionEnabled:true});},valid,{pause}),/bridge_invalid_response/);assert.equal(calls,1);
+ calls=0;await assert.rejects(()=>readBridgeProbe(async()=>{calls++;return new Response("",{status:503});},valid,{pause}),/bridge_http_503/);assert.equal(calls,4);
 });
