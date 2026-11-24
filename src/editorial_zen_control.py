@@ -30,7 +30,10 @@ def validate_control(row, job_id, mode, *, now=None, require_execution=True):
         raise CoreBlocked("control_execution_disabled")
     if not require_execution and row.get("executionEnabled") is not False:
         raise CoreBlocked("control_not_in_test_mode")
-    return row["version"]
+    revision = row.get("modeRevision", 0)
+    if type(revision) is not int or not 0 <= revision <= row["version"]:
+        raise CoreBlocked("invalid_control_mode_revision")
+    return revision
 
 
 def control_guard(endpoint, secret):
