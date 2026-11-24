@@ -7,6 +7,7 @@ import {recordReceipt} from "./receipt.mjs";
 import {notifyReceipt} from "./notifications.mjs";
 import {readMemory,writeMemory} from "./memory.mjs";
 import {diagnose} from "./diagnostics.mjs";
+import {recoverTimer} from "./recovery.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
 // No calls to RouterAI, editorial workflows, or publishing systems.
 export const CHANNELS=["cinema","legends","science"];
@@ -50,6 +51,9 @@ export class CoreHandler {
   const [ops,settings,alarmAt,budget,jobView,rows,readiness]=await Promise.all([opsState(this.storage),this.state(),this.storage.getAlarm(),readBudget(this.storage,now),jobsView(this.storage),this.storage.list({prefix:"agent:message:",reverse:true,limit:30}),verifyConfig?productionReadiness():null]);
   return diagnose({ops,settings,alarmAt,next:nextSlots(settings,now),budget,jobs:jobView.jobs,readiness,messages:[...rows.values()]},now);
  }
+ async watchdog(now=Date.now()){
+  return recoverTimer(this.storage,initial,nextSlots,now);
+ }
  async scheduleAlarm(now){
   const next=(await opsState(this.storage)).stopped?null:nextSlots(await this.state(),now)[0];
   if(next)await this.storage.setAlarm(next.at);else await this.storage.deleteAlarm();
@@ -86,6 +90,7 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core/jobs"){const [jobs,readiness,budget]=await Promise.all([jobsView(this.storage),productionReadiness(),readBudget(this.storage,now)]);return Response.json({...jobs,readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict:!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop,ownerDailyRub:budget.policy.mainKop/100}});}
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/watchdog")return Response.json(await this.watchdog(now));
   if(url.pathname==="/core/memory/settings"){const r=await writeMemory(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
