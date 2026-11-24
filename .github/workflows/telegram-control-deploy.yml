@@ -1,4 +1,4 @@
-name: ZEN CONTROL private review dashboard
+name: ZEN CONTROL article reader and image access
 on:
   push:
     branches: [feature/telegram-control-mvp]
@@ -32,6 +32,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+          EDITORIAL_REVIEW_READ_TOKEN: ${{ secrets.EDITORIAL_REVIEW_READ_TOKEN }}
           EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
           ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
         run: node deploy.mjs
