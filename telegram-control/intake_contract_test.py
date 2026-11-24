@@ -1,4 +1,4 @@
-"""Offline cross-language contract check against the actual pinned PR85 Core."""
+"""Offline cross-language contract check against the merged cloud executor."""
 import importlib.util
 import json
 import pathlib
@@ -9,6 +9,8 @@ import unittest
 core_root = pathlib.Path(sys.argv.pop(1)).resolve()
 sys.path.insert(0, str(core_root))
 from src.editorial_zen_core import Core, CoreBlocked
+from src.editorial_zen_cloud import CloudCore
+from tests.test_editorial_zen_executor import Store
 
 client_path = pathlib.Path(__file__).with_name("intake_client.py")
 spec = importlib.util.spec_from_file_location("intake_client", client_path)
@@ -18,6 +20,24 @@ envelope_path = pathlib.Path(sys.argv.pop(1))
 
 
 class IntakeContract(unittest.TestCase):
+    def test_cloud_intake_and_receipt(self):
+        envelope = json.loads(envelope_path.read_text())
+        job_id = envelope["intent"]["id"]
+        store = Store()
+        cloud = CloudCore(store)
+        for _ in range(2):
+            self.assertEqual(cloud.access(lambda c: client.accept(c, envelope, job_id), change=True), job_id)
+        restored = CloudCore(store)
+        snapshot = restored.access(lambda c: c.snapshot())
+        self.assertEqual(snapshot["jobs"][0]["mode"], "semi_autonomous")
+        receipt = restored.access(lambda c: client.build_receipt(c, job_id))
+        self.assertEqual(len(receipt["articles"]), 3)
+        self.assertFalse(receipt["executionEnabled"])
+        self.assertFalse(receipt["rssEnabled"])
+        self.assertFalse(receipt["publicationAuthorized"])
+        self.assertNotIn("instructions", json.dumps(receipt))
+        envelope_path.with_suffix(".receipt.json").write_text(json.dumps(receipt))
+
     def test_worker_payload_to_real_core(self):
         envelope = json.loads(envelope_path.read_text())
         with tempfile.TemporaryDirectory() as temp:
