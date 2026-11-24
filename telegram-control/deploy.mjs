@@ -71,10 +71,14 @@ async function main(){
  bindings.push(...privateBindings);
  bindings.push({type:"secret_text",name:"EDITORIAL_REVIEW_READ_TOKEN",text:readToken});
  if(router)bindings.push({type:"secret_text",name:"ROUTERAI_API_KEY",text:router});
+ const settings=await cf("/scripts/"+SCRIPT+"/settings");
+ const hasJournal=Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="REVIEW_JOURNAL"&&b.type==="durable_object_namespace"&&b.class_name==="ReviewJournal");
+ bindings.push({type:"durable_object_namespace",name:"REVIEW_JOURNAL",class_name:"ReviewJournal"});
+ const migrations=hasJournal?{}:{migrations:{new_tag:"review-journal-v1",new_sqlite_classes:["ReviewJournal"]}};
  const form=new FormData();
- form.set("metadata",new Blob([JSON.stringify({main_module:"worker.mjs",compatibility_date:"2026-11-24",bindings,observability:{enabled:false}})],{type:"application/json"}));
+ form.set("metadata",new Blob([JSON.stringify({main_module:"worker.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["miniapp.mjs","ui.mjs","snapshot.mjs"]){
+ for(const module of ["miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }
@@ -111,7 +115,7 @@ async function main(){
  requireOk(ownerReply.ok,"owner_reply_http_"+ownerReply.status);
  console.log("OWNER_REPLY_CONFIRMED");
  stage="verify_miniapp";
- const page=await fetch(endpoint+"/app?v=5",{redirect:"error",signal:AbortSignal.timeout(8000)});
+ const page=await fetch(endpoint+"/app?v=6",{redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(page.ok&&(await page.text()).includes("ZEN CONTROL"),"app_page_unavailable");
  const unauthorized=await fetch(endpoint+"/api/dashboard",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({initData:"invalid"}),redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(unauthorized.status===401,"app_auth_gate_failed");
@@ -137,21 +141,32 @@ async function main(){
  const imageBytes=await goodImage.arrayBuffer();
  requireOk(imageBytes.byteLength>100,"private_image_empty");
  console.log("PRIVATE_IMAGE_CONFIRMED");
+ stage="verify_review_journal";
+ requireOk(dashboard.reviewEnabled===true,"journal_binding_missing");
+ const journalRequest=async(path,body)=>fetch(endpoint+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(20000)});
+ const deniedJournal=await journalRequest("/api/journal",{initData:"invalid"});
+ requireOk(deniedJournal.status===401,"journal_auth_gate_failed");
+ const journal=await journalRequest("/api/journal",{initData:params.toString()});
+ requireOk(journal.ok&&Array.isArray((await journal.json()).entries),"journal_read_failed");
+ const invalid=await journalRequest("/api/review",{initData:params.toString(),action:"publish"});
+ requireOk(invalid.status===400,"review_action_gate_failed");
+ console.log("REVIEW_JOURNAL_CONFIRMED");
+ console.log("REVIEW_MUTATION_GATE_CONFIRMED");
  console.log("PRIVATE_REVIEW_CONFIRMED");
  console.log("LIVE_REVIEW_SYNC="+(dashboard.sync==="live"));
  console.log("IMAGE_PREVIEW_CONFIGURED="+(dashboard.imagePreview===true));
  console.log("MINIAPP_AUTH_CONFIRMED");
  console.log("MINIAPP_BALANCE_AVAILABLE="+(typeof dashboard.balance==="number"));
  stage="miniapp_menu";
- requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=5"}}})===true,"miniapp_menu_failed");
+ requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=6"}}})===true,"miniapp_menu_failed");
  const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
- requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=5","miniapp_menu_not_verified");
+ requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=6","miniapp_menu_not_verified");
  console.log("MINIAPP_MENU_CONFIRMED");
  stage="send_inline_launch";
- const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=5"}}]]}});
+ const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=6"}}]]}});
  requireOk(Number.isInteger(launch?.message_id),"inline_launch_failed");
  console.log("INLINE_LAUNCH_SENT");
- console.log("MINIAPP_URL="+endpoint+"/app?v=5");
+ console.log("MINIAPP_URL="+endpoint+"/app?v=6");
  stage="commands";
  try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},
