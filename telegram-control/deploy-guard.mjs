@@ -22,3 +22,24 @@ export function latestVersion(result){
  if(sorted.length>1&&sorted[0].number===sorted[1].number)throw Error("version_order_ambiguous");
  return sorted[0].id;
 }
+
+
+// Retry only explicitly read-only bridge probes after a transient response.
+// Authentication/validation errors and malformed successful payloads are never retried.
+export async function readBridgeProbe(fetchProbe,validate,{attempts=4,pause=()=>new Promise(r=>setTimeout(r,1500))}={}){
+ if(!Number.isInteger(attempts)||attempts<1||attempts>4)throw Error("invalid_probe_attempts");
+ for(let i=0;i<attempts;i++){
+  let response;
+  try{response=await fetchProbe();}catch{
+   if(i+1===attempts)throw Error("bridge_transport_unavailable");
+   await pause();continue;
+  }
+  if(response.ok){
+   const body=await response.json();
+   if(!validate(body))throw Error("bridge_invalid_response");
+   return body;
+  }
+  if(![429,502,503,504].includes(response.status)||i+1===attempts)throw Error("bridge_http_"+response.status);
+  await pause();
+ }
+}
