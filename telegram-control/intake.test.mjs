@@ -32,3 +32,15 @@ test("queue scans old and new jobs, excludes acknowledged, unconfirmed, cancelle
  assert.equal((await queueView(s,"bad")).status,400);
  m.set("ops:state",{stopped:true});assert.deepEqual((await queueView(s)).body.ids,[]);
 });
+
+test("owner mode revision resynchronizes an acknowledged job without replacing its immutable intent",async()=>{
+ const j={...job,preview:{executorMode:"manual"},executorReceipt:{modeRevision:0,effectiveMode:"manual"}},m=new Map([["production:job:"+j.id,j],["production:index:000000000000001:"+j.id,j.id],["ops:state",{version:7,modeRevision:7,requestedMode:"autonomous",stopped:false}]]);
+ const s={get:async k=>m.get(k),transaction:async f=>f(s),list:async()=>new Map([...m].filter(([k])=>k.startsWith("production:index:")))};
+ assert.deepEqual((await queueView(s)).body.ids,[j.id]);
+ const envelope=(await intakeView(s,j.id)).body;assert.equal(envelope.intent.mode,"manual");assert.deepEqual(envelope.modeTransition,{mode:"autonomous",revision:7});
+ assert.equal((await controlView(s,j.id)).body.reason,"mode_sync_pending");
+ m.set("production:job:"+j.id,{...j,executorReceipt:{modeRevision:7,effectiveMode:"autonomous"}});
+ assert.equal((await controlView(s,j.id)).body.controlClear,true);
+ assert.deepEqual((await queueView(s)).body.ids,[]);
+ assert.equal((await controlView(s,j.id)).body.executionEnabled,false);
+});
