@@ -92,8 +92,14 @@ async function main(){
  requireOk(ready,"worker_health_failed");
  const denied=await fetch(endpoint+"/telegram",{method:"POST",body:"{}",redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(denied.status===403,"webhook_secret_gate_failed");
- const ignored=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:JSON.stringify({message:{chat:{type:"private",id:0},from:{id:0,is_bot:false},text:"/balance"}}),redirect:"error",signal:AbortSignal.timeout(8000)});
- requireOk(ignored.status===200,"non_owner_gate_failed");
+ let ignored;
+ for(let i=0;i<8;i++){
+ ignored=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:JSON.stringify({message:{chat:{type:"private",id:0},from:{id:0,is_bot:false},text:"/balance"}}),redirect:"error",signal:AbortSignal.timeout(8000)});
+ if(ignored.status===200)break;
+ if(ignored.status!==403)break;
+ await new Promise(r=>setTimeout(r,2500));
+ }
+ requireOk(ignored?.status===200,"non_owner_gate_failed_"+ignored?.status);
  stage="register_webhook";
  requireOk(await telegram("setWebhook",{url:endpoint+"/telegram",secret_token:webhookSecret,allowed_updates:["message"],max_connections:2,drop_pending_updates:false})===true,"webhook_registration_failed");
  stage="verify_webhook";
