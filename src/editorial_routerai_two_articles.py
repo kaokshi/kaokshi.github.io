@@ -130,9 +130,11 @@ class Spend:
             for row in report["calls"]:
                 observed[row["stage"]] = max(observed.get(row["stage"], Decimal(0)), money(row["cost_rub"]))
             visual = max(cost for name, cost in observed.items() if name.endswith("-qas"))
-            forecast = 7 * self.image_price + observed["plan"] + observed["draft"] + observed["edit"] + (
-                observed["editorial_and_image_plan"] + 8 * visual
+            pending_text = Decimal(0) if report.get("resumed_science_text") else (
+                observed["plan"] + observed["draft"] + observed["edit"]
             )
+            forecast = (7 * self.image_price + pending_text
+                        + observed["editorial_and_image_plan"] + 8 * visual)
         elif self.total:
             forecast -= self.text_bound("brain", 4200, 1200) + self.text_bound("draft", 8500, 3600)
             if report.get("resumed_edited_text"):
@@ -472,16 +474,21 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
 
     report["stage"] = channel + "/editorial_and_image_plan"
     if records:
-        verify = ("Жанр: научпоп. Выяви неподтверждённые утверждения. В claims перечисли "
-                  "существенные проверяемые утверждения и дословные цитаты из источников. "
-                  'Формат claims: [{"claim":"дословно","source":"S1","quote":"дословно",'
-                  '"verdict":"supported"}]. Иллюстрации научно точные, с ясной композицией, '
-                  "в едином стиле концептуальной графики.")
+        verify = ("Жанр: научпоп. Для каждого существенного проверяемого утверждения "
+                  "поле claim должно быть точной непереведённой подстрокой из русской СТАТЬИ. "
+                  "Поле quote должно быть отдельной дословной непереведённой цитатой из "
+                  "англоязычного ПЕРВИЧНОГО ИСТОЧНИКА, которая подтверждает утверждение. "
+                  "Никогда не копируй quote в claim. Если доказательства нет, укажи это в issues. "
+                  'Формат claims: [{"claim":"текст из русской статьи","source":"S1",'
+                  '"quote":"цитата из указанного источника","verdict":"supported"}]. '
+                  "Иллюстрации научно точные, с ясной композицией, в едином стиле концептуальной графики.")
     else:
         verify = ("Жанр: художественная городская мистика. Мистические события допустимы "
                   "как часть вымышленного сюжета. Укажи реальные внутренние противоречия, если "
                   "они есть. Источники для вымышленных событий не требуются, claims всегда []. "
                   "В визуальной инструкции зафиксируй постоянные признаки героев и локаций.")
+    audit_sources = ("\n\n".join(f"S{i} {row['url']}\n{row['text'][:6500]}"
+                                  for i, row in enumerate(records, 1)) if records else facts)
     audit = resume["audit"] if resume and "audit" in resume else object_response(spend.chat(channel, "editorial_and_image_plan", "brain", (
         f"Канал «{name}». {verify} Оцени весь текст после правки DeepSeek на живой русский "
         "язык, связность, повторы и естественный призыв подписаться. В issues укажи только "
@@ -492,7 +499,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         "Для каждого промпта дай subject и brief по-английски, brief максимум две фразы. "
         'Верни JSON с ключами "issues" (массив строк), "claims" (массив), "style" '
         '(общая визуальная инструкция), "images" (ровно 7 объектов subject и brief). '
-        f"Тема: {title}. Текст: {canonical(article)}\n{facts}"
+        f"Тема: {title}. СТАТЬЯ:\n{canonical(article)}\nПЕРВИЧНЫЕ ИСТОЧНИКИ И ПРИМЕЧАНИЯ:\n{audit_sources}"
     ), 7500, reserve=reserve))
     issues = audit.get("issues")
     if not isinstance(issues, list) or any(not isinstance(issue, str) for issue in issues):
@@ -594,6 +601,7 @@ def evaluate(prefix, token, secret, report, resume_id=""):
     save("preflight.json", json_bytes({"publication_authorized": False, "status": "private_storage_verified"}))
     try:
         resume = None
+        science_resume = None
         if resume_id:
             report["stage"] = "private_resume_preflight"
             old = f"{PREFIX}/{resume_id}"
@@ -626,19 +634,34 @@ def evaluate(prefix, token, secret, report, resume_id=""):
                             and previous.get("reason") == "editorial_field_invalid_fix"
                             and previous.get("articles", {}).get("legends", {}).get("text_qa") == "passed"
                             and all(row.get("channel") == "legends" for row in calls))
+            science_audit = (stage == "science/editorial_and_image_plan"
+                             and previous.get("science_only") is True
+                             and previous.get("reason") == "qwen_text_or_source_qa_failed"
+                             and [row["stage"] for row in calls if row["channel"] == "science"]
+                             == ["plan", "draft", "edit", "editorial_and_image_plan"])
             if (not (first_edit or visual_plan or wrong_genre or rejected_acceptance
-                     or cover_rejected or lost_image or science_only)
-                    or (not (wrong_genre or rejected_acceptance or cover_rejected or lost_image or science_only) and previous.get("reason") != "routerai_incomplete_chat_response")
+                     or cover_rejected or lost_image or science_only or science_audit)
+                    or (not (wrong_genre or rejected_acceptance or cover_rejected or lost_image or science_only or science_audit) and previous.get("reason") != "routerai_incomplete_chat_response")
                     or previous.get("spend", {}).get("unmetered_calls") != 0
                     or abs(money(previous["balance_delta_rub"])
                            - money(previous["spend"]["metered_total_rub"])) > BALANCE_PRECISION):
                 raise UnsafeToTest("private_resume_checkpoint_invalid")
-            plan_file = json.loads(github_private(old, token, "legends/qwen-plan.json"))
-            draft = github_private(old, token, "legends/claude-draft.md").decode()
-            qa_file = json.loads(github_private(old, token, "legends/claude-qa.json"))
+            resume_channel = "science" if science_audit else "legends"
+            plan_file = json.loads(github_private(old, token, f"{resume_channel}/qwen-plan.json"))
+            draft = github_private(old, token, f"{resume_channel}/claude-draft.md").decode()
+            qa_file = json.loads(github_private(old, token, f"{resume_channel}/claude-qa.json"))
             if digest(plan_file["output"]) != plan_file["sha256"] or digest(draft) != qa_file["text_sha256"]:
                 raise UnsafeToTest("private_resume_checkpoint_hash_mismatch")
             resume = {"plan": plan_file["output"], "draft": draft}
+            if science_audit:
+                edited = github_private(old, token, "science/deepseek-edited.md").decode()
+                checked = json.loads(github_private(old, token, "science/text-structural-qa.json"))
+                if digest(edited) != checked["text_sha256"] or checked.get("issues") != []:
+                    raise UnsafeToTest("private_resume_science_hash_mismatch")
+                science_resume = {**resume, "edited": edited}
+                report["science_only"] = True
+                report["resumed_science_text"] = True
+                report["articles"]["legends"] = previous["articles"]["legends"]
             if science_only:
                 retained = []
                 for slot in (1, 4):
@@ -699,7 +722,7 @@ def evaluate(prefix, token, secret, report, resume_id=""):
                 if channel == "legends" and report.get("science_only"):
                     continue
                 evaluate_channel(channel, spend, save, report, index, path, catalogue,
-                                 (titles[channel], prose), resume if channel == "legends" else None)
+                                 (titles[channel], prose), resume if channel == "legends" else science_resume)
         if all(row.get("assembled") for row in report["articles"].values()):
             report.update(status="completed", stage="complete")
         else:
