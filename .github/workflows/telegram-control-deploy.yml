@@ -1,4 +1,4 @@
-name: Telegram control deployment (reply fix)
+name: ZEN CONTROL Mini App deployment
 on:
   push:
     branches: [feature/telegram-control-mvp]
