@@ -78,7 +78,7 @@ async function main(){
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"entry.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs"]){
+ for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs","ops.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }
@@ -115,7 +115,7 @@ async function main(){
  requireOk(ownerReply.ok,"owner_reply_http_"+ownerReply.status);
  console.log("OWNER_REPLY_CONFIRMED");
  stage="verify_miniapp";
- const page=await fetch(endpoint+"/app?v=10",{redirect:"error",signal:AbortSignal.timeout(8000)});
+ const page=await fetch(endpoint+"/app?v=11",{redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(page.ok&&(await page.text()).includes("ZEN CONTROL"),"app_page_unavailable");
  const unauthorized=await fetch(endpoint+"/api/dashboard",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({initData:"invalid"}),redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(unauthorized.status===401,"app_auth_gate_failed");
@@ -196,6 +196,17 @@ async function main(){
  requireOk(qv.productionEnabled===false&&Array.isArray(qv.jobs)&&qv.stages.length===8&&qv.readiness.canExecute===false,"queue_gate_failed");
  console.log("BUDGET_POLICY_CONFIRMED");
  console.log("PRODUCTION_QUEUE_CONFIRMED");
+ stage="verify_ops";
+ const ops=await journalRequest("/api/core/ops",{initData:params.toString()});
+ requireOk(ops.ok,"ops_http_"+ops.status);
+ const ov=await ops.json();
+ requireOk(ov.scope==="zen_control_only"&&ov.externalStopConnected===false&&typeof ov.state.stopped==="boolean"&&Array.isArray(ov.events),"ops_state_invalid");
+ const deniedOps=await journalRequest("/api/core/ops",{initData:"invalid"});
+ requireOk(deniedOps.status===401,"ops_auth_gate_failed");
+ const invalidOps=await journalRequest("/api/core/ops/settings",{initData:params.toString(),confirm:false});
+ requireOk(invalidOps.status===400,"ops_confirmation_failed");
+ console.log("OPS_CONTROLS_CONFIRMED");
+
 
 
 
@@ -205,15 +216,15 @@ async function main(){
  console.log("MINIAPP_AUTH_CONFIRMED");
  console.log("MINIAPP_BALANCE_AVAILABLE="+(typeof dashboard.balance==="number"));
  stage="miniapp_menu";
- requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=10"}}})===true,"miniapp_menu_failed");
+ requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=11"}}})===true,"miniapp_menu_failed");
  const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
- requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=10","miniapp_menu_not_verified");
+ requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=11","miniapp_menu_not_verified");
  console.log("MINIAPP_MENU_CONFIRMED");
  stage="send_inline_launch";
- const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=10"}}]]}});
+ const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=11"}}]]}});
  requireOk(Number.isInteger(launch?.message_id),"inline_launch_failed");
  console.log("INLINE_LAUNCH_SENT");
- console.log("MINIAPP_URL="+endpoint+"/app?v=10");
+ console.log("MINIAPP_URL="+endpoint+"/app?v=11");
  stage="commands";
  try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},
