@@ -1,6 +1,7 @@
 // Read-only bridge from confirmed Telegram jobs to the existing Python Core intake.
 import {validateJob} from "./production.mjs";
 import {opsState} from "./ops.mjs";
+import {pendingStage} from "./stage-intent.mjs";
 import {claimProduction,closeProduction,accountStatus} from "./account.mjs";
 const encoder=new TextEncoder();
 async function matches(secret,header){
@@ -39,7 +40,7 @@ export async function queueView(storage,cursor=null){
   for(const [,id] of rows){
    const job=await tx.get("production:job:"+id);
    const transition=transitionFor(ops);
-   if(deliverable(job,ops,settings)&&(!job.executorReceipt||(transition&&job.executorReceipt.modeRevision!==transition.revision)))ids.push(id);
+   if(deliverable(job,ops,settings)&&(!job.executorReceipt||(transition&&job.executorReceipt.modeRevision!==transition.revision)||pendingStage(job,ops)))ids.push(id);
   }
   return {status:200,body:{...base,ids,nextCursor:rows.size===20?[...rows.keys()].at(-1):null}};
  });
@@ -49,8 +50,8 @@ export async function intakeView(storage,id){
  return storage.transaction(async tx=>{
   if((await tx.get("ops:state"))?.stopped===true)return {status:409,body:{error:"emergency_paused"}};
   const ops=await opsState(tx);
-  const intent=deliverable(await tx.get("production:job:"+id),ops,await tx.get("core:settings"));
-  return intent?{status:200,body:{schema:"zen-core/intake-v1",mode:"intents_only",intent,...(transitionFor(ops)?{modeTransition:transitionFor(ops)}:{}),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
+  const job=await tx.get("production:job:"+id),intent=deliverable(job,ops,await tx.get("core:settings"));
+  return intent?{status:200,body:{schema:"zen-core/intake-v1",mode:"intents_only",intent,...(pendingStage(job,ops)?{stageIntent:pendingStage(job,ops)}:{}),...(transitionFor(ops)?{modeTransition:transitionFor(ops)}:{}),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
  });
 }
 // Fresh control observation, not an execution permit.
