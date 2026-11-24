@@ -1,0 +1,35 @@
+name: ZEN CONTROL live bridge diagnosis
+on:
+  push:
+    branches: [integration/zen-core-routerai-20261124]
+    paths: ['.github/workflows/zen-control-bridge-audit.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read bridge response status without revealing secrets or job data
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+        run: |
+          node --input-type=module <<'JS'
+          const e=process.env;
+          const r=await fetch("https://api.cloudflare.com/client/v4/accounts/"+e.CF_ACCOUNT+"/workers/subdomain",{headers:{Authorization:"Bearer "+e.CF_TOKEN},redirect:"error",signal:AbortSignal.timeout(10000)});
+          const d=await r.json();
+          if(!r.ok||d.success!==true||!/^[a-z0-9-]+$/.test(d.result?.subdomain||""))throw Error("subdomain_unavailable");
+          const root="https://zen-editorial-control."+d.result.subdomain+".workers.dev/internal/zen-core/";
+          for(const [route,body] of [["queue",{}],["account",{action:"status"}],["control",{id:"diagnostic-nonexistent"}],["intake",{id:"diagnostic-nonexistent"}]]){
+            for(const auth of [false,true]){
+              try{
+                const res=await fetch(root+route,{method:"POST",headers:{"Content-Type":"application/json",...(auth?{Authorization:"Bearer "+e.INTAKE_SECRET}:{})},body:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(10000)});
+                const value=await res.json().catch(()=>null);
+                const allowed=["unauthorized","core_unavailable","invalid_request","intent_not_available","emergency_paused","invalid_cursor"];
+                console.log("BRIDGE_"+route.toUpperCase()+"_"+(auth?"AUTH":"NOAUTH")+"="+res.status+" "+(allowed.includes(value?.error)?value.error:"other"));
+              }catch{console.log("BRIDGE_"+route.toUpperCase()+"_UNAVAILABLE");}
+            }
+          }
+          JS
