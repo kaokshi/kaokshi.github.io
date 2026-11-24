@@ -1,3 +1,4 @@
+import {saveJob,jobsView,cancelJob,productionReadiness} from "./production.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
 // No calls to RouterAI, editorial workflows, or publishing systems.
 export const CHANNELS=["cinema","legends","science"];
@@ -51,6 +52,7 @@ export class CoreHandler {
      const key="core:event:"+String(slot.at).padStart(15,"0")+":"+slot.id;
      if(await tx.get(key))continue;
      await tx.put(key,{...slot,recordedAt:now,status:"blocked_prelaunch",reason:slot.type==="prepare"?"production_not_connected":"rss_not_authorized"});
+     if(slot.type==="prepare")await saveJob(tx,"scheduled:"+slot.id,{items:[{channel:slot.channel,count:1}],day:slot.id.split(":")[1],instructions:"По сохранённому расписанию"},now,"schedule",slot.releaseAt);
     }
    }
    await tx.put("core:cursor",now);await tx.put("core:lastTick",new Date(now).toISOString());
@@ -62,8 +64,10 @@ export class CoreHandler {
  async fetch(request){
   const url=new URL(request.url),now=Date.now();
   if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
+  if(request.method==="GET"&&url.pathname==="/core/jobs")return Response.json({...await jobsView(this.storage),readiness:await productionReadiness()});
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/jobs/cancel"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const job=await cancelJob(this.storage,d.id);return Response.json(job?{job}:{error:"job_missing"},{status:job?200:404});}
   if(url.pathname==="/core/schedule"){
    const schedule=validateSchedule(d.settings);
    if(!schedule||!Number.isInteger(d.version))return Response.json({error:"invalid_schedule"},{status:400});
