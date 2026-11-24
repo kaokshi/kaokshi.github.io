@@ -79,13 +79,15 @@ export async function accountView(storage,d,now=Date.now()){
 }
 export async function bridgeRequest(request,env){
  const path=new URL(request.url).pathname;
- if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control","/internal/zen-core/queue","/internal/zen-core/account"].includes(path))return null;
+ if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control","/internal/zen-core/queue","/internal/zen-core/account","/internal/zen-core/probe"].includes(path))return null;
  const receipt=path.endsWith("/receipt"),route=path.split("/").pop();
  const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"};
  if(request.method!=="POST")return Response.json({error:"method_not_allowed"},{status:405,headers});
  if(!await matches(env.ZEN_CORE_INTAKE_SECRET,request.headers.get("Authorization")))return Response.json({error:"unauthorized"},{status:401,headers});
- let d;try{const raw=await request.text();if(raw.length>(receipt?16384:512))throw Error();d=JSON.parse(raw);}catch{return Response.json({error:"invalid_request"},{status:400,headers});}
- const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName("zen-core-scheduler-v1"));
+ let d;try{const raw=await request.text();if(raw.length>(receipt||route==="probe"?16384:512))throw Error();d=JSON.parse(raw);}catch{return Response.json({error:"invalid_request"},{status:400,headers});}
+ if(route==="probe"&&(typeof d?.run!=="string"||! /^[0-9]{1,20}-[0-9]{1,3}$/.test(d.run)))return Response.json({error:"invalid_probe"},{status:400,headers});
+ const namespace=route==="probe"?"zen-core-probe-v1:"+d.run:"zen-core-scheduler-v1";
+ const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName(namespace));
  if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
- try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt||route==="account"?d:route==="queue"?{cursor:d?.cursor??null}:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
+ try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt||route==="account"||route==="probe"?d:route==="queue"?{cursor:d?.cursor??null}:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
 }
