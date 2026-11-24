@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import time
 import urllib.request
 from urllib.parse import urlsplit
 
@@ -46,19 +47,59 @@ def pull(endpoint, secret, job_id):
         return json.loads(data)
 
 
+def build_receipt(core, job_id, observed_at=None):
+    snapshot = core.snapshot()
+    if snapshot.get("schema") != "zen-core/v1" or snapshot.get("executionMode") != "intents_only" or any(
+            snapshot.get(k) is not False for k in ("executionEnabled", "publicationAuthorized", "rssEnabled")):
+        raise ValueError("unsafe_core_snapshot")
+    jobs = [j for j in snapshot["jobs"] if j["id"] == job_id]
+    if len(jobs) != 1:
+        raise ValueError("job_missing")
+    return {"schema": "zen-core/receipt-v1", "jobId": job_id,
+            "observedAt": int(time.time() * 1000) if observed_at is None else observed_at,
+            "articles": [{"id": a["id"], "meteredRub": a["meteredRub"],
+                          "stages": [{"id": s["id"], "status": s["status"]} for s in a["stages"]]}
+                         for a in jobs[0]["articles"]],
+            "budget": {k: snapshot["budget"][k] for k in (
+                "day", "timezone", "mainDailyRub", "reserveDailyRub", "mainRemainingRub",
+                "reserveRemainingRub", "meteredRub", "unsettledRequest")},
+            "executionEnabled": False, "publicationAuthorized": False, "rssEnabled": False}
+
+
+def push_receipt(endpoint, secret, receipt):
+    parsed = urlsplit(endpoint)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.path != "/internal/zen-core/intake"):
+        raise ValueError("invalid_intake_endpoint")
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", secret or ""):
+        raise ValueError("missing_intake_secret")
+    request = urllib.request.Request(endpoint.removesuffix("/intake") + "/receipt",
+                                     data=json.dumps(receipt).encode(),
+                                     headers={"Authorization": "Bearer " + secret,
+                                              "Content-Type": "application/json"}, method="POST")
+    with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+        raw = response.read(1025)
+        if len(raw) > 1024 or json.loads(raw).get("accepted") is not True:
+            raise ValueError("receipt_not_confirmed")
+
+
 def main():
     from src.editorial_zen_core import Core
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", required=True)
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--job", required=True)
+    parser.add_argument("--report", action="store_true", help="Send informational snapshot after intake")
     args = parser.parse_args()
     # The database must be on the existing executor's protected persistent volume.
     core = Core(args.db)
     if any(core.policy.get(k) is not False for k in ("execution_enabled", "publication_enabled", "rss_enabled")):
         raise ValueError("core_not_in_intake_only_mode")
     envelope = pull(args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), args.job)
-    print(json.dumps({"id": accept(core, envelope, args.job), "mode": "intents_only",
+    job_id = accept(core, envelope, args.job)
+    if args.report:
+        push_receipt(args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), build_receipt(core, job_id))
+    print(json.dumps({"id": job_id, "mode": "intents_only", "receiptConfirmed": args.report,
                       "executed": False, "publicationAuthorized": False}))
 
 
