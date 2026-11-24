@@ -1,0 +1,57 @@
+import unittest
+from src.editorial_zen_cloud import CloudCore
+from src.editorial_zen_core import CoreBlocked
+from src.editorial_zen_finance_recovery import inspect, recover
+from tests.test_editorial_zen_executor import Store
+
+NOW = 1795536000000
+OP = "fixture/science/1/plan"
+
+
+class RecoveryTest(unittest.TestCase):
+    def setUp(self):
+        self.cloud = CloudCore(Store())
+        self.cloud.access(lambda c: c.submit({"id": "fixture", "plan": {"items": [
+            {"channel": "science", "count": 1}], "day": None, "instructions": ""}}), change=True)
+        self.hold = {"id": "fixture", "operation": OP, "startedAt": NOW - 10000}
+        self.events = []
+
+    def account(self, action, *args):
+        if action == "status":
+            return {"schema": "zen-core/account-status-v1", "observedAt": NOW,
+                    "executionEnabled": False, "production": self.hold,
+                    "chat": None}
+        self.events.append((action, *args))
+        return {"closed": True}
+
+    def test_unknown_or_missing_reservation_never_releases(self):
+        self.assertEqual(inspect(self.cloud, self.account, NOW)["productionRecovery"],
+                         "missing_reservation_requires_evidence")
+        self.cloud.access(lambda c: c.reserve_call(OP, "fixture/science/1", "plan", "new_article", "2"), change=True)
+        self.assertEqual(inspect(self.cloud, self.account, NOW)["productionRecovery"],
+                         "unsettled_requires_evidence")
+        with self.assertRaises(CoreBlocked):
+            recover(self.cloud, self.account, confirm=True, expected_operation=OP, now=NOW)
+        self.assertEqual(self.events, [])
+
+    def test_settled_hold_requires_confirmation_and_exact_operation(self):
+        self.cloud.access(lambda c: c.reserve_call(OP, "fixture/science/1", "plan", "new_article", "2"), change=True)
+        self.cloud.access(lambda c: c.settle(OP, "1.25"), change=True)
+        before = dict(self.cloud.store.data)
+        for confirm, operation in ((False, OP), (True, "different")):
+            with self.assertRaises(CoreBlocked):
+                recover(self.cloud, self.account, confirm=confirm, expected_operation=operation, now=NOW)
+        report = recover(self.cloud, self.account, confirm=True, expected_operation=OP, now=NOW)
+        self.assertEqual(report["confirmedRub"], "1.25")
+        self.assertEqual(self.events, [("close", "fixture", OP, "settled")])
+        self.assertEqual(before, self.cloud.store.data)
+
+    def test_missing_cloud_or_stale_account_blocks(self):
+        for cloud, now in ((CloudCore(Store()), NOW), (self.cloud, NOW + 60000)):
+            with self.assertRaises(CoreBlocked):
+                inspect(cloud, self.account, now)
+        self.assertEqual(self.events, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
