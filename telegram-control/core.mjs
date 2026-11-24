@@ -1,6 +1,7 @@
 import {opsState,opsView,updateOps,notifyTimer} from "./ops.mjs";
 import {readBudget,writeBudget} from "./budget.mjs";
-import {saveJob,jobsView,cancelJob,productionReadiness} from "./production.mjs";
+import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from "./production.mjs";
+import {previewJob} from "./adapter.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
 // No calls to RouterAI, editorial workflows, or publishing systems.
 export const CHANNELS=["cinema","legends","science"];
@@ -71,11 +72,12 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
-  if(request.method==="GET"&&url.pathname==="/core/jobs")return Response.json({...await jobsView(this.storage),readiness:await productionReadiness()});
+  if(request.method==="GET"&&url.pathname==="/core/jobs"){const [jobs,readiness,budget]=await Promise.all([jobsView(this.storage),productionReadiness(),readBudget(this.storage,now)]);return Response.json({...jobs,readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict:!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop,ownerDailyRub:budget.policy.mainKop/100}});}
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
   if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/jobs/preview"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const r=await previewJob(this.storage,d.id,now,validateJob,STAGES);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/cancel"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const job=await cancelJob(this.storage,d.id);return Response.json(job?{job}:{error:"job_missing"},{status:job?200:404});}
   if(url.pathname==="/core/schedule"){
    const schedule=validateSchedule(d.settings);
