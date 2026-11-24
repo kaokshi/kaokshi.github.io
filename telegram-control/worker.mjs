@@ -61,7 +61,12 @@ export async function command(text,env) {
  default:return "Команда не поддерживается. Используйте /help.";
  }
 }
-export default {async fetch(request,env) {
+export default {async scheduled(controller,env) {
+ const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName("zen-core-scheduler-v1"));
+ if(!stub)return;
+ const r=await stub.fetch("https://core.internal/core/watchdog",{method:"POST",body:"{}"});
+ if(!r.ok)throw Error("watchdog_failed");
+},async fetch(request,env) {
  const bridge=await bridgeRequest(request,env);if(bridge)return bridge;
  const app=await miniApp(request,env,balanceValue);
  if(app)return app;
