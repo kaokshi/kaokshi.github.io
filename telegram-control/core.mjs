@@ -89,7 +89,7 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
-  if(request.method==="GET"&&url.pathname==="/core/jobs"){const [jobs,readiness,budget]=await Promise.all([jobsView(this.storage),productionReadiness(),readBudget(this.storage,now)]);return Response.json({...jobs,readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict:!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop,ownerDailyRub:budget.policy.mainKop/100}});}
+  if(request.method==="GET"&&url.pathname==="/core/jobs"){const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),readBudget(this.storage,now),opsState(this.storage),this.state()]);return Response.json({...jobs,requestedMode:ops.requestedMode,modeRevision:ops.modeRevision??0,stopped:ops.stopped,schedulePaused:settings.paused,readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict:!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop,ownerDailyRub:budget.policy.mainKop/100}});}
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
   if(url.pathname==="/core/watchdog")return Response.json(await this.watchdog(now));
