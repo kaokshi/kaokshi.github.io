@@ -1,5 +1,6 @@
 """Offline contract tests: remote pause and invalid observations prevent model dispatch."""
 import unittest
+from src.editorial_zen_transport import bridge_opener, NoRedirect, USER_AGENT
 from src.editorial_zen_control import validate_control, control_guard
 from src.editorial_zen_core import CoreBlocked
 from src.editorial_zen_executor import execute
@@ -33,6 +34,13 @@ class ControlTest(unittest.TestCase):
             self.fail("provider contacted despite blocked control")
         with self.assertRaisesRegex(CoreBlocked, "control_blocked"):
             execute(cloud, "fixture/science/1", "fixture", guard=guard, transport=unexpected)
+
+    def test_transport_identifies_executor_and_blocks_redirects(self):
+        opener = bridge_opener()
+        self.assertEqual(opener.addheaders, [("User-Agent", USER_AGENT)])
+        self.assertEqual(USER_AGENT, "ZEN-Control-Executor/1.0")
+        self.assertTrue(any(isinstance(h, NoRedirect) for h in opener.handlers))
+        self.assertIsNone(NoRedirect().redirect_request(None, None, 302, "", {}, "https://other.invalid"))
 
     def test_invalid_endpoint_is_rejected(self):
         for endpoint in ("http://host/internal/zen-core/control", "https://host/other", "https://host/internal/zen-core/control?x=1"):
