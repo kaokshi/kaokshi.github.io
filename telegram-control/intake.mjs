@@ -14,7 +14,9 @@ export function exportIntent(job){
  if(!plan||plan.items.some(x=>x.channel==="cinema"))return null;
  let releaseAt=null;
  if(job.releaseAt!=null){if(!Number.isSafeInteger(job.releaseAt)||!Number.isFinite(new Date(job.releaseAt).getTime()))return null;releaseAt=new Date(job.releaseAt).toISOString();}
- return {id:job.id,plan,releaseAt};
+ const mode=job.preview.executorMode??"manual";
+ if(!["manual","semi_autonomous","autonomous"].includes(mode))return null;
+ return {id:job.id,plan,releaseAt,mode};
 }
 export async function intakeView(storage,id){
  if(typeof id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(id))return {status:400,body:{error:"invalid_job_id"}};
