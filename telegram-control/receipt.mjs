@@ -33,7 +33,7 @@ function cleanReport(d,job,now){
  if(d.modeRevision!==undefined&&(!Number.isSafeInteger(d.modeRevision)||d.modeRevision<0||!["manual","semi_autonomous","autonomous"].includes(d.effectiveMode)))return null;
  const rolling=["rollingStart","rollingCapRub","rollingRemainingRub","rollingMeteredRub","rollingOverrun","overrun"];
  if(rolling.some(k=>Object.hasOwn(b,k))){
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(b.rollingStart)||![b.rollingCapRub,b.rollingRemainingRub,b.rollingMeteredRub].every(money)||Number(b.rollingCapRub)!==9000||Number(b.rollingRemainingRub)>9000||typeof b.rollingOverrun!=="boolean"||typeof b.overrun!=="boolean")return null;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(b.rollingStart)||![b.rollingCapRub,b.rollingRemainingRub,b.rollingMeteredRub].every(money)||Number(b.rollingCapRub)!==9000||Number(b.rollingRemainingRub)>9000||typeof b.rollingOverrun!=="boolean"||typeof b.overrun!=="boolean")return null;
  }
  const budget=Object.fromEntries(["day","timezone","mainDailyRub","reserveDailyRub","mainRemainingRub","reserveRemainingRub","meteredRub","unsettledRequest",...rolling.filter(k=>Object.hasOwn(b,k))].map(k=>[k,b[k]]));
  return {schema:d.schema,jobId:d.jobId,observedAt:d.observedAt,...(d.modeRevision!==undefined?{modeRevision:d.modeRevision,effectiveMode:d.effectiveMode}:{}),articles,budget,source:"executor_report",executionEnabled:false,publicationAuthorized:false,rssEnabled:false};
