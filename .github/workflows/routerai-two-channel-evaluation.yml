@@ -1,0 +1,42 @@
+name: Isolated RouterAI two-channel full-text evaluation
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/routerai-two-channel-evaluation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: routerai-full-eval-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  private-test:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify Python source and short synthetic tests without network
+        run: |
+          python -m py_compile src/editorial_routerai_two_articles.py
+          python -m unittest tests.test_editorial_routerai_adapter -q
+      - name: Run one private two-channel text experiment with spend gate
+        env:
+          ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ROUTERAI_FULL_TEST_RESULT: ${{ runner.temp }}/routerai-full-result.json
+        run: python -m src.editorial_routerai_two_articles
+      - name: Save status only - no article texts in public artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: routerai-private-eval-status
+          path: ${{ runner.temp }}/routerai-full-result.json
+          retention-days: 7
+          if-no-files-found: ignore
