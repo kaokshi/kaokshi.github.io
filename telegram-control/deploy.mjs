@@ -1,7 +1,7 @@
 // Explicit one-time deployment of a new, isolated read-only Worker.
 // No package downloads, paid model requests, GitHub writes or editorial changes.
 import {readFile} from "node:fs/promises";
-import {randomBytes} from "node:crypto";
+import {randomBytes,createHmac} from "node:crypto";
 const SCRIPT="zen-editorial-control";
 const account=process.env.CLOUDFLARE_ACCOUNT_ID||"";
 const cfToken=process.env.CLOUDFLARE_API_TOKEN||"";
@@ -64,6 +64,10 @@ async function main(){
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"worker.mjs",compatibility_date:"2026-11-24",bindings,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
+ for(const module of ["miniapp.mjs","ui.mjs"]){
+  const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
+  form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
+ }
  await cf("/scripts/"+SCRIPT,"PUT",form);
  stage="enable_worker_subdomain";
  await cf("/scripts/"+SCRIPT+"/subdomain","POST",{enabled:true,previews_enabled:false});
@@ -90,6 +94,27 @@ async function main(){
  const ownerReply=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:JSON.stringify({message:{chat:{type:"private",id:Number(owner)},from:{id:Number(owner),is_bot:false},text:"/start"}}),redirect:"error",signal:AbortSignal.timeout(20000)});
  requireOk(ownerReply.ok,"owner_reply_http_"+ownerReply.status);
  console.log("OWNER_REPLY_CONFIRMED");
+ stage="verify_miniapp";
+ const page=await fetch(endpoint+"/app",{redirect:"error",signal:AbortSignal.timeout(8000)});
+ requireOk(page.ok&&(await page.text()).includes("ZEN CONTROL"),"app_page_unavailable");
+ const unauthorized=await fetch(endpoint+"/api/dashboard",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({initData:"invalid"}),redirect:"error",signal:AbortSignal.timeout(8000)});
+ requireOk(unauthorized.status===401,"app_auth_gate_failed");
+ const params=new URLSearchParams({auth_date:String(Math.floor(Date.now()/1000)),user:JSON.stringify({id:Number(owner),is_bot:false}),query_id:"deploy-test"});
+ const data=[...params.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([k,v])=>k+"="+v).join("\n");
+ const signKey=createHmac("sha256","WebAppData").update(botToken).digest();
+ params.set("hash",createHmac("sha256",signKey).update(data).digest("hex"));
+ const appResponse=await fetch(endpoint+"/api/dashboard",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({initData:params.toString()}),redirect:"error",signal:AbortSignal.timeout(15000)});
+ requireOk(appResponse.ok,"signed_dashboard_failed");
+ const dashboard=await appResponse.json();
+ requireOk(dashboard.mode==="read_only","app_mode_invalid");
+ console.log("MINIAPP_AUTH_CONFIRMED");
+ console.log("MINIAPP_BALANCE_AVAILABLE="+(typeof dashboard.balance==="number"));
+ stage="miniapp_menu";
+ requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app"}}})===true,"miniapp_menu_failed");
+ const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
+ requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app","miniapp_menu_not_verified");
+ console.log("MINIAPP_MENU_CONFIRMED");
+ console.log("MINIAPP_URL="+endpoint+"/app");
  stage="commands";
  try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},
