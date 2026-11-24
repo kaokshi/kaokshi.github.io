@@ -23,8 +23,12 @@ def accept(core, envelope, expected_id):
                    ("executionEnabled", "publicationAuthorized", "rssEnabled"))):
         raise ValueError("unsafe_intake_envelope")
     intent = envelope.get("intent")
-    if not isinstance(intent, dict) or set(intent) != {"id", "plan", "releaseAt"} or intent["id"] != expected_id:
+    if not isinstance(intent, dict) or set(intent) != {"id", "plan", "releaseAt", "mode"} or intent["id"] != expected_id:
         raise ValueError("intent_id_or_schema_mismatch")
+    if intent["mode"] not in ("manual", "semi_autonomous", "autonomous"):
+        raise ValueError("invalid_execution_mode")
+    if any(core.policy.get(k) is not False for k in ("execution_enabled", "publication_enabled", "rss_enabled")):
+        raise ValueError("core_not_in_intake_only_mode")
     return core.submit(intent)
 
 
@@ -84,21 +88,17 @@ def push_receipt(endpoint, secret, receipt):
 
 
 def main():
-    from src.editorial_zen_core import Core
+    from src.editorial_zen_cloud import CloudCore, GitHubStore
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", required=True)
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--job", required=True)
     parser.add_argument("--report", action="store_true", help="Send informational snapshot after intake")
     args = parser.parse_args()
-    # The database must be on the existing executor's protected persistent volume.
-    core = Core(args.db)
-    if any(core.policy.get(k) is not False for k in ("execution_enabled", "publication_enabled", "rss_enabled")):
-        raise ValueError("core_not_in_intake_only_mode")
+    core = CloudCore(GitHubStore(os.environ.get("EDITORIAL_PRIVATE_TOKEN")))
     envelope = pull(args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), args.job)
-    job_id = accept(core, envelope, args.job)
+    job_id = core.access(lambda c: accept(c, envelope, args.job), change=True)
     if args.report:
-        push_receipt(args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), build_receipt(core, job_id))
+        push_receipt(args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), core.access(lambda c: build_receipt(c, job_id)))
     print(json.dumps({"id": job_id, "mode": "intents_only", "receiptConfirmed": args.report,
                       "executed": False, "publicationAuthorized": False}))
 
