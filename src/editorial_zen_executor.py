@@ -16,6 +16,7 @@ from .editorial_routerai_smoke import UnsafeToTest, call, credits
 from .editorial_routerai_two_articles import MODELS, ROOT, Spend, evaluate_channel, json_bytes, money, safe_reason
 from .editorial_zen_cloud import CloudCore, GitHubStore
 from .editorial_zen_core import CONFIG, STAGES, CoreBlocked
+from .editorial_zen_control import configured_guard
 
 SEED_ROUTE = "/models/" + MODELS["image"] + "/endpoints"
 
@@ -94,6 +95,7 @@ class MeteredRouter(Spend):
                 lambda core: core.reserve_call(operation, self.session.article, phase, reason, bound, slot=slot,
                                                hold=reserve), change=True)
             # From this point an absent response means uncertain billing. Never resend.
+            self.session.check_control()
             answer = self.transport(path, self.token, body,
                                     limit=12_000_000 if role == "image" else 350000,
                                     timeout=180, exact_numbers=True)
@@ -128,8 +130,9 @@ class MeteredRouter(Spend):
 
 
 class Session:
-    def __init__(self, core, article, *, target=None):
+    def __init__(self, core, article, *, target=None, guard=None):
         self.core, self.article, self.target = core, article, target
+        self.guard = guard
         self.plan, self.next_stage = core.access(lambda c: c.article_work(article))
         self.channel = article.split("/")[1]
         self.prefix = "articles/" + digest(article) + "/"
@@ -153,7 +156,12 @@ class Session:
             plan = json.loads(json.loads(data)["output"])
             self.core.access(lambda c: c.register_title(self.article, self.channel, plan["title"]), change=True)
 
+    def check_control(self):
+        if self.guard is not None:
+            self.guard(self.article.split("/", 1)[0], self.mode)
+
     def permit(self, stage):
+        self.check_control()
         if self.target and STAGES.index(stage) > STAGES.index(self.target):
             raise Pause("requested_stage_boundary")
         if self.mode == "semi_autonomous" and stage in ("images", "package"):
@@ -235,10 +243,11 @@ class Session:
         self.permit("package")
 
 
-def execute(core, article, token, *, target=None, transport=call, balance=credits, pipeline=evaluate_channel):
+def execute(core, article, token, *, target=None, transport=call, balance=credits, pipeline=evaluate_channel, guard=None):
     if target is not None and target not in STAGES:
         raise CoreBlocked("unknown_target_stage")
-    session = Session(core, article, target=target)
+    session = Session(core, article, target=target, guard=guard or configured_guard())
+    session.check_control()
     if session.next_stage is None:
         return
     router = MeteredRouter(session, token, transport=transport, balance=balance)
