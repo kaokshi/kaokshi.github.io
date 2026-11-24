@@ -148,3 +148,36 @@ test("private image proxy validates repository and returns raster bytes",async()
   assert.equal(result.type,"image/jpeg");assert.equal(calls,2);
  }finally{globalThis.fetch=original;}
 });
+
+import {ReviewJournal,validateDecision} from "./journal.mjs";
+const decision={action:"revise",channel:"science",revision:"a".repeat(40),run:"45395283968",id:"9b00a000-1111-4222-8333-444444444444",note:"Проверить научный факт",target:"article"};
+const review={revision:decision.revision,run:decision.run,articles:[{channel:"science",text:"Черновик",assembled:false,textQA:"passed",imageQA:"failed",images:[{path:"routerai-validation/45395283968/science/images/image-01.jpg"}]}]};
+test("review decision is bound to exact revision and ready material",()=>{
+ assert.ok(validateDecision(decision,review).entry);
+ assert.equal(validateDecision({...decision,revision:"b".repeat(40)},review).error,"stale_revision");
+ assert.equal(validateDecision({...decision,action:"approve"},review).error,"not_ready");
+ assert.equal(validateDecision({...decision,note:"  "},review).error,"note_required");
+ assert.equal(validateDecision({...decision,target:"unknown"},review).error,"invalid_target");
+ assert.ok(validateDecision({...decision,target:review.articles[0].images[0].path},review).entry);
+ assert.equal(validateDecision({...decision,action:"publish"},review).status,400);
+ const ready={...review,articles:[{...review.articles[0],assembled:true,assembledVerified:true,imageQA:"passed"}]};
+ assert.ok(validateDecision({...decision,action:"approve"},ready).entry);
+});
+test("journal is persistent and idempotent, conflicting replay rejected",async()=>{
+ const store=new Map();
+ const storage={get:async k=>store.get(k),put:async(k,v)=>store.set(k,v),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage)};
+ const obj=new ReviewJournal({storage});
+ const entry=validateDecision(decision,review).entry;
+ const req=e=>new Request("https://journal.internal/",{method:"POST",body:JSON.stringify(e)});
+ assert.equal((await obj.fetch(req(entry))).status,200);
+ assert.equal((await obj.fetch(req({...entry,at:new Date(0).toISOString()}))).status,200);
+ assert.equal((await obj.fetch(req({...entry,note:"Other"}))).status,409);
+ const restarted=new ReviewJournal({storage});
+ assert.deepEqual((await (await restarted.fetch(new Request("https://journal.internal/"))).json()).entries,[entry]);
+});
+test("journal and decision endpoints reject non-owner before storage access",async()=>{
+ for(const path of ["/api/journal","/api/review"]){
+  const r=await worker.fetch(new Request("https://example.test"+path,{method:"POST",body:JSON.stringify({initData:signed(124)})}),{...env,REVIEW_JOURNAL:{idFromName(){throw Error("must not touch");}}});
+  assert.equal(r.status,401);
+ }
+});
