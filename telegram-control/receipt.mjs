@@ -1,6 +1,7 @@
 // Authenticated executor reports are informational; they never authorize work or release.
 import {exportIntent} from "./intake.mjs";
 import {STAGES} from "./production.mjs";
+import {reportEvents} from "./notifications.mjs";
 const stages=STAGES.filter(s=>s.id!=="rss").map(s=>s.id);
 const statuses=new Set(["not_started","passed","failed","blocked"]);
 const money=v=>typeof v==="string"&&/^\d{1,9}(?:\.\d{1,12})?$/.test(v)&&Number.isFinite(Number(v));
@@ -44,6 +45,6 @@ export async function recordReceipt(storage,d,now=Date.now()){
   if(old&&receipt.observedAt===old.observedAt)return JSON.stringify(old)===JSON.stringify(receipt)?{status:200,body:{accepted:true,replay:true}}:bad(409,"receipt_conflict");
   if(old&&old.articles.some((a,i)=>a.stages.some((s,j)=>s.status==="passed"&&receipt.articles[i].stages[j].status!=="passed")))return bad(409,"passed_stage_regression");
   await tx.put(key,{...job,executorReceipt:receipt});
-  return {status:200,body:{accepted:true,replay:false}};
+  return {status:200,body:{accepted:true,replay:false},receipt,events:reportEvents(old,receipt)};
  });
 }
