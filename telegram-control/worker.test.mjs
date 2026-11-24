@@ -430,3 +430,26 @@ test("memory API rejects non-owner and stores only confirmed owner notes",async(
  const get=await h.fetch(new Request("https://core.internal/core/memory"));
  assert.deepEqual((await get.json()).memory.notes,d.notes);
 });
+
+import {diagnose} from "./diagnostics.mjs";
+test("diagnostics distinguishes expected safety locks from missing timer and conflicting budgets",()=>{
+ const now=Date.parse("2026-11-24T15:00:00Z"),budget={policy:{mainKop:30000},production:{ledgerConnected:false},chat:{accountedRub:10,limitRub:10,calls:20}};
+ const d=diagnose({ops:{requestedMode:"autonomous"},settings:{paused:false},next:[{}],alarmAt:null,budget,readiness:{verified:true,configuredDailyRub:150}},now);
+ const codes=d.findings.map(f=>f.code);
+ for(const code of ["production_locked","mode_not_effective","alarm_missing","budget_mismatch","ledger_disconnected","chat_limit"])assert.ok(codes.includes(code));
+ assert.equal(d.findings[0].severity,"critical");assert.equal(d.productionEnabled,false);assert.equal(d.automaticRecoveryEnabled,false);
+ const paused=diagnose({ops:{stopped:true},settings:{paused:true},next:[{}],budget},now);
+ assert.ok(!paused.findings.some(f=>f.code==="alarm_missing"));
+});
+test("diagnostics flags stale evidence and uncertain charges without guessing root cause",()=>{
+ const now=Date.parse("2026-11-24T15:00:00Z");
+ const d=diagnose({jobs:[{id:"j",preview:{},executorReceipt:{observedAt:now-400000,budget:{day:"2026-11-24",unsettledRequest:true,mainRemainingRub:"0",reserveRemainingRub:"0"},articles:[{id:"j/science/1",stages:[{id:"images",status:"failed"}]}]}},{id:"cancelled",status:"cancelled"},{id:"missing",preview:{}}],messages:[{id:"chat",status:"failed",cost:null}]},now);
+ for(const code of ["receipt_stale","charge_unsettled","main_exhausted","reserve_exhausted","stage_failed","receipt_missing","chat_charge_unknown"])assert.ok(d.findings.some(f=>f.code===code));
+ assert.equal(d.findings.find(f=>f.code==="stage_failed").evidence.stale,true);
+ assert.ok(!d.findings.some(f=>f.scope==="cancelled"));
+ assert.equal(d.publicationAuthorized,false);
+});
+test("diagnostics endpoint rejects non-owner before config or storage access",async()=>{
+ const r=await worker.fetch(new Request("https://example.test/api/core/diagnostics",{method:"POST",body:JSON.stringify({initData:signed(124)})}),{...env,REVIEW_JOURNAL:{idFromName(){throw Error("must not access");}}});
+ assert.equal(r.status,401);
+});
