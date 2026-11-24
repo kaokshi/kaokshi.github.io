@@ -87,12 +87,12 @@ async function main(){
  const info=await telegram("getWebhookInfo");
  requireOk(info.url===endpoint+"/telegram","webhook_url_mismatch");
  stage="commands";
- requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
+ try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},
   {command:"balance",description:"Баланс RouterAI"},{command:"models",description:"Модели"},
   {command:"articles",description:"Статьи"},{command:"tests",description:"Тесты"},
   {command:"expenses",description:"Расходы"},{command:"help",description:"Помощь"}
- ]})===true,"commands_registration_failed");
+ ]})===true,"commands_registration_failed"); } catch { console.log("COMMAND_MENU_PENDING_OWNER_START"); }
  console.log("DEPLOY_OK");
  console.log("BOT_LINK=https://t.me/"+me.username);
  console.log("BALANCE_CONFIGURED="+Boolean(router));
