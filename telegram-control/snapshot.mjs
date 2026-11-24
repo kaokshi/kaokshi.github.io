@@ -48,7 +48,7 @@ export async function buildSnapshot(token){
   const assembled=await read(dir+"/article.md",30000);
   const text=assembled&&row.assembled===true?assembled:await read(dir+"/deepseek-edited.md",30000);
   const files=Array.isArray(row.accepted_files)?row.accepted_files.filter(x=>/^image-[0-9]{2}\.(?:jpg|jpeg|png)$/.test(x)).slice(0,12):[];
-  articles.push({channel,name,text,assembled:row.assembled===true,textQA:safeText(row.text_qa),imageQA:safeText(row.image_qa),accepted:num(row.accepted_images),rub:num(report.spend?.by_channel_rub?.[channel]),sourceUrl:"https://github.com/"+REPO+"/tree/"+head.sha+"/"+dir,images:files.map(file=>({name:file,path:dir+"/images/"+file,url:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+dir+"/images/"+file}))});
+  articles.push({channel,name,text,assembled:row.assembled===true,assembledVerified:Boolean(assembled&&row.assembled===true),textQA:safeText(row.text_qa),imageQA:safeText(row.image_qa),accepted:num(row.accepted_images),rub:num(report.spend?.by_channel_rub?.[channel]),sourceUrl:"https://github.com/"+REPO+"/tree/"+head.sha+"/"+dir,images:files.map(file=>({name:file,path:dir+"/images/"+file,url:"https://github.com/"+REPO+"/blob/"+head.sha+"/"+dir+"/images/"+file}))});
  }
  const summary=await read(root+"/summary-ru.md",30000);
  const offline=await read(root+"/offline-image-review-ru.md",30000);
