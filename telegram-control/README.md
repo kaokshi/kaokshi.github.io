@@ -9,3 +9,9 @@ Isolated Cloudflare Worker, read-only. No paid generations, publication, reposit
 5. Run node --test worker.test.mjs locally. Never rerun paid editorial tests from this bot.
 
 Current limitations: /status reports mode only, /models lists intended models, /expenses is not connected, /articles and /tests list private result directories (not completed article content). No automatic notifications or controls yet. Future commands should use a durable authorization/approval and budget layer, not direct LLM execution. Telegram delivery can duplicate read-only replies on webhook retries.
+
+## Offline production and finance checks (2026-11-24)
+
+`adapter.mjs` builds only a deterministic draft-task graph from existing confirmed jobs; it never dispatches a workflow, creates an article, or authorizes RSS. `spend-simulation.mjs` is isolated under the `simulation:spend:` storage namespace, without public endpoints or any live provider integration. Its synthetic context assumes verified owner policy, matching daily configuration, a monthly cap, and opening fixture funds. It reserves in integer kopecks, checks daily/monthly limits and Moscow dates, records atomic article starts, rejects replays, and retains uncertain charges while halting new reservations. Actual provider balance, price bounds, authenticated receipts, cross-worker ledger, and manual reconciliation of ambiguous charges still need verified production integration. No simulated balance or receipt may be shown as live expenditure. Do not enable production on the basis of these tests.
+
+Run `node --test telegram-control/worker.test.mjs telegram-control/adapter.test.mjs telegram-control/spend-simulation.test.mjs` from the repository root. The offline workflow requires no secrets and does not deploy.
