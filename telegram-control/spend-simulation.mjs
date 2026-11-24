@@ -31,12 +31,16 @@ export async function simulateReserve(storage,context,op,now=Date.now()){
   const daily=await tx.get(dayKey(day))||totals();
   const monthly=await tx.get(monthKey(month))||0;
   const outstanding=await tx.get(P+"outstanding")||0;
-  if(!money(daily.mainKop)||!money(daily.reserveKop)||!money(monthly)||!money(outstanding))return deny("invalid_ledger");
+  const settled=await tx.get(P+"settled")||0;
+  if(!money(daily.mainKop)||!money(daily.reserveKop)||!money(monthly)||!money(outstanding)||!money(settled))return deny("invalid_ledger");
   if(monthly+op.boundKop>context.monthlyCapKop)return deny("monthly_cap");
-  if(outstanding+op.boundKop>context.availableKop)return deny("insufficient_balance");
+  // availableKop is the fixture opening funds, not a live balance snapshot.
+  if(settled+outstanding+op.boundKop>context.availableKop)return deny("insufficient_balance");
   const article=await tx.get(articleKey(op.articleId));
   // A reservation alone is not evidence that the article was started.
   const started=article?.status==="started";
+  if(article?.status==="finished")return deny("article_finished");
+  if(started&&op.kind==="new_article")return deny("article_already_started");
   const d=budgetDecision(context.policy,{...daily,verified:true},{...op,started});
   if(!d.allowed)return deny(d.reason);
   const operation=Object.fromEntries(["id","articleId","kind","boundKop","attempt","required"].map(k=>[k,op[k]]));
@@ -71,13 +75,24 @@ export async function simulateSettle(storage,id,result){
   await tx.put(dayKey(old.day),{mainKop:daily.mainKop-old.mainKop+main,reserveKop:daily.reserveKop-old.reserveKop+reserve});
   await tx.put(monthKey(old.month),monthly-bound+actual);
   await tx.put(P+"outstanding",outstanding-bound);
+  await tx.put(P+"settled",(await tx.get(P+"settled")||0)+actual);
   const receipt={...old,status:result.status,actualKop:actual,mainKop:main,reserveKop:reserve};
   await tx.put(key,receipt);
   if(result.status==="charged"&&old.operation.kind==="new_article")await tx.put(articleKey(old.operation.articleId),{status:"started",evidenceId:id});
   return {allowed:true,...receipt};
  });
 }
+// Explicit synthetic completion evidence; never called from Telegram or live QA.
+export async function simulateFinishArticle(storage,articleId){
+ if(!idOk(articleId))return deny("invalid_article");
+ return storage.transaction(async tx=>{
+  const key=articleKey(articleId),article=await tx.get(key);
+  if(article?.status!=="started")return deny("article_not_started");
+  await tx.put(key,{...article,status:"finished"});
+  return {allowed:true,mode:"simulation",liveAuthorized:false};
+ });
+}
 export async function simulationSummary(storage,now=Date.now()){
  const day=dayAt(now);
- return storage.transaction(async tx=>({mode:"simulation",liveAuthorized:false,day,accounted:await tx.get(dayKey(day))||totals(),monthlyAccountedKop:await tx.get(monthKey(day.slice(0,7)))||0,outstandingKop:await tx.get(P+"outstanding")||0,halt:await tx.get(P+"halt")||null,reserveCapKop:RESERVE_KOP}));
+ return storage.transaction(async tx=>({mode:"simulation",liveAuthorized:false,day,accounted:await tx.get(dayKey(day))||totals(),monthlyAccountedKop:await tx.get(monthKey(day.slice(0,7)))||0,outstandingKop:await tx.get(P+"outstanding")||0,settledKop:await tx.get(P+"settled")||0,halt:await tx.get(P+"halt")||null,reserveCapKop:RESERVE_KOP}));
 }
