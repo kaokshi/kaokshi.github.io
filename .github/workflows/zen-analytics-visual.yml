@@ -1,0 +1,27 @@
+name: ZEN Analytics visual validation
+on:
+  push:
+    branches: [assistant/zen-control-statistics-20261124]
+    paths: ['.github/workflows/zen-analytics-visual.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --package-lock=false playwright@1.51.1
+      - run: npx playwright install --with-deps chromium
+      - run: node --test telegram-control/statistics.test.mjs telegram-control/metrika.test.mjs
+      - run: node telegram-control/analytics-browser-test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analytics-synthetic-previews
+          path: analytics-*.png
+          if-no-files-found: ignore
+          retention-days: 2
