@@ -1,9 +1,12 @@
-name: ZEN CONTROL v0.9 operations
+name: ZEN CONTROL guarded deployment
 on:
-  push:
-    branches: [feature/telegram-control-mvp]
-    paths: ['.github/workflows/telegram-control-deploy.yml']
   workflow_dispatch:
+    inputs:
+      confirm_update:
+        description: 'Confirm updating the existing Telegram Worker (no production or RSS)'
+        type: boolean
+        default: false
+        required: true
 permissions:
   contents: read
 concurrency:
@@ -11,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/feature/telegram-control-mvp'
+    if: github.ref == 'refs/heads/integration/zen-core-routerai-20261124' && inputs.confirm_update == true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -25,7 +28,7 @@ jobs:
         with:
           node-version: '22'
       - name: Offline authorization tests
-        run: node --test worker.test.mjs
+        run: node --test *.test.mjs
       - name: Deploy read-only bot and register webhook
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
@@ -34,5 +37,7 @@ jobs:
           TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
           EDITORIAL_REVIEW_READ_TOKEN: ${{ secrets.EDITORIAL_REVIEW_READ_TOKEN }}
           EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+          ZEN_CONTROL_CONFIRM_UPDATE: 'true'
           ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
         run: node deploy.mjs
