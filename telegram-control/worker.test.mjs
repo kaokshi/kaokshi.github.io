@@ -181,3 +181,37 @@ test("journal and decision endpoints reject non-owner before storage access",asy
   assert.equal(r.status,401);
  }
 });
+
+import {CoreHandler,initial,validateSchedule,slots,nextSlots} from "./core.mjs";
+const plan={...initial(),paused:false,leadMinutes:360,channels:[{channel:"cinema",enabled:false,times:[]},{channel:"legends",enabled:true,times:["09:00","19:00"]},{channel:"science",enabled:true,times:["12:00"]}]};
+test("schedule validates all channels and rejects duplicate or invalid times",()=>{
+ assert.ok(validateSchedule(plan));
+ assert.equal(validateSchedule({...plan,timezone:"UTC"}),null);
+ assert.equal(validateSchedule({...plan,channels:[plan.channels[0],{...plan.channels[1],times:["09:00","09:00"]},plan.channels[2]]}),null);
+ assert.equal(validateSchedule({...plan,channels:[plan.channels[0],{...plan.channels[1],times:["25:00"]},plan.channels[2]]}),null);
+});
+test("Moscow release and preparation slots cross midnight and pause safely",()=>{
+ const n=Date.parse("2026-11-24T00:00:00Z");
+ const list=slots(plan,n);
+ assert.equal(list.find(x=>x.id==="legends:2026-11-24:09:00:release").at,Date.parse("2026-11-24T06:00:00Z"));
+ assert.equal(list.find(x=>x.id==="legends:2026-11-24:09:00:prepare").at,n);
+ assert.ok(nextSlots(plan,n).every(x=>x.at>n));
+ assert.deepEqual(slots({...plan,paused:true},n),[]);
+});
+test("scheduler records blocked events idempotently, never performs production",async()=>{
+ const store=new Map();let alarm=null;
+ const storage={get:async k=>store.get(k),put:async(k,v)=>store.set(k,v),delete:async k=>store.delete(k),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage),getAlarm:async()=>alarm,setAlarm:async n=>alarm=n,deleteAlarm:async()=>alarm=null};
+ const h=new CoreHandler({storage});
+ const n=Date.parse("2026-11-24T06:00:00Z");
+ await storage.put("core:settings",plan);await storage.put("core:cursor",n-1);
+ await h.alarm(n);await h.alarm(n);
+ const v=await h.view(n);
+ assert.equal(v.events.length,1);assert.equal(v.events[0].status,"blocked_prelaunch");
+ assert.equal(v.productionEnabled,false);assert.equal(v.rssEnabled,false);assert.ok(alarm>n);
+});
+test("core and RSS endpoints reject non-owner before external calls",async()=>{
+ for(const path of ["/api/core","/api/core/schedule","/api/core/order","/api/rss"]){
+  const r=await worker.fetch(new Request("https://example.test"+path,{method:"POST",body:JSON.stringify({initData:signed(124)})}),env);
+  assert.equal(r.status,401);
+ }
+});
