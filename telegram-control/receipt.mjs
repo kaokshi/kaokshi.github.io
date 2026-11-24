@@ -21,9 +21,12 @@ function cleanReport(d,job,now){
   for(let n=0;n<stages.length;n++){
    const s=a.stages[n];if(s?.id!==stages[n]||!statuses.has(s.status))return null;
    if(s.status!=="not_started"&&clean.some(p=>p.status!=="passed"))return null;
-   clean.push({id:s.id,status:s.status});
+   if(s.reason!==undefined&&(typeof s.reason!=="string"||! /^[a-z0-9_]{1,120}$/.test(s.reason)||!["blocked","failed"].includes(s.status)))return null;
+   clean.push({id:s.id,status:s.status,...(s.reason?{reason:s.reason}:{})});
   }
-  articles.push({id,meteredRub:a.meteredRub,stages:clean});
+  const slots=a.acceptedImageSlots;
+  if(slots!==undefined&&(!Array.isArray(slots)||slots.length>7||slots.some((x,i)=>!Number.isInteger(x)||x<0||x>6||i>0&&x<=slots[i-1])))return null;
+  articles.push({id,meteredRub:a.meteredRub,stages:clean,...(slots!==undefined?{acceptedImageSlots:slots}:{})});
  }
  const b=d.budget;
  if(!b||!/^\d{4}-\d{2}-\d{2}$/.test(b.day)||b.timezone!=="Europe/Moscow"||
@@ -54,6 +57,7 @@ export async function recordReceipt(storage,d,now=Date.now()){
   if(old&&receipt.observedAt<old.observedAt)return bad(409,"stale_receipt");
   if(old&&receipt.observedAt===old.observedAt)return JSON.stringify(old)===JSON.stringify(receipt)?{status:200,body:{accepted:true,replay:true}}:bad(409,"receipt_conflict");
   if(old&&old.articles.some((a,i)=>a.stages.some((s,j)=>s.status==="passed"&&receipt.articles[i].stages[j].status!=="passed")))return bad(409,"passed_stage_regression");
+  if(old&&old.articles.some((a,i)=>a.acceptedImageSlots?.some(s=>!receipt.articles[i].acceptedImageSlots?.includes(s))))return bad(409,"accepted_image_regression");
   await tx.put(key,{...job,executorReceipt:receipt,...(receipt.stageAcknowledgment?{stageAcknowledgment:receipt.stageAcknowledgment}:{})});
   const latest=await tx.get("budget:executor-report");
   if(!latest||receipt.observedAt>latest.observedAt)await tx.put("budget:executor-report",{observedAt:receipt.observedAt,budget:receipt.budget});
