@@ -59,7 +59,9 @@ export async function controlView(storage,id,now=Date.now()){
   const ops=await opsState(tx),job=await tx.get("production:job:"+id),intent=exportIntent(job);
   const mode=modeFor(ops),transition=transitionFor(ops),settings=await tx.get("core:settings");
   const effective=transition?job?.executorReceipt?.effectiveMode:intent?.mode;
-  const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":job.origin==="schedule"&&settings?.paused!==false?"schedule_paused":transition&&job.executorReceipt?.modeRevision!==transition.revision?"mode_sync_pending":effective!==mode?"mode_changed":null;
+  const policy=await tx.get("budget:policy");
+  const mismatch=Boolean(policy&&(policy.mainKop!==30000||policy.reserveKop!==5000));
+  const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":job.origin==="schedule"&&settings?.paused!==false?"schedule_paused":transition&&job.executorReceipt?.modeRevision!==transition.revision?"mode_sync_pending":effective!==mode?"mode_changed":mismatch?"budget_policy_mismatch":null;
   return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:effective??null,modeRevision:transition?.revision??0,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
  });
 }
