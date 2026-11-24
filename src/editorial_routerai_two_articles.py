@@ -120,12 +120,14 @@ class Spend:
             self.text_bound("brain", 4200, 1200)
             + self.text_bound("draft", 8500, 3600)
             + self.text_bound("edit", 17000, 8000)
-            + self.text_bound("brain", 18000, 4900)
+            + self.text_bound("brain", 18000, 7500)
             + 7 * self.text_bound("brain", 9000, 700)
             + self.text_bound("brain", 7500, 1000)
         )
         if self.total:
             forecast -= self.text_bound("brain", 4200, 1200) + self.text_bound("draft", 8500, 3600)
+            if report.get("resumed_edited_text"):
+                forecast -= self.text_bound("edit", 17000, 8000)
         self.report["forecast_rub"] = str(forecast + self.total)
         if forecast + self.total > min(BUDGET, self.initial):
             raise UnsafeToTest("initial_run_forecast_exceeds_available_budget")
@@ -182,7 +184,7 @@ class Spend:
         answer = self.request(channel, stage, role, "/chat/completions", {
             "messages": [{"role": "system", "content": SYSTEM},
                          {"role": "user", "content": content}],
-            "max_tokens": cap, "reasoning": {"effort": "low"},
+            "max_tokens": cap, "reasoning": {"enabled": False} if role == "brain" else {"effort": "low"},
         }, self.text_bound(role, tokens, cap), reserve=reserve)
         try:
             choice = answer["choices"][0]
@@ -419,7 +421,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     save(f"{channel}/claude-qa.json", json_bytes(draft_checks))
 
     report["stage"] = channel + "/edit"
-    revised = spend.chat(channel, "edit", "edit", (
+    revised = resume["edited"] if resume and "edited" in resume else spend.chat(channel, "edit", "edit", (
         f"Независимо отредактируй черновик. Исправь логику, повторы, слабые места, "
         f"структуру и ошибки. Верни весь итоговый текст. {rules}\n{facts}\nЧерновик:\n{draft}"
     ), 8000, reserve=reserve)
@@ -446,12 +448,12 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         "после него — по одному конкретному кадру на каждый заголовок по порядку. "
         "Задай общий стиль, постоянные признаки персонажей и мест для мистики, "
         "понятные и научно корректные сцены без имитации документальных доказательств "
-        "для научпопа. Поля subject и brief пиши по-английски для визуальных моделей. "
+        "для научпопа. Поля subject и brief пиши по-английски. Ограничь brief двумя короткими фразами. "
         'Верни JSON {"issues":[],"claims":[{"claim":"дословно","source":"S1",'
         '"quote":"дословно","verdict":"supported"}],"style":"общая визуальная инструкция",'
         '"images":[{"subject":"короткое описание сцены","brief":"промпт для Seedream"}]}. '
         f"Тема: {title}. Текст: {canonical(article)}\n{facts}"
-    ), 4900, reserve=reserve))
+    ), 7500, reserve=reserve))
     issues = audit.get("issues")
     if not isinstance(issues, list) or any(not isinstance(issue, str) for issue in issues):
         raise UnsafeToTest("text_audit_invalid")
@@ -540,21 +542,34 @@ def evaluate(prefix, token, secret, report, resume_id=""):
             report["stage"] = "private_resume_preflight"
             old = f"{PREFIX}/{resume_id}"
             previous = json.loads(github_private(old, token, "test-results.json"))
-            if (previous.get("stage") != "legends/edit"
+            stage = previous.get("stage")
+            calls = previous.get("calls", [])
+            steps = [row.get("stage") for row in calls]
+            first_edit = stage == "legends/edit" and steps == ["plan", "draft", "edit"]
+            visual_plan = (stage == "legends/editorial_and_image_plan"
+                           and steps == ["plan", "draft", "edit", "edit", "editorial_and_image_plan"])
+            if (not (first_edit or visual_plan)
                     or previous.get("reason") != "routerai_incomplete_chat_response"
-                    or [row.get("stage") for row in previous.get("calls", [])] != ["plan", "draft", "edit"]
                     or previous.get("spend", {}).get("unmetered_calls") != 0
-                    or money(previous["balance_delta_rub"]) != money(previous["spend"]["metered_total_rub"])):
+                    or abs(money(previous["balance_delta_rub"])
+                           - money(previous["spend"]["metered_total_rub"])) > Decimal("0.000001")):
                 raise UnsafeToTest("private_resume_checkpoint_invalid")
             plan_file = json.loads(github_private(old, token, "legends/qwen-plan.json"))
             draft = github_private(old, token, "legends/claude-draft.md").decode()
             qa_file = json.loads(github_private(old, token, "legends/claude-qa.json"))
             if digest(plan_file["output"]) != plan_file["sha256"] or digest(draft) != qa_file["text_sha256"]:
                 raise UnsafeToTest("private_resume_checkpoint_hash_mismatch")
-            github_private(old, token, "resume-receipt.json", json_bytes({"continued_at": prefix}))
-            report["calls"] = previous["calls"]
-            report["continued_from"] = old
             resume = {"plan": plan_file["output"], "draft": draft}
+            if visual_plan:
+                edited = github_private(old, token, "legends/deepseek-edited.md").decode()
+                qa_file = json.loads(github_private(old, token, "legends/text-structural-qa.json"))
+                if digest(edited) != qa_file["text_sha256"] or qa_file.get("issues") != []:
+                    raise UnsafeToTest("private_resume_edit_hash_mismatch")
+                resume["edited"] = edited
+                report["resumed_edited_text"] = True
+            github_private(old, token, "resume-receipt.json", json_bytes({"continued_at": prefix}))
+            report["calls"] = calls
+            report["continued_from"] = old
         report["stage"] = "budget_preflight"
         spend = Spend(secret, report)
         catalogue = json.loads((ROOT / "config/editorial_science_sources.json").read_text())

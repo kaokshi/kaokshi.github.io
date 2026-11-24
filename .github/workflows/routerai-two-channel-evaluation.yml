@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       resume_run_id:
-        description: Previous private run ID to continue from an incomplete first edit
+        description: Previous private run ID to continue from an incomplete text-stage response
         required: false
         type: string
 permissions:
