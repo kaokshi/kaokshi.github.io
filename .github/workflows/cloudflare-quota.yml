@@ -1,9 +1,6 @@
-name: Cloudflare Workers AI quota (read-only)
+name: Cloudflare Workers AI quota (read-only) — legacy manual diagnostics
 on:
   workflow_dispatch:
-  schedule:
-    # 09:30 Moscow time; scheduling may be delayed by GitHub.
-    - cron: '30 6 * * *'
   pull_request:
     paths:
       - '.github/workflows/cloudflare-quota.yml'
