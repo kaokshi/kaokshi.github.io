@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {bridgeRequest,exportIntent,intakeView,controlView} from "./intake.mjs";
+import {bridgeRequest,exportIntent,intakeView,controlView,queueView} from "./intake.mjs";
 const job={id:"agent:fixture",status:"blocked_prelaunch",executed:false,publicationAuthorized:false,preview:{mode:"dry_run"},plan:{items:[{channel:"legends",count:2},{channel:"science",count:1}],day:"2026-11-25",instructions:"Synthetic fixture only"},releaseAt:Date.parse("2026-11-25T09:00:00Z")};
 test("maps exact PR85 contract and converts epoch milliseconds to ISO",()=>{assert.deepEqual(exportIntent(job),{id:job.id,plan:job.plan,releaseAt:"2026-11-25T09:00:00.000Z",mode:"manual"});for(const change of [{preview:null},{status:"cancelled"},{executed:true},{publicationAuthorized:true},{releaseAt:"bad"},{plan:{...job.plan,items:[{channel:"cinema",count:1}]}}])assert.equal(exportIntent({...job,...change}),null);});
 test("intake only exports existing confirmed preview; pause prevents export",async()=>{const map=new Map([["production:job:"+job.id,job]]);const s={get:async k=>map.get(k),transaction:async fn=>fn(s)};const r=await intakeView(s,job.id);assert.equal(r.status,200);assert.equal(r.body.executionEnabled,false);assert.equal(r.body.publicationAuthorized,false);assert.equal(r.body.rssEnabled,false);assert.equal((await intakeView(s,"missing")).status,404);map.set("ops:state",{stopped:true});assert.equal((await intakeView(s,job.id)).status,409);});
@@ -20,4 +20,15 @@ test("control reports pause, cancellation and changed mode without granting exec
 test("control endpoint rejects wrong bearer before touching storage",async()=>{
  const req=new Request("https://fixture.invalid/internal/zen-core/control",{method:"POST",body:JSON.stringify({id:job.id})});
  const r=await bridgeRequest(req,{ZEN_CORE_INTAKE_SECRET:"a".repeat(64),REVIEW_JOURNAL:{idFromName(){throw Error("unexpected storage");}}});assert.equal(r.status,401);
+});
+
+test("queue scans old and new jobs, excludes acknowledged, unconfirmed, cancelled and mismatched jobs",async()=>{
+ const m=new Map(), add=(n,changes={})=>{const id="job:"+n;const key="production:index:"+String(n).padStart(15,"0")+":"+id;m.set(key,id);m.set("production:job:"+id,{...job,id,...changes});return key;};
+ add(1);add(2,{preview:null});add(3,{status:"cancelled"});add(4,{executorReceipt:{}});add(5,{preview:{executorMode:"autonomous"}});add(6,{origin:"schedule"});
+ for(let n=7;n<=20;n++)add(n,{status:"cancelled"});add(21);
+ const s={get:async k=>m.get(k),transaction:async f=>f(s),list:async o=>new Map([...m].filter(([k])=>k.startsWith(o.prefix)&&(!o.startAfter||k>o.startAfter)).sort(([a],[b])=>a.localeCompare(b)).slice(0,o.limit))};
+ const a=await queueView(s);assert.deepEqual(a.body.ids,["job:1"]);assert.ok(a.body.nextCursor);
+ assert.deepEqual((await queueView(s,a.body.nextCursor)).body.ids,["job:21"]);
+ assert.equal((await queueView(s,"bad")).status,400);
+ m.set("ops:state",{stopped:true});assert.deepEqual((await queueView(s)).body.ids,[]);
 });
