@@ -31,3 +31,14 @@ test("authenticated production claim is still disabled and unauthenticated bridg
  const r=await bridgeRequest(new Request("https://example.invalid/internal/zen-core/account",{method:"POST",body:JSON.stringify({...op,action:"claim"})}),{ZEN_CORE_INTAKE_SECRET:"a".repeat(64)});
  assert.equal(r.status,401);
 });
+
+test("account status is read-only and omits private chat contents",async()=>{
+ const s=fixture();
+ await s.put("account:production-hold",{...op,startedAt:now});
+ await s.put("agent:charge-hold",{id:"fixture-chat",startedAt:now,status:"unknown",text:"private fixture"});
+ const r=await accountView(s,{action:"status"},now);
+ assert.equal(r.body.schema,"zen-core/account-status-v1");assert.equal(r.body.production.operation,op.operation);
+ assert.equal(r.body.chat.status,"unknown");assert.equal(Object.hasOwn(r.body.chat,"text"),false);
+ assert.equal(r.body.executionEnabled,false);
+ assert.equal((await s.get("agent:charge-hold")).status,"unknown");
+});
