@@ -23,3 +23,23 @@ test("no paid or publishing command",async()=>{
  assert.match(await command("/balance",env),/не настроен/);
 });
 test("models are explicitly planned",async()=>assert.match(await command("/models",env),/не подтверждение/));
+
+test("owner start sends menu with Cloudflare-supported manual redirects",async()=>{
+ const original=globalThis.fetch;
+ let calls=0;
+ globalThis.fetch=async(url,options)=>{
+  calls++;
+  assert.equal(options.redirect,"manual");
+  assert.match(url,/api\.telegram\.org\/bot.*\/sendMessage$/);
+  const body=JSON.parse(options.body);
+  assert.equal(body.chat_id,"123");
+  assert.match(body.text,/режим только просмотра/i);
+  assert.ok(body.reply_markup.keyboard.length);
+  return Response.json({ok:true,result:{message_id:1}});
+ };
+ try {
+  const r=await worker.fetch(new Request("https://example.test/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":env.TELEGRAM_WEBHOOK_SECRET},body:JSON.stringify({message})}),env);
+  assert.equal(r.status,200);
+  assert.equal(calls,1);
+ } finally {globalThis.fetch=original;}
+});
