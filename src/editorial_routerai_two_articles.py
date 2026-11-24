@@ -123,8 +123,8 @@ def one_model(role, prompt, max_tokens, token, previous, initial, ledger):
 
 
 def metrics(text, channel):
-    chars = len(re.sub(r"\\s", "", text))
-    headings = re.findall(r"(?m)^\\*\\*[^\\n*]{4,100}\\*\\*$", text)
+    chars = len(re.sub(r"\s", "", text))
+    headings = re.findall(r"(?m)^\*\*[^\n*]{4,100}\*\*$", text)
     return {
         "chars_without_spaces": chars,
         "bold_headings": len(headings),
@@ -154,7 +154,7 @@ def evaluate():
             "Составь небольшой план будущей статьи для канала " + name +
             ". Дай 4-6 логично связанных разделов, необычный заход, "
             "ключевой поворот и рекомендации по смыслу иллюстраций. "
-            "Не придумывай ссылки. Тематика: " + subject + "\\n" + facts
+            "Не придумывай ссылки. Тематика: " + subject + "\n" + facts
         ), 650, secret, balance, initial, ledger)
         author_prompt = (
             "Ты основной АВТОР статьи русского канала «" + name + "». "
@@ -165,8 +165,8 @@ def evaluate():
             "В конце естественно призови подписаться на канал «" + name + "». "
             "Не добавляй изображения: это отдельная проверка после текста. "
             "Чётко следуй плану, но не копируй его дословно. "
-            "Обязательно соблюдай ограничения:\\n" + facts +
-            "\\nТЕМА: " + subject + "\\nПЛАН ОТ QWEN:\\n" + topic
+            "Обязательно соблюдай ограничения:\n" + facts +
+            "\nТЕМА: " + subject + "\nПЛАН ОТ QWEN:\n" + topic
         )
         draft, balance = one_model("draft", author_prompt, 4100, secret, balance, initial, ledger)
         edit_prompt = (
@@ -177,8 +177,8 @@ def evaluate():
             "В каждом разделе жирный заголовок **Название**. "
             "Сохрани CTA «" + name + "». Не добавляй непроверенные факты, "
             "не выдумывай числа и ссылки. Если исходник короткий, "
-            "раскрой тему без воды. Ограничения:\\n" + facts +
-            "\\nЧЕРНОВИК ОТ CLAUDE:\\n" + draft
+            "раскрой тему без воды. Ограничения:\n" + facts +
+            "\nЧЕРНОВИК ОТ CLAUDE:\n" + draft
         )
         revised, balance = one_model("edit", edit_prompt, 4600, secret, balance, initial, ledger)
         draft_path = PREFIX + "/" + channel + "-claude-draft.md"
@@ -229,13 +229,13 @@ def main():
             print(channel, "PRIVATE_RESULT", entry["edited"])
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
-            out.write("## RouterAI 2-channel text validation\\nStatus: " + report["status"] + "\\n")
+            out.write("## RouterAI 2-channel text validation\nStatus: " + report["status"] + "\n")
             if report["status"] == "completed":
-                out.write("Measured balance delta: " + report["total_delta_rub"] + " RUB\\n")
+                out.write("Measured balance delta: " + report["total_delta_rub"] + " RUB\n")
                 for channel, entry in report["articles"].items():
-                    out.write(channel + ": " + str(entry["edited_metrics"]) + "\\n")
+                    out.write(channel + ": " + str(entry["edited_metrics"]) + "\n")
             else:
-                out.write("Reason: " + report["reason"] + "\\n")
+                out.write("Reason: " + report["reason"] + "\n")
     return rc
 
 
