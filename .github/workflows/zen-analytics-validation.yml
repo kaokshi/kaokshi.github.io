@@ -1,0 +1,54 @@
+name: ZEN Analytics collector validation
+on:
+  push:
+    branches: [assistant/zen-control-statistics-20261124]
+    paths: ['.github/workflows/zen-analytics-validation.yml']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline regression tests
+        run: |
+          python -m unittest discover -s tests -p test_zen_metrika_collector.py -v
+          node --test telegram-control/statistics.test.mjs
+      - name: Read independent counters
+        env:
+          YANDEX_METRIKA_CINEMA_TOKEN: ${{ secrets.YANDEX_METRIKA_CINEMA_TOKEN }}
+          YANDEX_METRIKA_SCIENCE_TOKEN: ${{ secrets.YANDEX_METRIKA_SCIENCE_TOKEN }}
+          YANDEX_METRIKA_LEGENDS_TOKEN: ${{ secrets.YANDEX_METRIKA_LEGENDS_TOKEN }}
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ZEN_METRIKA_OUTPUT: ${{ runner.temp }}/zen-metrika.json
+        run: |
+          python -m src.zen_metrika_collector
+          python - <<'PY'
+          import os,json,urllib.request,urllib.error,base64
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs): return None
+          opener=urllib.request.build_opener(NoRedirect)
+          token=os.environ["EDITORIAL_PRIVATE_TOKEN"]
+          root="https://api.github.com/repos/kaokshi/zen-editorial-review"
+          def req(path,body=None):
+              r=urllib.request.Request(root+path,headers={"Authorization":"Bearer "+token,"Accept":"application/vnd.github+json","User-Agent":"ZEN-Analytics/1.0","Content-Type":"application/json"},data=json.dumps(body).encode() if body is not None else None,method="PUT" if body is not None else "GET")
+              try:
+                  with opener.open(r,timeout=20) as x: return x.status,json.load(x)
+              except urllib.error.HTTPError as e: return e.code,None
+          status,meta=req("")
+          if status!=200 or meta.get("private") is not True: raise SystemExit("PRIVATE_REPO_UNVERIFIED")
+          with open(os.environ["ZEN_METRIKA_OUTPUT"],"rb") as f: raw=f.read()
+          report=json.loads(raw)
+          path="/contents/zen-analytics/collector-validation.json"
+          code,old=req(path)
+          if code not in (200,404): raise SystemExit("PRIVATE_READ_FAILED")
+          body={"message":"Save independent Metrika collector validation","content":base64.b64encode(raw).decode(),"branch":meta["default_branch"]}
+          if code==200: body["sha"]=old["sha"]
+          code,_=req(path,body)
+          if code not in (200,201): raise SystemExit("PRIVATE_WRITE_FAILED")
+          print("PRIVATE_REPORT_SAVED")
+          for channel,entry in report["channels"].items():
+              print(channel.upper()+"_REPORT_STATUS="+entry["status"])
+          if any(e["status"]=="unavailable" for e in report["channels"].values()): raise SystemExit("COLLECTOR_INCOMPLETE")
+          PY
