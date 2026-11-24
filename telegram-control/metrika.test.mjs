@@ -1,0 +1,14 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {sanitizeMetrika,readMetrika} from "./metrika.mjs";
+import {miniApp} from "./miniapp.mjs";
+import {HTML,JS} from "./ui.mjs";
+const now=Date.parse("2026-11-24T20:10:00Z");
+const fixture=()=>({schema:"zen-metrika/v1",collected_at:new Date(now).toISOString(),channels:Object.fromEntries(Object.entries({cinema:114654979,science:114655465,legends:114655507}).map(([channel,counter_id])=>[channel,{channel,counter_id,source:"yandex_metrika",status:"binding_unverified",binding_verified:true,usable_for_editorial_advice:true,periods:{7:{start:"2026-11-17",end:"2026-11-23",totals:{metrics:["ym:s:visits","ym:s:users","ym:s:pageviews","ym:s:bounceRate","ym:s:pageDepth","ym:s:avgVisitDurationSeconds"],totals:[0,0,0,0,0,0]},daily:{metrics:["ym:s:visits","ym:s:pageviews"],rows:[]}}}}]))});
+test("zero visits do not imply zero visit duration",()=>{const r=sanitizeMetrika(fixture(),now);assert.equal(r.reports[0].periods[7].visits,0);assert.equal(r.reports[0].periods[7].avgVisitSeconds,null);assert.equal(r.reports[0].usableForEditorialAdvice,false);assert.equal(r.automaticSync,false);});
+test("wrong counter and future timestamps rejected",()=>{const r=fixture();r.channels.cinema.counter_id=1;assert.equal(sanitizeMetrika(r,now),null);assert.equal(sanitizeMetrika(fixture(),now-120000),null);});
+test("stale snapshot marked",()=>assert.equal(sanitizeMetrika(fixture(),now+7200001).stale,true));
+test("private repository required",async()=>{let calls=0;assert.equal(await readMetrika("fake",async()=>{calls++;return Response.json({full_name:"kaokshi/zen-editorial-review",private:false,visibility:"public"});},now),null);assert.equal(calls,1);});
+test("fixed private file decoded",async()=>{const raw=Buffer.from(JSON.stringify(fixture()));let calls=0;const r=await readMetrika("fake",async(url,opts)=>{assert.equal(opts.redirect,"manual");calls++;return Response.json(calls===1?{full_name:"kaokshi/zen-editorial-review",private:true,visibility:"private"}:{path:"zen-analytics/collector-validation.json",type:"file",encoding:"base64",size:raw.length,content:raw.toString("base64")});},now);assert.equal(calls,2);assert.equal(r.reports.length,3);});
+test("analytics rejects unauthenticated requests",async()=>{const r=await miniApp(new Request("https://example.org/api/analytics/metrika",{method:"POST",body:JSON.stringify({initData:""})}),{},()=>{throw Error("unexpected");});assert.equal(r.status,401);});
+test("UI compiles with separate analytics views",()=>{assert.match(HTML,/id="metrikabody"/);assert.match(HTML,/id="statsbody"/);assert.match(JS,/\/api\/analytics\/metrika/);new Function(JS);});
