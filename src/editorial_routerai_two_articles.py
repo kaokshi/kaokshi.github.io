@@ -439,19 +439,26 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         raise UnsafeToTest("edited_text_structural_check_failed")
 
     report["stage"] = channel + "/editorial_and_image_plan"
+    if records:
+        verify = ("Жанр: научпоп. Выяви неподтверждённые утверждения. В claims перечисли "
+                  "существенные проверяемые утверждения и дословные цитаты из источников. "
+                  'Формат claims: [{"claim":"дословно","source":"S1","quote":"дословно",'
+                  '"verdict":"supported"}]. Иллюстрации научно точные, с ясной композицией, '
+                  "в едином стиле концептуальной графики.")
+    else:
+        verify = ("Жанр: художественная городская мистика. Мистические события допустимы "
+                  "как часть вымышленного сюжета. Укажи реальные внутренние противоречия, если "
+                  "они есть. Источники для вымышленных событий не требуются, claims всегда []. "
+                  "В визуальной инструкции зафиксируй постоянные признаки героев и локаций.")
     audit = object_response(spend.chat(channel, "editorial_and_image_plan", "brain", (
-        "Оцени полный текст после независимой правки DeepSeek на живой русский язык, "
-        "логику, слабые места, повторы, источники и естественный финальный призыв. "
-        "Отметь блокирующие недостатки в issues. Для научпопа перечисли существенные "
-        "проверяемые утверждения дословно и приведи дословные цитаты первичных источников. "
-        "Затем создай визуальный план: первое изображение — выделяющаяся обложка всей статьи; "
-        "после него — по одному конкретному кадру на каждый заголовок по порядку. "
-        "Задай общий стиль, постоянные признаки персонажей и мест для мистики, "
-        "понятные и научно корректные сцены без имитации документальных доказательств "
-        "для научпопа. Поля subject и brief пиши по-английски. Ограничь brief двумя короткими фразами. "
-        'Верни JSON {"issues":[],"claims":[{"claim":"дословно","source":"S1",'
-        '"quote":"дословно","verdict":"supported"}],"style":"общая визуальная инструкция",'
-        '"images":[{"subject":"короткое описание сцены","brief":"промпт для Seedream"}]}. '
+        f"Канал «{name}». {verify} Оцени весь текст после правки DeepSeek на живой русский "
+        "язык, связность, повторы и естественный призыв подписаться. В issues укажи только "
+        "проблемы, которые действительно мешают принять текст для указанного жанра. "
+        "Составь ровно семь промптов Seedream: индекс 0 — самая сильная обложка; "
+        "индексы 1–6 — по одному изображению на каждый из шести разделов в исходном порядке. "
+        "Для каждого промпта дай subject и brief по-английски, brief максимум две фразы. "
+        'Верни JSON с ключами "issues" (массив строк), "claims" (массив), "style" '
+        '(общая визуальная инструкция), "images" (ровно 7 объектов subject и brief). '
         f"Тема: {title}. Текст: {canonical(article)}\n{facts}"
     ), 7500, reserve=reserve))
     issues = audit.get("issues")
@@ -548,8 +555,11 @@ def evaluate(prefix, token, secret, report, resume_id=""):
             first_edit = stage == "legends/edit" and steps == ["plan", "draft", "edit"]
             visual_plan = (stage == "legends/editorial_and_image_plan"
                            and steps == ["plan", "draft", "edit", "edit", "editorial_and_image_plan"])
-            if (not (first_edit or visual_plan)
-                    or previous.get("reason") != "routerai_incomplete_chat_response"
+            wrong_genre = (stage == "legends/editorial_and_image_plan"
+                           and steps == ["plan", "draft", "edit", "edit"] + ["editorial_and_image_plan"] * 2
+                           and previous.get("reason") == "qwen_text_or_source_qa_failed")
+            if (not (first_edit or visual_plan or wrong_genre)
+                    or (not wrong_genre and previous.get("reason") != "routerai_incomplete_chat_response")
                     or previous.get("spend", {}).get("unmetered_calls") != 0
                     or abs(money(previous["balance_delta_rub"])
                            - money(previous["spend"]["metered_total_rub"])) > Decimal("0.000001")):
@@ -560,7 +570,7 @@ def evaluate(prefix, token, secret, report, resume_id=""):
             if digest(plan_file["output"]) != plan_file["sha256"] or digest(draft) != qa_file["text_sha256"]:
                 raise UnsafeToTest("private_resume_checkpoint_hash_mismatch")
             resume = {"plan": plan_file["output"], "draft": draft}
-            if visual_plan:
+            if visual_plan or wrong_genre:
                 edited = github_private(old, token, "legends/deepseek-edited.md").decode()
                 qa_file = json.loads(github_private(old, token, "legends/text-structural-qa.json"))
                 if digest(edited) != qa_file["text_sha256"] or qa_file.get("issues") != []:
