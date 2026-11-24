@@ -1,3 +1,4 @@
+import {buildDryRun} from "./adapter.mjs";
 // Durable production intents. No model inference, GitHub dispatch or publishing.
 export const STAGES=[
  {id:"plan",model:"qwen/qwen3.6-plus",role:"Темы, источники и задания",requires:[]},
@@ -26,6 +27,12 @@ export async function saveJob(tx,id,plan,now,origin="owner",releaseAt=null){
  const old=await tx.get(key);
  if(old)return JSON.stringify(old.plan)===JSON.stringify(plan)?old:null;
  const job=makeJob(id,plan,now,origin,releaseAt);
+ // An owner-confirmed agent order or enabled schedule can prepare an intake-only preview automatically.
+ const mode=(await tx.get("ops:state"))?.requestedMode;
+ if(["agent","schedule"].includes(origin)&&["assisted","autonomous"].includes(mode)){
+  const preview=buildDryRun(job,validateJob,STAGES);
+  if(preview)job.preview={...preview,executorMode:mode==="assisted"?"semi_autonomous":"autonomous",createdAt:job.createdAt};
+ }
  await tx.put(key,job);
  await tx.put("production:index:"+String(now).padStart(15,"0")+":"+id,id);
  return job;
