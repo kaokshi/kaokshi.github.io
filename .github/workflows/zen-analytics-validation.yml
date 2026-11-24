@@ -3,6 +3,9 @@ on:
   push:
     branches: [assistant/zen-control-statistics-20261124]
     paths: ['.github/workflows/zen-analytics-validation.yml']
+concurrency:
+  group: zen-analytics-private-sync
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
@@ -40,11 +43,17 @@ jobs:
           if status!=200 or meta.get("private") is not True: raise SystemExit("PRIVATE_REPO_UNVERIFIED")
           with open(os.environ["ZEN_METRIKA_OUTPUT"],"rb") as f: raw=f.read()
           report=json.loads(raw)
+          if report.get('schema')!='zen-metrika/v1' or set(report.get('channels',{}))!={'cinema','science','legends'} or any(e.get('status') not in ('binding_unverified','mixed_channel_traffic') or set(e.get('periods',{}))!={'7','30'} for e in report['channels'].values()): raise SystemExit('COLLECTOR_INCOMPLETE_KEEP_PREVIOUS')
+          if len(raw)>100000: raise SystemExit('REPORT_TOO_LARGE_KEEP_PREVIOUS')
+          if meta.get('full_name')!='kaokshi/zen-editorial-review' or meta.get('visibility')!='private': raise SystemExit('PRIVATE_REPO_UNVERIFIED')
           path="/contents/zen-analytics/collector-validation.json"
           code,old=req(path)
           if code not in (200,404): raise SystemExit("PRIVATE_READ_FAILED")
-          body={"message":"Save independent Metrika collector validation","content":base64.b64encode(raw).decode(),"branch":meta["default_branch"]}
-          if code==200: body["sha"]=old["sha"]
+          body={"message":"Validate hourly independent Metrika report","content":base64.b64encode(raw).decode(),"branch":meta["default_branch"]}
+          if code==200:
+              previous=json.loads(base64.b64decode(old["content"]))
+              if previous["collected_at"]>=report["collected_at"]: raise SystemExit("NEWER_REPORT_ALREADY_EXISTS")
+              body["sha"]=old["sha"]
           code,_=req(path,body)
           if code not in (200,201): raise SystemExit("PRIVATE_WRITE_FAILED")
           print("PRIVATE_REPORT_SAVED")
