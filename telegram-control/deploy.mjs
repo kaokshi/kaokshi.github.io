@@ -95,7 +95,7 @@ async function main(){
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"entry.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs","ops.mjs","adapter.mjs","intake.mjs","receipt.mjs","memory.mjs","notifications.mjs","diagnostics.mjs","recovery.mjs","account.mjs"]){
+ for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs","ops.mjs","adapter.mjs","intake.mjs","receipt.mjs","memory.mjs","notifications.mjs","diagnostics.mjs","recovery.mjs","account.mjs","release.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }
@@ -174,6 +174,8 @@ async function main(){
  requireOk(invalid.status===400,"review_action_gate_failed");
  console.log("REVIEW_JOURNAL_CONFIRMED");
  console.log("REVIEW_MUTATION_GATE_CONFIRMED");
+ stage="verify_release";
+ const rel=await journalRequest("/api/release",{initData:params.toString()});requireOk(rel.ok,"release_unavailable");const rv=await rel.json();requireOk(rv.version==="1.0.0-rc.1"&&rv.productionEnabled===false&&rv.publicationAuthorized===false&&rv.rssEnabled===false,"release_gate_failed");
  stage="verify_core";
  const core=await journalRequest("/api/core",{initData:params.toString()});
  requireOk(core.ok,"core_read_http_"+core.status);
