@@ -76,9 +76,9 @@ async function main(){
  bindings.push({type:"durable_object_namespace",name:"REVIEW_JOURNAL",class_name:"ReviewJournal"});
  const migrations=hasJournal?{}:{migrations:{new_tag:"review-journal-v1",new_sqlite_classes:["ReviewJournal"]}};
  const form=new FormData();
- form.set("metadata",new Blob([JSON.stringify({main_module:"worker.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
+ form.set("metadata",new Blob([JSON.stringify({main_module:"entry.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs"]){
+ for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }
@@ -147,7 +147,8 @@ async function main(){
  const deniedJournal=await journalRequest("/api/journal",{initData:"invalid"});
  requireOk(deniedJournal.status===401,"journal_auth_gate_failed");
  const journal=await journalRequest("/api/journal",{initData:params.toString()});
- requireOk(journal.ok&&Array.isArray((await journal.json()).entries),"journal_read_failed");
+ requireOk(journal.ok,"journal_read_http_"+journal.status);
+ requireOk(Array.isArray((await journal.json()).entries),"journal_response_invalid");
  const invalid=await journalRequest("/api/review",{initData:params.toString(),action:"publish"});
  requireOk(invalid.status===400,"review_action_gate_failed");
  console.log("REVIEW_JOURNAL_CONFIRMED");
