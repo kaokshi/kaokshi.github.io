@@ -1,6 +1,10 @@
 """Conservative recovery decisions for the existing durable executor. No paid transport."""
 import json
-from .editorial_zen_core import CoreBlocked, amount
+from .editorial_zen_core import CoreBlocked
+
+AUTO_RETRY = {"cloud_ledger_busy", "cloud_storage_unavailable", "control_unavailable"}
+MAX_RETRIES = 2
+COOLDOWN_MS = 15 * 60 * 1000
 
 # Only explicit, known temporary failures are eligible. Unknown errors, rights,
 # quality gates, and ambiguous billing never become automatic retries.
@@ -38,3 +42,18 @@ def confirmed_retry(core, article, expected_stage, expected_revision, expected_r
     # Do not erase diagnostic evidence or turn a failed stage into a passed stage.
     # A separate dispatch permit must be provided by the future execution host.
     return state
+
+def retry_window(core, article, stage, reason, now):
+    # No automatic recovery for budget, balance, quality, rights, or unknown charges.
+    if reason not in AUTO_RETRY:
+        return False
+    row = core.db.execute("SELECT count,last_at FROM recovery_attempts WHERE article=? AND stage=?", (article, stage)).fetchone()
+    return row is None or row["count"] < MAX_RETRIES and now - row["last_at"] >= COOLDOWN_MS
+
+def claim_retry(core, article, stage, revision, reason, now):
+    confirmed_retry(core, article, stage, revision, reason)
+    with core.db:
+        core.db.execute("BEGIN IMMEDIATE")
+        if not retry_window(core, article, stage, reason, now):
+            raise CoreBlocked("recovery_retry_not_due")
+        core.db.execute("INSERT INTO recovery_attempts VALUES (?,?,1,?) ON CONFLICT(article,stage) DO UPDATE SET count=count+1,last_at=excluded.last_at", (article, stage, now))
