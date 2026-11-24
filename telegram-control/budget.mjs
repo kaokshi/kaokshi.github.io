@@ -22,7 +22,7 @@ export async function readBudget(storage,now=Date.now()){
  const policy=await storage.get("budget:policy")||initialBudget();
  const day=new Date(now+10800000).toISOString().slice(0,10);
  const chat=await storage.get("agent:budget:"+day)||{reserved:0,calls:0};
- return {policy,day,totalKop:policy.mainKop+RESERVE_KOP,production:{ledgerConnected:false,mainSpentKop:null,reserveSpentKop:null,reserveRemainingKop:null,activationReason:null},chat:{limitRub:10,accountedRub:chat.reserved,calls:chat.calls},executionEnabled:false};
+ return {policy,day,totalKop:policy.mainKop+RESERVE_KOP,production:{ledgerConnected:false,mainSpentKop:null,reserveSpentKop:null,reserveRemainingKop:null,activationReason:null},chat:{limitRub:10,accountedRub:chat.reserved,calls:chat.calls,chargeHold:Boolean(await storage.get("agent:charge-hold"))},executionEnabled:false};
 }
 export async function writeBudget(storage,data,now=Date.now()){
  const v=validateBudget(data?.budget);
