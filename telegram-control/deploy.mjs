@@ -1,7 +1,7 @@
 // Explicit one-time deployment of a new, isolated read-only Worker.
 // No package downloads, paid model requests, GitHub writes or editorial changes.
 import {readFile} from "node:fs/promises";
-import {randomBytes,createHmac} from "node:crypto";
+import {createHmac} from "node:crypto";
 import {buildSnapshot,snapshotBindings} from "./snapshot.mjs";
 const SCRIPT="zen-editorial-control";
 const account=process.env.CLOUDFLARE_ACCOUNT_ID||"";
@@ -9,7 +9,8 @@ const cfToken=process.env.CLOUDFLARE_API_TOKEN||"";
 const botToken=process.env.TELEGRAM_BOT_TOKEN||"";
 const owner=process.env.TELEGRAM_OWNER_ID||"";
 const router=process.env.ROUTERAI_API_KEY||"";
-const webhookSecret=randomBytes(32).toString("hex");
+const webhookSecret=process.env.TELEGRAM_WEBHOOK_SECRET||"";
+const intakeSecret=process.env.ZEN_CORE_INTAKE_SECRET||"";
 let stage="preflight";
 function requireOk(value,code){if(!value)throw new Error(code);}
 async function request(url,options){
@@ -33,6 +34,9 @@ async function telegram(method,payload={}){
  return res.result;
 }
 async function main(){
+ requireOk(process.env.ZEN_CONTROL_CONFIRM_UPDATE==="true","explicit_update_confirmation_required");
+ requireOk(/^[a-fA-F0-9]{64}$/.test(intakeSecret),"intake_secret_required");
+ requireOk(/^[a-zA-Z0-9_-]{32,256}$/.test(webhookSecret),"existing_webhook_secret_required");
  requireOk(/^[a-f0-9]{32}$/i.test(account)&&cfToken,"cloudflare_config_missing");
  requireOk(/^\d+:[A-Za-z0-9_-]+$/.test(botToken),"bot_token_missing_or_invalid");
  requireOk(/^[1-9]\d{0,15}$/.test(owner)&&Number.isSafeInteger(Number(owner)),"owner_id_missing_or_invalid");
@@ -53,7 +57,7 @@ async function main(){
  requireOk(Array.isArray(scripts),"worker_list_invalid");
  // Never overwrite an unrelated existing script. An existing script without an
  // associated webhook requires an owner-reviewed recovery procedure.
- requireOk(!scripts.some(s=>s.id===SCRIPT||s.name===SCRIPT)||previous.url===endpoint+"/telegram","existing_worker_refused");
+ requireOk(scripts.some(s=>s.id===SCRIPT||s.name===SCRIPT)&&previous.url===endpoint+"/telegram","existing_worker_required");
  stage="private_snapshot";
  const readToken=process.env.EDITORIAL_REVIEW_READ_TOKEN||"";
  requireOk(readToken&&readToken!==process.env.EDITORIAL_PRIVATE_TOKEN,"separate_read_token_required");
@@ -71,12 +75,12 @@ async function main(){
  bindings.push(...privateBindings);
  bindings.push({type:"secret_text",name:"EDITORIAL_REVIEW_READ_TOKEN",text:readToken});
  if(router)bindings.push({type:"secret_text",name:"ROUTERAI_API_KEY",text:router});
- const intakeSecret=process.env.ZEN_CORE_INTAKE_SECRET||"";
  if(intakeSecret){requireOk(/^[a-fA-F0-9]{64}$/.test(intakeSecret),"invalid_intake_secret");bindings.push({type:"secret_text",name:"ZEN_CORE_INTAKE_SECRET",text:intakeSecret});}
  const settings=await cf("/scripts/"+SCRIPT+"/settings");
  const hasJournal=Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="REVIEW_JOURNAL"&&b.type==="durable_object_namespace"&&b.class_name==="ReviewJournal");
  bindings.push({type:"durable_object_namespace",name:"REVIEW_JOURNAL",class_name:"ReviewJournal"});
- const migrations=hasJournal?{}:{migrations:{new_tag:"review-journal-v1",new_sqlite_classes:["ReviewJournal"]}};
+ requireOk(hasJournal,"existing_journal_binding_required");
+ const migrations={};
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"entry.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
@@ -174,7 +178,7 @@ async function main(){
  const agent=await journalRequest("/api/core/agent",{initData:params.toString()});
  requireOk(agent.ok,"agent_http_"+agent.status);
  const av=await agent.json();
- requireOk(av.enabled===true&&av.mode==="owner_chat_only"&&av.limit===10&&av.perCall===2&&Array.isArray(av.messages),"agent_config_invalid");
+ requireOk(typeof av.enabled==="boolean"&&av.mode==="owner_chat_only"&&av.limit===10&&av.perCall===2&&Array.isArray(av.messages),"agent_config_invalid");
  const deniedAgent=await journalRequest("/api/core/agent/chat",{initData:"invalid"});
  requireOk(deniedAgent.status===401,"agent_auth_gate_failed");
  const noConsent=await journalRequest("/api/core/agent/chat",{initData:params.toString(),text:"test",consent:false});
@@ -208,6 +212,13 @@ async function main(){
  const invalidOps=await journalRequest("/api/core/ops/settings",{initData:params.toString(),confirm:false});
  requireOk(invalidOps.status===400,"ops_confirmation_failed");
  console.log("OPS_CONTROLS_CONFIRMED");
+ stage="verify_private_bridge";
+ const bridge=async(path,body,auth)=>fetch(endpoint+"/internal/zen-core/"+path,{method:"POST",headers:{"Content-Type":"application/json",...(auth?{Authorization:"Bearer "+intakeSecret}:{})},body:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(10000)});
+ requireOk((await bridge("queue",{},false)).status===401,"bridge_auth_failed");
+ const qr=await bridge("queue",{},true);requireOk(qr.ok,"bridge_queue_unavailable");const qb=await qr.json();requireOk(qb.schema==="zen-core/queue-v1"&&qb.executionEnabled===false&&qb.rssEnabled===false&&qb.publicationAuthorized===false,"bridge_queue_gate_failed");
+ const ar=await bridge("account",{action:"status"},true);requireOk(ar.ok,"bridge_account_unavailable");const ab=await ar.json();requireOk(ab.schema==="zen-core/account-status-v1"&&ab.executionEnabled===false,"bridge_account_gate_failed");
+ const cr=await bridge("control",{id:"deploy-probe-not-a-real-job"},true);requireOk(cr.ok,"bridge_control_unavailable");const cb=await cr.json();requireOk(cb.controlClear===false&&cb.executionEnabled===false,"bridge_control_gate_failed");
+ console.log("PRIVATE_BRIDGE_READ_ONLY_CONFIRMED");
  const diag=await journalRequest("/api/core/diagnostics",{initData:params.toString()});
  requireOk(diag.ok,"diagnostics_unavailable");
  const dv=await diag.json();requireOk(dv.mode==="read_only"&&dv.productionEnabled===false&&dv.publicationAuthorized===false,"diagnostics_gate_failed");
