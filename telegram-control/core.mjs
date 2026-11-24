@@ -1,3 +1,4 @@
+import {statsView,importStats} from "./statistics.mjs";
 import {opsState,opsView,updateOps,notifyTimer} from "./ops.mjs";
 import {readBudget,writeBudget} from "./budget.mjs";
 import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from "./production.mjs";
@@ -106,6 +107,8 @@ export class CoreHandler {
   }
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/statistics")return Response.json(await statsView(this.storage,d.period,now));
+  if(url.pathname==="/core/statistics/import"){const r=await importStats(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/probe"){const r=await runProbe(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/watchdog")return Response.json(await this.watchdog(now));
   if(url.pathname==="/core/memory/settings"){const r=await writeMemory(this.storage,d,now);return Response.json(r.body,{status:r.status});}
