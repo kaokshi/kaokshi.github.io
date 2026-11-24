@@ -1,7 +1,7 @@
 // Read-only bridge from confirmed Telegram jobs to the existing Python Core intake.
 import {validateJob} from "./production.mjs";
 import {opsState} from "./ops.mjs";
-import {claimProduction,closeProduction} from "./account.mjs";
+import {claimProduction,closeProduction,accountStatus} from "./account.mjs";
 const encoder=new TextEncoder();
 async function matches(secret,header){
  if(typeof secret!=="string"||! /^[a-fA-F0-9]{64}$/.test(secret)||typeof header!=="string"||!/^Bearer [a-fA-F0-9]{64}$/.test(header))return false;
@@ -68,6 +68,7 @@ async function controlSnapshot(tx,id,now){
   return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:effective??null,modeRevision:transition?.revision??0,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
 }
 export async function accountView(storage,d,now=Date.now()){
+ if(d?.action==="status")return storage.transaction(tx=>accountStatus(tx,now));
  if(!d||typeof d.id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(d.id)||!["claim","close"].includes(d.action))return {status:400,body:{error:"invalid_account_request"}};
  return storage.transaction(async tx=>{
   if(d.action==="close")return closeProduction(tx,d,now);
