@@ -1,5 +1,6 @@
 // Read-only bridge from confirmed Telegram jobs to the existing Python Core intake.
 import {validateJob} from "./production.mjs";
+import {opsState} from "./ops.mjs";
 const encoder=new TextEncoder();
 async function matches(secret,header){
  if(typeof secret!=="string"||! /^[a-fA-F0-9]{64}$/.test(secret)||typeof header!=="string"||!/^Bearer [a-fA-F0-9]{64}$/.test(header))return false;
@@ -26,15 +27,25 @@ export async function intakeView(storage,id){
   return intent?{status:200,body:{schema:"zen-core/intake-v1",mode:"intents_only",intent,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
  });
 }
+// Fresh control observation, not an execution permit.
+export async function controlView(storage,id,now=Date.now()){
+ if(typeof id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(id))return {status:400,body:{error:"invalid_job_id"}};
+ return storage.transaction(async tx=>{
+  const ops=await opsState(tx),job=await tx.get("production:job:"+id),intent=exportIntent(job);
+  const mode=ops.requestedMode==="assisted"?"semi_autonomous":ops.requestedMode;
+  const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":intent.mode!==mode?"mode_changed":null;
+  return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:intent?.mode??null,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
+ });
+}
 export async function bridgeRequest(request,env){
  const path=new URL(request.url).pathname;
- if(!["/internal/zen-core/intake","/internal/zen-core/receipt"].includes(path))return null;
- const receipt=path.endsWith("/receipt");
+ if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control"].includes(path))return null;
+ const receipt=path.endsWith("/receipt"),route=path.split("/").pop();
  const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"};
  if(request.method!=="POST")return Response.json({error:"method_not_allowed"},{status:405,headers});
  if(!await matches(env.ZEN_CORE_INTAKE_SECRET,request.headers.get("Authorization")))return Response.json({error:"unauthorized"},{status:401,headers});
  let d;try{const raw=await request.text();if(raw.length>(receipt?16384:512))throw Error();d=JSON.parse(raw);}catch{return Response.json({error:"invalid_request"},{status:400,headers});}
  const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName("zen-core-scheduler-v1"));
  if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
- try{const r=await stub.fetch("https://core.internal/core/"+(receipt?"receipt":"intake"),{method:"POST",body:JSON.stringify(receipt?d:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
+ try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt?d:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
 }
