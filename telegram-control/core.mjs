@@ -91,7 +91,19 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
-  if(request.method==="GET"&&url.pathname==="/core/jobs"){const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),readBudget(this.storage,now),opsState(this.storage),this.state()]);return Response.json({...jobs,requestedMode:ops.requestedMode,opsVersion:ops.version,modeRevision:ops.modeRevision??0,stopped:ops.stopped,schedulePaused:settings.paused,readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict:!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop,ownerDailyRub:budget.policy.mainKop/100}});}
+  if(request.method==="GET"&&url.pathname==="/core/jobs"){
+   const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),
+    readBudget(this.storage,now),opsState(this.storage),this.state()]);
+   const budgetConflict=!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop;
+   const verified=budget.production.ledgerConnected===true;
+   const reported=budget.production.reported?.budget;
+   const canExecute=this.env?.ZEN_CORE_EXECUTION_ENABLED==="true"&&readiness.privateExecutionConfigured===true&&
+    verified&&!budgetConflict&&!ops.stopped&&!reported?.unsettledRequest&&!reported?.overrun&&!reported?.rollingOverrun;
+   return Response.json({...jobs,productionEnabled:canExecute,requestedMode:ops.requestedMode,
+    opsVersion:ops.version,modeRevision:ops.modeRevision??0,stopped:ops.stopped,schedulePaused:settings.paused,
+    readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict,ownerDailyRub:budget.policy.mainKop/100,
+     sharedSpendGuardVerified:verified,canExecute}});
+  }
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
   if(url.pathname==="/core/probe"){const r=await runProbe(this.storage,d,now);return Response.json(r.body,{status:r.status});}
