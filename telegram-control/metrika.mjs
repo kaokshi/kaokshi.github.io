@@ -29,7 +29,17 @@ export function sanitizeMetrika(raw,now=Date.now()){
    if(bad)continue;
    periods[n]={start:p.start,end:p.end,visits:a[0],users:a[1],pageviews:a[2],bounceRate:a[0]?a[3]:null,depth:a[0]?a[4]:null,avgVisitSeconds:a[0]?a[5]:null,series:series.sort((x,y)=>x.date.localeCompare(y.date))};
   }
-  reports.push({channel,counterId:id,status:r.status,bindingVerified:false,usableForEditorialAdvice:false,periods});
+  let intraday=null;
+  const t=r.intraday,a=t?.totals;
+  if(t?.provisional===true&&validDate(t.date)&&["available","totals_only"].includes(t.status)&&JSON.stringify(t.metrics)===JSON.stringify(metricNames)&&nums(a,6)&&counts(a.slice(0,3),3)&&a[3]<=100){
+   let hourly=null;
+   if(t.status==="available"&&Array.isArray(t.hourly)&&t.hourly.length<=24){
+    const seen=new Set();
+    if(t.hourly.every(x=>Number.isInteger(x.hour)&&x.hour>=0&&x.hour<=23&&!seen.has(x.hour)&&seen.add(x.hour)&&counts([x.visits,x.pageviews],2)))hourly=t.hourly.map(x=>({hour:x.hour,visits:x.visits,pageviews:x.pageviews})).sort((x,y)=>x.hour-y.hour);
+   }
+   intraday={date:t.date,timezone:typeof t.timezone==="string"?t.timezone.slice(0,80):null,provisional:true,visits:a[0],users:a[1],pageviews:a[2],bounceRate:a[0]?a[3]:null,depth:a[0]?a[4]:null,avgVisitSeconds:a[0]?a[5]:null,hourly};
+  }
+  reports.push({channel,counterId:id,status:r.status,bindingVerified:false,usableForEditorialAdvice:false,periods,intraday});
  }
  return {source:"yandex_metrika",collectedAt:raw.collected_at,stale:now-Date.parse(raw.collected_at)>7200000,automaticSync:false,reports};
 }
