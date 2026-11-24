@@ -22,14 +22,20 @@ jobs:
           const d=await r.json();
           if(!r.ok||d.success!==true||!/^[a-z0-9-]+$/.test(d.result?.subdomain||""))throw Error("subdomain_unavailable");
           const root="https://zen-editorial-control."+d.result.subdomain+".workers.dev/internal/zen-core/";
+          let passed=true;
           for(const [route,body] of [["queue",{}],["account",{action:"status"}],["control",{id:"diagnostic-nonexistent"}],["intake",{id:"diagnostic-nonexistent"}]]){
             for(const auth of [false,true]){
               try{
                 const res=await fetch(root+route,{method:"POST",headers:{"Content-Type":"application/json",...(auth?{Authorization:"Bearer "+e.INTAKE_SECRET}:{})},body:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(10000)});
                 const value=await res.json().catch(()=>null);
                 const allowed=["unauthorized","core_unavailable","invalid_request","intent_not_available","emergency_paused","invalid_cursor"];
-                console.log("BRIDGE_"+route.toUpperCase()+"_"+(auth?"AUTH":"NOAUTH")+"="+res.status+" "+(allowed.includes(value?.error)?value.error:"other"));
-              }catch{console.log("BRIDGE_"+route.toUpperCase()+"_UNAVAILABLE");}
+                const safe=value?.executionEnabled===false&&value?.publicationAuthorized===false&&value?.rssEnabled===false;
+                const ok=!auth?res.status===401&&value?.error==="unauthorized":route==="queue"?res.status===200&&safe&&value.schema==="zen-core/queue-v1"&&Array.isArray(value.ids):route==="control"?res.status===200&&safe&&value.schema==="zen-core/control-v1"&&value.controlClear===false:route==="account"?res.status===200&&value?.schema==="zen-core/account-status-v1"&&value.executionEnabled===false:res.status===404&&value?.error==="intent_not_available"||res.status===409&&value?.error==="emergency_paused";
+                passed&&=ok;
+                console.log("BRIDGE_"+route.toUpperCase()+"_"+(auth?"AUTH":"NOAUTH")+"="+res.status+" "+(allowed.includes(value?.error)?value.error:"other")+" CHECK="+(ok?"OK":"FAIL"));
+              }catch{passed=false;console.log("BRIDGE_"+route.toUpperCase()+"_UNAVAILABLE");}
             }
           }
+          console.log("BRIDGE_VALIDATION="+(passed?"OK":"FAIL"));
+          if(!passed)process.exitCode=1;
           JS
