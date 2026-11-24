@@ -24,6 +24,18 @@ export async function verifyInitData(raw,env,now=Date.now()/1000){
 }
 const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"};
 function serve(body,type){return new Response(body,{headers:{...headers,"Content-Type":type,"Content-Security-Policy":"default-src 'none'; script-src 'self' https://telegram.org; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'"} });}
+export function readSnapshot(env){
+ try{
+  const count=Number(env.REVIEW_SNAPSHOT_COUNT);
+  if(!Number.isInteger(count)||count<1||count>36)return null;
+  let b64="";
+  for(let i=0;i<count;i++){const chunk=env["REVIEW_SNAPSHOT_"+i];if(typeof chunk!=="string"||chunk.length>3500)return null;b64+=chunk;}
+  const raw=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const parsed=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(raw));
+  if(!/^[0-9]{8,20}$/.test(parsed.run||"")||!Array.isArray(parsed.articles)||!Array.isArray(parsed.models))return null;
+  return parsed;
+ }catch{return null;}
+}
 export async function miniApp(request,env,getBalance){
  const path=new URL(request.url).pathname;
  if(request.method==="GET"){
@@ -38,5 +50,5 @@ export async function miniApp(request,env,getBalance){
  if(!await verifyInitData(data?.initData,env))return new Response("Unauthorized",{status:401,headers});
  let balance=null;
  try{balance=await getBalance(env);}catch{}
- return Response.json({balance,checkedAt:new Date().toISOString(),mode:"read_only"},{headers});
+ return Response.json({balance,checkedAt:new Date().toISOString(),mode:"read_only",review:readSnapshot(env)},{headers});
 }
