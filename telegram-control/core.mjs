@@ -1,0 +1,104 @@
+// ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
+// No calls to RouterAI, editorial workflows, or publishing systems.
+export const CHANNELS=["cinema","legends","science"];
+const MIN=60000,DAY=86400000,MSK=3*60*MIN;
+export const initial=()=>({version:0,timezone:"Europe/Moscow",paused:true,leadMinutes:360,channels:CHANNELS.map(channel=>({channel,enabled:false,times:[]})),updatedAt:null});
+export function validateSchedule(value){
+ if(!value||!Array.isArray(value.channels)||value.channels.length!==3||value.timezone!=="Europe/Moscow"||typeof value.paused!=="boolean"||!Number.isInteger(value.leadMinutes)||value.leadMinutes<60||value.leadMinutes>1440)return null;
+ const rows=[];
+ for(const id of CHANNELS){
+  const matches=value.channels.filter(r=>r?.channel===id);if(matches.length!==1)return null;
+  const r=matches[0];if(typeof r.enabled!=="boolean"||!Array.isArray(r.times)||r.times.length>10||r.times.some(t=>typeof t!=="string"||!/^([01]\d|2[0-3]):[0-5]\d$/.test(t))||new Set(r.times).size!==r.times.length||r.enabled&&!r.times.length)return null;
+  rows.push({channel:id,enabled:r.enabled,times:[...r.times].sort()});
+ }
+ if(rows.reduce((sum,r)=>sum+(r.enabled?r.times.length:0),0)>30)return null;
+ return {timezone:"Europe/Moscow",paused:value.paused,leadMinutes:value.leadMinutes,channels:rows};
+}
+export function slots(settings,now){
+ if(settings.paused)return [];
+ const day=Math.floor((now+MSK)/DAY)*DAY-MSK;
+ const list=[];
+ for(let offset=-1;offset<=3;offset++){
+  const midnight=day+offset*DAY,date=new Date(midnight+MSK).toISOString().slice(0,10);
+  for(const row of settings.channels){if(!row.enabled)continue;for(const time of row.times){
+   const [h,m]=time.split(":").map(Number),release=midnight+(h*60+m)*MIN;
+   const base=row.channel+":"+date+":"+time;
+   list.push({id:base+":prepare",channel:row.channel,type:"prepare",at:release-settings.leadMinutes*MIN,releaseAt:release});
+   list.push({id:base+":release",channel:row.channel,type:"release",at:release,releaseAt:release});
+  }}
+ }
+ return list.sort((a,b)=>a.at-b.at||a.id.localeCompare(b.id));
+}
+export function nextSlots(settings,now){return slots(settings,now).filter(x=>x.at>now).slice(0,60);}
+export class CoreHandler {
+ constructor(ctx){this.storage=ctx.storage;}
+ async state(){return await this.storage.get("core:settings")||initial();}
+ async view(now=Date.now()){
+  const settings=await this.state(),events=await this.storage.list({prefix:"core:event:",reverse:true,limit:60}),orders=await this.storage.list({prefix:"core:order:",reverse:true,limit:30});
+  return {settings,mode:"dry_run",productionEnabled:false,rssEnabled:false,next:nextSlots(settings,now),events:[...events.values()],orders:[...orders.values()],lastTick:await this.storage.get("core:lastTick")||null,alarmAt:await this.storage.getAlarm()};
+ }
+ async scheduleAlarm(now){
+  const next=nextSlots(await this.state(),now)[0];
+  if(next)await this.storage.setAlarm(next.at);else await this.storage.deleteAlarm();
+ }
+ async alarm(now=Date.now()){
+  await this.storage.transaction(async tx=>{
+   const settings=await tx.get("core:settings")||initial();
+   const last=await tx.get("core:cursor");
+   if(!settings.paused&&typeof last==="number"){
+    const start=Math.max(last,now-2*DAY);
+    for(const slot of slots(settings,now).filter(x=>x.at>start&&x.at<=now)){
+     const key="core:event:"+String(slot.at).padStart(15,"0")+":"+slot.id;
+     if(await tx.get(key))continue;
+     await tx.put(key,{...slot,recordedAt:now,status:"blocked_prelaunch",reason:slot.type==="prepare"?"production_not_connected":"rss_not_authorized"});
+    }
+   }
+   await tx.put("core:cursor",now);await tx.put("core:lastTick",new Date(now).toISOString());
+  });
+  const old=await this.storage.list({prefix:"core:event:",limit:1000});
+  for(const [key,event] of old)if(event.at<now-30*DAY)await this.storage.delete(key);
+  await this.scheduleAlarm(now);
+ }
+ async fetch(request){
+  const url=new URL(request.url),now=Date.now();
+  if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
+  if(request.method!=="POST")return new Response("Not found",{status:404});
+  const d=await request.json();
+  if(url.pathname==="/core/schedule"){
+   const schedule=validateSchedule(d.settings);
+   if(!schedule||!Number.isInteger(d.version))return Response.json({error:"invalid_schedule"},{status:400});
+   const result=await this.storage.transaction(async tx=>{
+    const previous=await tx.get("core:settings")||initial();
+    if(previous.version!==d.version)return null;
+    const saved={...schedule,version:previous.version+1,updatedAt:new Date(now).toISOString()};
+    await tx.put("core:settings",saved);await tx.put("core:cursor",now);return saved;
+   });
+   if(!result)return Response.json({error:"stale_settings"},{status:409});
+   await this.scheduleAlarm(now);
+   return Response.json(await this.view(now));
+  }
+  if(url.pathname==="/core/order"){
+   if(typeof d.text!=="string"||!d.text.trim()||d.text.length>2000||!/^[a-f0-9-]{36}$/.test(d.id||""))return Response.json({error:"invalid_order"},{status:400});
+   const order=await this.storage.transaction(async tx=>{
+    const key="core:orderid:"+d.id,old=await tx.get(key);
+    if(old)return old.text===d.text.trim()?old:null;
+    const entry={id:d.id,text:d.text.trim(),at:new Date(now).toISOString(),status:"queued_for_future_agent",executed:false};
+    await tx.put(key,entry);await tx.put("core:order:"+String(now).padStart(15,"0")+":"+d.id,entry);return entry;
+   });
+   return Response.json(order?{order}:{error:"id_conflict"},{status:order?200:409});
+  }
+  return new Response("Not found",{status:404});
+ }
+}
+export function coreStub(env){return env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName("zen-core-scheduler-v1"));}
+export async function rssStatus(){
+ const base="https://raw.githubusercontent.com/kaokshi/kaokshi.github.io/main/config/";
+ const get=async file=>{const r=await fetch(base+file,{redirect:"manual",signal:AbortSignal.timeout(5000)});if(!r.ok)throw Error();return r.json();};
+ let flags=null;
+ try{const [site,policy]=await Promise.all([get("site.json"),get("ai_revision_policy.json")]);const p=policy.future_rss_delivery;flags={publication:site.publication_enabled===true,launched:p.project_launched===true,active:p.currently_active===true,channels:Array.isArray(site.auto_release_active_channels)?site.auto_release_active_channels.filter(x=>CHANNELS.includes(x)):[]};}catch{}
+ const feeds=await Promise.all(CHANNELS.map(async channel=>{
+  const url="https://kaokshi.github.io/feeds/"+channel+".xml";
+  try{const r=await fetch(url,{method:"HEAD",redirect:"manual",signal:AbortSignal.timeout(5000)});return {channel,url,http:r.status,available:r.ok};}catch{return {channel,url,http:null,available:false};}
+ }));
+ return {flags,feeds,checkedAt:new Date().toISOString(),zenIngestionVerified:false,deliveryEnabled:false};
+}
