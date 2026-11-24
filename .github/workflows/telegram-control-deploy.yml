@@ -1,4 +1,4 @@
-name: ZEN CONTROL v0.3 deployment verification
+name: ZEN CONTROL live sync activation
 on:
   push:
     branches: [feature/telegram-control-mvp]
