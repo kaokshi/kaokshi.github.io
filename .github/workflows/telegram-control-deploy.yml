@@ -1,4 +1,4 @@
-name: ZEN CONTROL article reader and image access
+name: ZEN CONTROL v0.3 reader and secure image access
 on:
   push:
     branches: [feature/telegram-control-mvp]
