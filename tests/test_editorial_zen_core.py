@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import tempfile
 import unittest
@@ -60,6 +60,22 @@ class CoreTest(unittest.TestCase):
         self.core.stage_result(article, "images", {"status": "blocked", "checks": {"slot_5": "passed"}})
         with self.assertRaisesRegex(CoreBlocked, "already_passed"):
             self.core.reserve_call("approved", article, "images", "missing_image", "2", slot=5)
+
+    def test_rolling_cap_counts_reserve_and_releases_expired_days(self):
+        article = self.started()
+        # Small synthetic cap exercises the same production rule without real spending.
+        from decimal import Decimal
+        self.core.rolling_cap = Decimal("351")
+        self.core.reserve_call("first", article, "images", "missing_image", "350", slot=4)
+        self.core.settle("first", "350")
+        self.now += timedelta(days=1)
+        with self.assertRaisesRegex(CoreBlocked, "rolling_budget_exhausted"):
+            self.core.reserve_call("too_large", article, "images", "missing_image", "2", slot=5)
+        self.core.reserve_call("next", article, "images", "missing_image", "1", slot=5)
+        self.core.settle("next", "0.5")
+        self.assertEqual(self.core.snapshot()["budget"]["rollingRemainingRub"], "0.5")
+        self.now += timedelta(days=29)
+        self.assertEqual(self.core.snapshot()["budget"]["rollingRemainingRub"], "350.5")
 
     def test_caps_and_safe_intake(self):
         article = self.started()
