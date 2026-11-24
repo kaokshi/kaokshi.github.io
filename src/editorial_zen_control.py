@@ -4,14 +4,10 @@ import os
 import re
 import time
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import Request
+from .editorial_zen_transport import bridge_opener
 
 from .editorial_zen_core import CoreBlocked
-
-
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None
 
 
 def validate_control(row, job_id, mode, *, now=None, require_execution=True):
@@ -42,7 +38,7 @@ def control_guard(endpoint, secret):
             or parsed.query or parsed.fragment or parsed.path != "/internal/zen-core/control"
             or not re.fullmatch(r"[a-fA-F0-9]{64}", secret or "")):
         raise CoreBlocked("control_configuration_missing")
-    opener = build_opener(NoRedirect())
+    opener = bridge_opener()
 
     def check(job_id, mode):
         req = Request(endpoint, method="POST", data=json.dumps({"id": job_id}).encode(),
@@ -70,7 +66,7 @@ def configured_account():
     # Reuse endpoint validation; no redirect or credential fallback.
     control_guard(endpoint, secret)
     target = endpoint.removesuffix("/control") + "/account"
-    opener = build_opener(NoRedirect())
+    opener = bridge_opener()
 
     def account(action, job_id=None, operation=None, outcome=None):
         data = {"action": action, "id": job_id, "operation": operation}
