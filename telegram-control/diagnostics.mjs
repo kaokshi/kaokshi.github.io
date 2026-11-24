@@ -38,6 +38,7 @@ export function diagnose({ops,settings,alarmAt,next=[],budget,jobs=[],readiness=
   else if(Number.isFinite(readiness.configuredDailyRub)&&budget?.policy&&Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop)add("budget_mismatch","system",{configuredDailyRub:readiness.configuredDailyRub,ownerDailyRub:budget.policy.mainKop/100});
  }
  if(budget?.production?.ledgerConnected!==true)add("ledger_disconnected");
+ if(budget?.chat?.chargeHold)add("chat_charge_unknown","chat",{persistentHold:true});
  if(budget?.chat&&(budget.chat.accountedRub>=budget.chat.limitRub||budget.chat.calls>=20))add("chat_limit");
  for(const m of messages){if(m?.status==="failed"&&m.cost==null)add("chat_charge_unknown","chat",{id:m.id});}
  for(const j of jobs){
