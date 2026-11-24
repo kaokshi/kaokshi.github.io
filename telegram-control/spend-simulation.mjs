@@ -40,12 +40,14 @@ export async function simulateReserve(storage,context,op,now=Date.now()){
   // A reservation alone is not evidence that the article was started.
   const started=article?.status==="started";
   if(article?.status==="finished")return deny("article_finished");
-  if(started&&op.kind==="new_article")return deny("article_already_started");
+  if((started||article?.status==="starting")&&op.kind==="new_article")return deny("article_already_started");
+  if(op.kind!=="new_article"&&!started)return deny("article_not_started");
   const d=budgetDecision(context.policy,{...daily,verified:true},{...op,started});
   if(!d.allowed)return deny(d.reason);
   const operation=Object.fromEntries(["id","articleId","kind","boundKop","attempt","required"].map(k=>[k,op[k]]));
   const receipt={operation,day,month,mainKop:d.mainKop,reserveKop:d.reserveKop,status:"reserved",mode:"simulation",liveAuthorized:false};
   await tx.put(opKey(op),receipt);
+  if(op.kind==="new_article")await tx.put(articleKey(op.articleId),{status:"starting",evidenceId:op.id});
   await tx.put(dayKey(day),{mainKop:daily.mainKop+d.mainKop,reserveKop:daily.reserveKop+d.reserveKop});
   await tx.put(monthKey(month),monthly+op.boundKop);
   await tx.put(P+"outstanding",outstanding+op.boundKop);
@@ -78,7 +80,7 @@ export async function simulateSettle(storage,id,result){
   await tx.put(P+"settled",(await tx.get(P+"settled")||0)+actual);
   const receipt={...old,status:result.status,actualKop:actual,mainKop:main,reserveKop:reserve};
   await tx.put(key,receipt);
-  if(result.status==="charged"&&old.operation.kind==="new_article")await tx.put(articleKey(old.operation.articleId),{status:"started",evidenceId:id});
+  if(old.operation.kind==="new_article")await tx.put(articleKey(old.operation.articleId),{status:result.status==="charged"?"started":"not_started",evidenceId:id});
   return {allowed:true,...receipt};
  });
 }
