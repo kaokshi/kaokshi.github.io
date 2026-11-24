@@ -22,7 +22,6 @@ jobs:
           python-version: '3.12'
       - run: python -m unittest -v tests.test_editorial_gemini_quota
   read-gemini:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       id-token: write  # short-lived Google Cloud Monitoring credential, no long-lived GCP key

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "timezone": "Europe/Moscow",
+  "main_daily_rub": "300",
+  "reserve_daily_rub": "50",
+  "max_image_retries": 2,
+  "execution_enabled": false,
+  "publication_enabled": false,
+  "rss_enabled": false
+}

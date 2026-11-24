@@ -1,9 +1,5 @@
 name: One-time RouterAI Claude DeepSeek Qwen smoke
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/routerai-one-time-smoke.yml'
   workflow_dispatch:
 permissions:
   contents: read
