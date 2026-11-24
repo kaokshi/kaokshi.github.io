@@ -1,6 +1,6 @@
 """Local durable ZEN CORE contract. No model transport or release side effects."""
 import argparse
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 import json
 from pathlib import Path
@@ -68,6 +68,7 @@ class Core:
         self.policy = json.loads(CONFIG.read_text())
         self.main = amount(self.policy["main_daily_rub"])
         self.reserve = amount(self.policy["reserve_daily_rub"])
+        self.rolling_cap = amount(self.policy.get("rolling_30_day_cap_rub", "9000"))
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, intent TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS job_modes (job TEXT PRIMARY KEY, mode TEXT NOT NULL, revision INTEGER NOT NULL);
@@ -270,7 +271,14 @@ class Core:
         rows = self.db.execute("SELECT * FROM spend WHERE day=? ORDER BY rowid", (day,)).fetchall()
         main_used = sum((amount(r["main"]) for r in rows), Decimal(0))
         reserve_used = sum((amount(r["reserve"]) for r in rows), Decimal(0))
+        start = (date.fromisoformat(day) - timedelta(days=29)).isoformat()
+        period = self.db.execute("SELECT main,reserve,actual FROM spend WHERE day BETWEEN ? AND ?", (start, day)).fetchall()
+        period_used = sum((amount(r["main"]) + amount(r["reserve"]) for r in period), Decimal(0))
+        period_metered = sum((amount(r["actual"]) for r in period if r["actual"] is not None), Decimal(0))
         return {
+            "rollingStart": start, "rollingCapRub": str(self.rolling_cap),
+            "rollingRemainingRub": str(max(Decimal(0), self.rolling_cap - period_used)),
+            "rollingMeteredRub": str(period_metered), "rollingOverrun": period_used > self.rolling_cap,
             "day": day, "timezone": self.policy["timezone"], "mainDailyRub": str(self.main),
             "mainRemainingRub": str(max(Decimal(0), self.main - main_used)),
             "reserveDailyRub": str(self.reserve), "reserveRemainingRub": str(max(Decimal(0), self.reserve - reserve_used)),
@@ -304,6 +312,8 @@ class Core:
                 raise CoreBlocked("daily_budget_overrun")
             if budget["unsettledRequest"]:
                 raise CoreBlocked("unsettled_request")
+            if budget["rollingOverrun"] or bound + hold > amount(budget["rollingRemainingRub"]):
+                raise CoreBlocked("rolling_budget_exhausted")
             if stage == "images" and reason != "required_check":
                 if type(slot) is not int or not 0 <= slot <= 7:
                     raise CoreBlocked("invalid_image_slot")
