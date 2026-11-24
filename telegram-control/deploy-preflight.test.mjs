@@ -21,7 +21,7 @@ test("deployment is manual and carries all imported modules",()=>{
  const deploy=readFileSync(script,"utf8");for(const module of ["account.mjs","intake.mjs","receipt.mjs","recovery.mjs"])assert.ok(deploy.includes('"'+module+'"'));
 });
 
-import {activeDeployment,rollbackBody} from "./deploy-guard.mjs";
+import {activeDeployment,rollbackBody,latestVersion} from "./deploy-guard.mjs";
 const prior={id:"10000000-0000-4000-8000-000000000001",version:"20000000-0000-4000-8000-000000000001"};
 const next={id:"10000000-0000-4000-8000-000000000002",version:"20000000-0000-4000-8000-000000000002"};
 const deployment=(d,created_on)=>({id:d.id,created_on,versions:[{version_id:d.version,percentage:100}]});
@@ -43,4 +43,10 @@ test("existing webhook secret is inherited strictly, never replaced or registere
  assert.match(deploy,/bindings_inherit=strict/);
  assert.doesNotMatch(deploy,/telegram\("setWebhook"/);
  assert.match(deploy,/existing_webhook_binding_required/);
+});
+
+test("latest uploaded version is identified independently of deployment",()=>{
+ assert.equal(latestVersion({items:[{id:prior.version,number:1},{id:next.version,number:2}]}),next.version);
+ assert.throws(()=>latestVersion({items:[{id:prior.version,number:1},{id:next.version,number:1}]}));
+ assert.throws(()=>latestVersion({items:[]}));
 });
