@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test telegram-control/worker.test.mjs telegram-control/adapter.test.mjs telegram-control/spend-simulation.test.mjs telegram-control/intake.test.mjs telegram-control/receipt.test.mjs
+      - run: node --test telegram-control/worker.test.mjs telegram-control/adapter.test.mjs telegram-control/spend-simulation.test.mjs telegram-control/intake.test.mjs telegram-control/receipt.test.mjs telegram-control/notifications.test.mjs
       - uses: actions/checkout@v4
         with:
           ref: ffc9f82f8afd7841cdea7d80efdf63247ca8d6cd
