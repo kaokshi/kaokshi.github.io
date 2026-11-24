@@ -30,7 +30,15 @@ def accept(core, envelope, expected_id):
         raise ValueError("invalid_execution_mode")
     if any(core.policy.get(k) is not False for k in ("execution_enabled", "publication_enabled", "rss_enabled")):
         raise ValueError("core_not_in_intake_only_mode")
-    return core.submit(intent)
+    transition = envelope.get("modeTransition")
+    if transition is not None and (not isinstance(transition, dict) or set(transition) != {"mode", "revision"}
+            or transition["mode"] not in ("manual", "semi_autonomous", "autonomous")
+            or type(transition["revision"]) is not int or not 0 < transition["revision"] <= 2**53-1):
+        raise ValueError("invalid_mode_transition")
+    job_id = core.submit(intent)
+    if transition is not None:
+        core.apply_mode(job_id, transition["mode"], transition["revision"])
+    return job_id
 
 
 def pull(endpoint, secret, job_id):
@@ -62,6 +70,7 @@ def build_receipt(core, job_id, observed_at=None):
         raise ValueError("job_missing")
     return {"schema": "zen-core/receipt-v1", "jobId": job_id,
             "observedAt": int(time.time() * 1000) if observed_at is None else observed_at,
+            "modeRevision": jobs[0]["modeRevision"], "effectiveMode": jobs[0]["mode"],
             "articles": [{"id": a["id"], "meteredRub": a["meteredRub"],
                           "stages": [{"id": s["id"], "status": s["status"]} for s in a["stages"]]}
                          for a in jobs[0]["articles"]],
@@ -114,7 +123,7 @@ def discover(endpoint, secret, cursor=None):
             or any(not isinstance(i, str) or not re.fullmatch(r"[-a-zA-Z0-9:]{1,120}", i) for i in ids)
             or len(set(ids)) != len(ids) or row["stopped"] and (ids or nxt is not None)
             or nxt is not None and (not isinstance(nxt, str)
-                or not re.fullmatch(r"production:index:\\d{15}:[-a-zA-Z0-9:]{1,120}", nxt))):
+                or not re.fullmatch(r"production:index:\d{15}:[-a-zA-Z0-9:]{1,120}", nxt))):
         raise ValueError("invalid_queue_response")
     return ids, nxt
 
