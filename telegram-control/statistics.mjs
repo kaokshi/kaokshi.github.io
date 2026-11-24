@@ -1,6 +1,6 @@
 // Private, owner-confirmed aggregate Dzen Studio imports. No scraping or paid calls.
 const channels=["cinema","legends","science"],DAY=86400000;
-const fields=["impressions","opens","reads","subscribers_delta","reading_seconds","revenue_kopecks"];
+const fields=["impressions","feed_opens","opens","reads","subscribers_delta","reading_seconds","revenue_kopecks"];
 const key="stats:dzen:v1";
 const dayAt=now=>new Date(now+10800000).toISOString().slice(0,10);
 const dateOK=s=>typeof s==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s;
@@ -13,6 +13,7 @@ function clean(rows,now){
   const id=r.date+":"+r.channel;if(seen.has(id))return null;seen.add(id);
   const item={date:r.date,channel:r.channel};let provided=false;
   for(const f of fields){const v=r[f]??null;if(v!==null&&(!Number.isSafeInteger(v)||Math.abs(v)>1e12||(f!=="subscribers_delta"&&v<0)))return null;item[f]=v;provided ||= v!==null;}
+  if(item.feed_opens!==null&&(item.impressions!==null&&item.feed_opens>item.impressions||item.opens!==null&&item.feed_opens>item.opens))return null;
   if(!provided)return null;out.push(item);
  }return out;
 }
@@ -33,13 +34,13 @@ function aggregate(rows,days){
  const metrics={},coverage={};
  for(const f of fields){const vals=rows.map(r=>r[f]).filter(v=>v!==null&&v!==undefined);coverage[f]=vals.length;metrics[f]=vals.length===days?vals.reduce((a,b)=>a+b,0):null;}
  const ratio=(a,b)=>a!==null&&b!==null&&b>0?a/b:null;
- return {metrics,coverage,days,ctr:ratio(metrics.opens,metrics.impressions),completion:ratio(metrics.reads,metrics.opens),avgReadingSeconds:ratio(metrics.reading_seconds,metrics.opens)};
+ return {metrics,coverage,days,ctr:ratio(metrics.feed_opens,metrics.impressions),completion:ratio(metrics.reads,metrics.opens),avgReadingSeconds:ratio(metrics.reading_seconds,metrics.opens)};
 }
 function advice(current,previous){
  const out=[];
  // Only compare complete matched periods with at least 100 opens; no causal claims.
  if(current.metrics.opens>=100&&previous.metrics.opens>=100&&current.completion!==null&&previous.completion!==null&&current.completion<previous.completion-.05)out.push("Доля дочитываний снизилась более чем на 5 п.п. Проверьте вступления, структуру и соответствие заголовков содержанию.");
- if(current.metrics.impressions>=1000&&previous.metrics.impressions>=1000&&current.ctr!==null&&previous.ctr!==null&&current.ctr<previous.ctr-.02)out.push("CTR снизился более чем на 2 п.п. Сравните обложки и заголовки с содержанием материалов.");
+ if(current.metrics.feed_opens!==null&&previous.metrics.feed_opens!==null&&current.metrics.impressions>=1000&&previous.metrics.impressions>=1000&&current.ctr!==null&&previous.ctr!==null&&current.ctr<previous.ctr-.02)out.push("CTR снизился более чем на 2 п.п. Сравните обложки и заголовки с содержанием материалов.");
  return out;
 }
 export async function statsView(storage,period=7,now=Date.now()){
