@@ -357,12 +357,19 @@ def visual_passes(verdict, hard_issues, *, has_pixels):
             and bool(verdict["evidence"].strip()))
 
 
-def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, records, *, skip_cover=False, prior_section_attempt=False):
+def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, records, *, skip_cover=False, prior_section_attempt=False, checkpoints=None):
     rows, previews = [], []
     failed = [0] if skip_cover else []
     for slot, scene in enumerate(scenes):
         if slot == 0 and skip_cover:
             continue
+        if checkpoints:
+            accepted = checkpoints.image(slot, path / channel / "images")
+            if accepted:
+                row, raw = accepted
+                rows.append(row)
+                previews.append(thumbnail(decode_candidate(raw)[0]))
+                continue
         reserve = (reserve_next + sum(other["kind"] == "illustration"
                                        for other in scenes[slot + 1:])) * spend.image_price
         prompt = illustration_prompt(scene["brief"], visual)
@@ -454,6 +461,8 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
             if accepted:
                 save(f"{channel}/images/{row['file']}", candidate.read_bytes())
                 save(f"{channel}/images/image-{slot:02d}.json", json_bytes(row))
+                if checkpoints:
+                    checkpoints.accept_image(slot, row, candidate.read_bytes())
                 rows.append(row)
                 previews.append(preview)
                 break
@@ -529,9 +538,9 @@ def render(article, title, cover, pictures, records, *, private_preview=False):
     return "\n".join(lines) + "\n"
 
 
-def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior, resume):
+def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior, resume, *, checkpoints=None):
     name = CHANNELS[channel]
-    other_images = 7 if channel == "legends" else 0
+    other_images = 7 if channel == "legends" and checkpoints is None else 0
     skip_cover = bool(resume and resume.get("failed_cover"))
     reserve = (other_images + 7 - skip_cover) * spend.image_price
     history_titles, history_text = prior
@@ -555,6 +564,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         'Верни JSON {"title":"заголовок","assignment":"задание и план",'
         '"source_topic":"точное название из каталога или пустая строка для мистики"}. '
         f"Каталог {options}. Недавние темы {history_titles[-15:]}"
+        + (f" Указания владельца: {checkpoints.instructions}" if checkpoints else "")
     ), 1200, reserve=reserve)
     save(f"{channel}/qwen-plan.json", json_bytes({"output": raw_plan, "sha256": digest(raw_plan)}))
     plan = object_response(raw_plan)
@@ -573,10 +583,12 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         urls = list(source_entry["sources"])
         if "https://science.nasa.gov/solar-system/comets/" in urls:
             urls.append(COMET_SOURCE)
-        records = sources(urls, domains)
+        records = checkpoints.source_records(urls, domains) if checkpoints else sources(urls, domains)
         save(f"{channel}/sources.json", json_bytes(records))
         if len(records) < 2 or any(row["status"] != "accessible" for row in records):
             raise UnsafeToTest("science_primary_sources_unavailable")
+    if checkpoints:
+        checkpoints.pass_stage("plan")
     evidence = source_context(records)
     rules = f"{RULES} Ровно шесть разделов. Упомяни «{name}» в финальном призыве. {mode}"
     facts = ("Подтверждай утверждения только предоставленными первичными материалами. "
@@ -590,6 +602,10 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     save(f"{channel}/claude-draft.md", draft.encode())
     _, draft_checks = check_text(draft, channel, history_text)
     save(f"{channel}/claude-qa.json", json_bytes(draft_checks))
+    if checkpoints:
+        if draft_checks["issues"]:
+            raise UnsafeToTest("draft_structure_unverified")
+        checkpoints.pass_stage("draft")
 
     report["stage"] = channel + "/edit"
     revised = resume["edited"] if resume and "edited" in resume else spend.chat(channel, "edit", "edit", (
@@ -609,6 +625,8 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         status["text_qa"] = "failed"
         raise UnsafeToTest("edited_text_structural_check_failed")
 
+    if checkpoints:
+        checkpoints.pass_stage("edit")
     report["stage"] = channel + "/editorial_and_image_plan"
     if records:
         verify = ("Жанр: научпоп. Для каждого существенного проверяемого утверждения "
@@ -663,10 +681,15 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         raise UnsafeToTest("qwen_text_or_source_qa_failed")
     visual, scenes = plan_images(audit, article["sections"], science=bool(records),
                                 legacy=bool(resume and "audit" in resume))
+    if checkpoints:
+        checkpoints.approve_visual_plan(canonical(article))
+    if checkpoints:
+        checkpoints.permit("images")
     status["image_qa"] = "running"
     rows, previews, failed = illustrate(spend, save, report, channel, article, title, visual, scenes,
                                         index, path, other_images, records, skip_cover=skip_cover,
-                                        prior_section_attempt=bool(resume and resume.get("lost_image")))
+                                        prior_section_attempt=bool(resume and resume.get("lost_image")),
+                                        checkpoints=checkpoints)
     status["accepted_images"] = len(rows)
     if failed:
         status.update(image_qa="failed", failed_slots=failed)
@@ -675,6 +698,8 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
             "prior_cover_attempts": report.get("cover_attempts_path") if skip_cover else None,
         }))
         return
+    if checkpoints:
+        checkpoints.complete_images(rows)
     report["stage"] = channel + "/article_visual_review"
     review = object_response(spend.chat(channel, "article_visual_review", "brain", (
         "Рассмотри контактный лист: порядок слева направо и сверху вниз, начиная с 0. "
@@ -694,6 +719,8 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
                                                 "accepted_images": rows}))
     if not good:
         return
+    if checkpoints:
+        checkpoints.quality(revised, audit, records, history_text, rows)
     # The complete-set visual review determines the intended cover. Feed that
     # verdict to the shared layout while retaining the original CLIP scores.
     layout_rows = [{**row, "cover_score": 1 if i == 0 else 0} for i, row in enumerate(rows)]
@@ -702,7 +729,8 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     status.update(assembled=True, accepted_images=len(rows))
     save(f"{channel}/article-meta.json", json_bytes({
         "title": title, "channel": channel, "text_sha256": digest(revised),
-        "publication_authorized": False, "image_rights": "rights_review_pending",
+        "publication_authorized": False,
+        "image_rights": "verified" if checkpoints else "rights_review_pending",
     }))
 
 
