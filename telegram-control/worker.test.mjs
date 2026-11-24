@@ -495,3 +495,16 @@ test("release metadata is owner-only and explicitly prelaunch",async()=>{
  const r=await worker.fetch(req(123),env);assert.equal(r.status,200);const d=await r.json();
  assert.equal(d.version,"1.0.0-rc.1");assert.equal(d.productionEnabled,false);assert.equal(d.publicationAuthorized,false);assert.equal(d.rssEnabled,false);
 });
+
+test("responsive mode controls are available in both Core and Settings without bypassing confirmation",async()=>{
+ const {HTML,CSS,JS}=await import("./ui.mjs");
+ assert.match(HTML,/id="coremode"/);
+ assert.match(CSS,/\.mode-option\[aria-pressed=true\]/);
+ assert.match(CSS,/@media\(max-width:600px\)/);
+ assert.match(JS,/renderModeControl\(section,s\)/);
+ assert.match(JS,/renderModeControl\(direct,s\)/);
+ assert.match(JS,/confirm:true/);
+ assert.match(JS,/version:s.version/);
+ assert.match(JS,/selected===saved/);
+ assert.doesNotThrow(()=>new Function(JS));
+});
