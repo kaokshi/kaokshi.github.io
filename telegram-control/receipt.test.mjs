@@ -9,3 +9,10 @@ function storage(){const m=new Map([["production:job:"+job.id,job]]);const s={ge
 test("receipt is informational and repeat-safe",async()=>{const s=storage();assert.equal((await recordReceipt(s,report,now)).status,200);assert.equal((await recordReceipt(s,report,now)).body.replay,true);const j=await s.get("production:job:"+job.id);assert.equal(j.executed,false);assert.equal(j.publicationAuthorized,false);assert.equal(j.executorReceipt.budget.mainRemainingRub,"300");assert.equal((await recordReceipt(s,{...report,observedAt:now-1},now)).status,409);});
 test("reject unsafe, missing, stale or impossible stage reports",async()=>{const s=storage();for(const change of [{executionEnabled:true},{rssEnabled:true},{publicationAuthorized:true},{observedAt:now-400000},{articles:[]},{budget:{...report.budget,mainRemainingRub:"301"}},{articles:[{...report.articles[0],stages:report.articles[0].stages.map((st,i)=>({...st,status:i===2?"passed":"not_started"}))}]}])assert.equal((await recordReceipt(s,{...report,...change},now)).status,409);});
 test("passed stage cannot regress or conflict on replay",async()=>{const s=storage();const r=structuredClone(report);r.articles[0].stages[0].status="passed";assert.equal((await recordReceipt(s,r,now)).status,200);assert.equal((await recordReceipt(s,report,now)).status,409);assert.equal((await recordReceipt(s,{...report,observedAt:now+1},now)).status,409);});
+
+test("rolling budget report is bounded and latest snapshot does not rewind",async()=>{
+ const s=storage(),budget={...report.budget,rollingStart:"2026-10-26",rollingCapRub:"9000",rollingRemainingRub:"8990",rollingMeteredRub:"10",rollingOverrun:false,overrun:false};
+ assert.equal((await recordReceipt(s,{...report,budget},now)).status,200);
+ assert.equal((await s.get("budget:executor-report")).budget.rollingRemainingRub,"8990");
+ assert.equal((await recordReceipt(s,{...report,observedAt:now+1,budget:{...budget,rollingRemainingRub:"9001"}},now)).status,409);
+});
