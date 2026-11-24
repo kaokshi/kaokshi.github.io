@@ -31,7 +31,11 @@ function cleanReport(d,job,now){
  Number(b.mainDailyRub)!==300||Number(b.reserveDailyRub)!==50||
  Number(b.mainRemainingRub)>300||Number(b.reserveRemainingRub)>50||typeof b.unsettledRequest!=="boolean")return null;
  if(d.modeRevision!==undefined&&(!Number.isSafeInteger(d.modeRevision)||d.modeRevision<0||!["manual","semi_autonomous","autonomous"].includes(d.effectiveMode)))return null;
- const budget=Object.fromEntries(["day","timezone","mainDailyRub","reserveDailyRub","mainRemainingRub","reserveRemainingRub","meteredRub","unsettledRequest"].map(k=>[k,b[k]]));
+ const rolling=["rollingStart","rollingCapRub","rollingRemainingRub","rollingMeteredRub","rollingOverrun","overrun"];
+ if(rolling.some(k=>Object.hasOwn(b,k))){
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(b.rollingStart)||![b.rollingCapRub,b.rollingRemainingRub,b.rollingMeteredRub].every(money)||Number(b.rollingCapRub)!==9000||Number(b.rollingRemainingRub)>9000||typeof b.rollingOverrun!=="boolean"||typeof b.overrun!=="boolean")return null;
+ }
+ const budget=Object.fromEntries(["day","timezone","mainDailyRub","reserveDailyRub","mainRemainingRub","reserveRemainingRub","meteredRub","unsettledRequest",...rolling.filter(k=>Object.hasOwn(b,k))].map(k=>[k,b[k]]));
  return {schema:d.schema,jobId:d.jobId,observedAt:d.observedAt,...(d.modeRevision!==undefined?{modeRevision:d.modeRevision,effectiveMode:d.effectiveMode}:{}),articles,budget,source:"executor_report",executionEnabled:false,publicationAuthorized:false,rssEnabled:false};
 }
 export async function recordReceipt(storage,d,now=Date.now()){
@@ -49,6 +53,8 @@ export async function recordReceipt(storage,d,now=Date.now()){
   if(old&&receipt.observedAt===old.observedAt)return JSON.stringify(old)===JSON.stringify(receipt)?{status:200,body:{accepted:true,replay:true}}:bad(409,"receipt_conflict");
   if(old&&old.articles.some((a,i)=>a.stages.some((s,j)=>s.status==="passed"&&receipt.articles[i].stages[j].status!=="passed")))return bad(409,"passed_stage_regression");
   await tx.put(key,{...job,executorReceipt:receipt});
+  const latest=await tx.get("budget:executor-report");
+  if(!latest||receipt.observedAt>latest.observedAt)await tx.put("budget:executor-report",{observedAt:receipt.observedAt,budget:receipt.budget});
   return {status:200,body:{accepted:true,replay:false},receipt,events:reportEvents(old,receipt)};
  });
 }
