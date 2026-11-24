@@ -72,7 +72,7 @@ def configured_account():
     target = endpoint.removesuffix("/control") + "/account"
     opener = build_opener(NoRedirect())
 
-    def account(action, job_id, operation, outcome=None):
+    def account(action, job_id=None, operation=None, outcome=None):
         data = {"action": action, "id": job_id, "operation": operation}
         if outcome is not None:
             data["outcome"] = outcome
@@ -86,6 +86,10 @@ def configured_account():
                 row = json.loads(raw)
         except (OSError, ValueError):
             raise CoreBlocked("account_gate_unavailable") from None
+        if action == "status":
+            if not isinstance(row, dict) or row.get("schema") != "zen-core/account-status-v1" or row.get("executionEnabled") is not False:
+                raise CoreBlocked("account_status_invalid")
+            return row
         if not isinstance(row, dict) or row.get("claimed" if action == "claim" else "closed") is not True:
             raise CoreBlocked("account_gate_denied")
         return row
