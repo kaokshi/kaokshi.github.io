@@ -402,3 +402,30 @@ test("mode choice persists but does not enable production or the scheduler",asyn
  assert.equal((await opsState(storage)).stopped,true);
  assert.equal((await new CoreHandler({storage}).view()).requestedMode,"manual");
 });
+
+import {readMemory,writeMemory} from "./memory.mjs";
+test("owner memory is bounded, confirmed, persistent and revisioned",async()=>{
+ const map=new Map(),storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),transaction:async fn=>fn(storage)};
+ const notes=[{kind:"style",text:"Живой русский язык"}],d={notes,version:0,confirm:true};
+ assert.equal((await readMemory(storage)).version,0);
+ for(const change of [{confirm:false},{notes:[{kind:"unknown",text:"x"}]},{notes:[{kind:"style",text:"x".repeat(241)}]},{notes:[{kind:"style",text:"api key: fixture"}]},{notes:Array(9).fill(notes[0])}])assert.equal((await writeMemory(storage,{...d,...change})).status,400);
+ assert.equal((await writeMemory(storage,d)).status,200);
+ assert.equal((await writeMemory(storage,d)).status,409);
+ assert.deepEqual((await readMemory(storage)).notes,notes);
+ assert.equal((await writeMemory(storage,{notes:[],version:1,confirm:true})).status,200);
+ assert.deepEqual((await readMemory(storage)).notes,[]);
+ assert.equal(JSON.stringify([...map.values()]).includes("Живой русский язык"),false);
+});
+test("memory API rejects non-owner and stores only confirmed owner notes",async()=>{
+ const map=new Map(),storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),transaction:async fn=>fn(storage)};
+ const h=new CoreHandler({storage});
+ for(const path of ["/api/core/memory","/api/core/memory/settings"]){
+ const req=new Request("https://example.test"+path,{method:"POST",body:JSON.stringify({initData:signed(124)})});
+ assert.equal((await worker.fetch(req,env)).status,401);
+ }
+ const d={version:0,confirm:true,notes:[{kind:"illustrations",text:"Проверять соответствие смыслу"}]};
+ const req=new Request("https://core.internal/core/memory/settings",{method:"POST",body:JSON.stringify(d)});
+ assert.equal((await h.fetch(req)).status,200);
+ const get=await h.fetch(new Request("https://core.internal/core/memory"));
+ assert.deepEqual((await get.json()).memory.notes,d.notes);
+});
