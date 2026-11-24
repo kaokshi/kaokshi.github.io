@@ -1,4 +1,5 @@
 import {HTML,CSS,JS} from "./ui.mjs";
+import {journalStub,validateDecision} from "./journal.mjs";
 import {buildSnapshot,readPrivateImage} from "./snapshot.mjs";
 const encoder=new TextEncoder();
 async function hmac(key,data){
@@ -44,12 +45,28 @@ export async function miniApp(request,env,getBalance){
   if(path==="/app.css")return serve(CSS,"text/css; charset=utf-8");
   if(path==="/app.js")return serve(JS,"application/javascript; charset=utf-8");
  }
- if(!["/api/dashboard","/api/image"].includes(path))return null;
+ if(!["/api/dashboard","/api/image","/api/review","/api/journal"].includes(path))return null;
  if(request.method!=="POST")return new Response("Method not allowed",{status:405,headers});
  let data;
  try{if(Number(request.headers.get("Content-Length")||0)>16000)throw Error();const raw=await request.text();if(raw.length>16000)throw Error();data=JSON.parse(raw);}catch{return new Response("Bad request",{status:400,headers});}
  if(!await verifyInitData(data?.initData,env))return new Response("Unauthorized",{status:401,headers});
  const token=env.EDITORIAL_REVIEW_READ_TOKEN;
+ if(path==="/api/journal"||path==="/api/review"){
+  const stub=journalStub(env);
+  if(!stub)return Response.json({error:"journal_unavailable"},{status:503,headers});
+  if(path==="/api/journal"){
+   try{const r=await stub.fetch("https://journal.internal/");return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"journal_unavailable"},{status:503,headers});}
+  }
+  let live;
+  try{live=await buildSnapshot(token);}catch{}
+  if(!live)return Response.json({error:"sync_unavailable"},{status:503,headers});
+  const validated=validateDecision(data,live);
+  if(validated.error)return Response.json({error:validated.error},{status:validated.status,headers});
+  try{
+   const r=await stub.fetch("https://journal.internal/",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(validated.entry)});
+   return Response.json(await r.json(),{status:r.status,headers});
+  }catch{return Response.json({error:"journal_unavailable"},{status:503,headers});}
+ }
  if(path==="/api/image"){
   if(!token)return new Response("Not configured",{status:503,headers});
   let image=null;
@@ -61,5 +78,5 @@ export async function miniApp(request,env,getBalance){
  const jobs=[(async()=>{try{balance=await getBalance(env);}catch{}})()];
  if(token)jobs.push((async()=>{try{const live=await buildSnapshot(token);if(live){review=live;sync="live";}}catch{}})());
  await Promise.all(jobs);
- return Response.json({balance,checkedAt:new Date().toISOString(),mode:"read_only",review,sync,imagePreview:sync==="live"},{headers});
+ return Response.json({balance,checkedAt:new Date().toISOString(),mode:"read_only",review,sync,imagePreview:sync==="live",reviewEnabled:Boolean(env.REVIEW_JOURNAL)&&sync==="live"},{headers});
 }
