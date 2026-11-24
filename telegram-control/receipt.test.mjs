@@ -16,3 +16,17 @@ test("rolling budget report is bounded and latest snapshot does not rewind",asyn
  assert.equal((await s.get("budget:executor-report")).budget.rollingRemainingRub,"8990");
  assert.equal((await recordReceipt(s,{...report,observedAt:now+1,budget:{...budget,rollingRemainingRub:"9001"}},now)).status,409);
 });
+
+test("recovery information is bounded and accepted illustrations never regress",async()=>{
+ const s=storage(),r=structuredClone(report);
+ r.articles[0].stages.slice(0,4).forEach(x=>x.status="passed");
+ r.articles[0].stages[4]={id:"images",status:"blocked",reason:"cloud_storage_unavailable"};
+ r.articles[0].acceptedImageSlots=[0,2,4];
+ assert.equal((await recordReceipt(s,r,now)).status,200);
+ const saved=(await s.get("production:job:"+job.id)).executorReceipt;
+ assert.equal(saved.articles[0].stages[4].reason,"cloud_storage_unavailable");
+ assert.deepEqual(saved.articles[0].acceptedImageSlots,[0,2,4]);
+ for(const slots of [[0,2],[0,2,7],[0,0,2,4]]){const bad=structuredClone(r);bad.observedAt++;bad.articles[0].acceptedImageSlots=slots;assert.equal((await recordReceipt(s,bad,now)).status,409);}
+ const bad=structuredClone(r);bad.observedAt++;bad.articles[0].stages[4].reason="private text / token";assert.equal((await recordReceipt(s,bad,now)).status,409);
+ const good=structuredClone(r);good.observedAt++;good.articles[0].acceptedImageSlots=[0,1,2,4];assert.equal((await recordReceipt(s,good,now)).status,200);
+});
