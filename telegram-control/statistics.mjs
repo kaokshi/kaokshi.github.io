@@ -1,0 +1,55 @@
+// Private, owner-confirmed aggregate Dzen Studio imports. No scraping or paid calls.
+const channels=["cinema","legends","science"],DAY=86400000;
+const fields=["impressions","opens","reads","subscribers_delta","reading_seconds","revenue_kopecks"];
+const key="stats:dzen:v1";
+const dayAt=now=>new Date(now+10800000).toISOString().slice(0,10);
+const dateOK=s=>typeof s==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s;
+const empty=()=>({version:0,updatedAt:null,rows:[]});
+function clean(rows,now){
+ if(!Array.isArray(rows)||!rows.length||rows.length>90)return null;
+ const seen=new Set(),out=[];
+ for(const r of rows){
+  if(!r||Object.keys(r).some(k=>!["date","channel",...fields].includes(k))||!dateOK(r.date)||r.date>dayAt(now)||r.date<dayAt(now-365*DAY)||!channels.includes(r.channel))return null;
+  const id=r.date+":"+r.channel;if(seen.has(id))return null;seen.add(id);
+  const item={date:r.date,channel:r.channel};let provided=false;
+  for(const f of fields){const v=r[f]??null;if(v!==null&&(!Number.isSafeInteger(v)||Math.abs(v)>1e12||(f!=="subscribers_delta"&&v<0)))return null;item[f]=v;provided ||= v!==null;}
+  if(!provided)return null;out.push(item);
+ }return out;
+}
+export async function importStats(storage,d,now=Date.now()){
+ const rows=clean(d?.rows,now);
+ if(d?.confirm!==true||!Number.isSafeInteger(d.version)||!rows)return {status:400,body:{error:"invalid_stats_import"}};
+ return storage.transaction(async tx=>{
+  const old=await tx.get(key)||empty();
+  if(old.version!==d.version)return {status:409,body:{error:"stale_stats"}};
+  const map=new Map(old.rows.filter(r=>r.date>=dayAt(now-365*DAY)).map(r=>[r.date+":"+r.channel,r]));
+  for(const r of rows)map.set(r.date+":"+r.channel,r);
+  const next={version:old.version+1,updatedAt:new Date(now).toISOString(),rows:[...map.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.channel.localeCompare(b.channel))};
+  await tx.put(key,next);return {status:200,body:{version:next.version,imported:rows.length}};
+ });
+}
+function aggregate(rows,days){
+ // Missing dates or fields never silently become zero; coverage accompanies every sum.
+ const metrics={},coverage={};
+ for(const f of fields){const vals=rows.map(r=>r[f]).filter(v=>v!==null&&v!==undefined);coverage[f]=vals.length;metrics[f]=vals.length===days?vals.reduce((a,b)=>a+b,0):null;}
+ const ratio=(a,b)=>a!==null&&b!==null&&b>0?a/b:null;
+ return {metrics,coverage,days,ctr:ratio(metrics.opens,metrics.impressions),completion:ratio(metrics.reads,metrics.opens),avgReadingSeconds:ratio(metrics.reading_seconds,metrics.opens)};
+}
+function advice(current,previous){
+ const out=[];
+ // Only compare complete matched periods with at least 100 opens; no causal claims.
+ if(current.metrics.opens>=100&&previous.metrics.opens>=100&&current.completion!==null&&previous.completion!==null&&current.completion<previous.completion-.05)out.push("Доля дочитываний снизилась более чем на 5 п.п. Проверьте вступления, структуру и соответствие заголовков содержанию.");
+ if(current.metrics.impressions>=1000&&previous.metrics.impressions>=1000&&current.ctr!==null&&previous.ctr!==null&&current.ctr<previous.ctr-.02)out.push("CTR снизился более чем на 2 п.п. Сравните обложки и заголовки с содержанием материалов.");
+ return out;
+}
+export async function statsView(storage,period=7,now=Date.now()){
+ if(![7,30,90].includes(period))period=7;
+ const s=await storage.get(key)||empty(),end=dayAt(now-DAY),start=dayAt(now-period*DAY),prevStart=dayAt(now-period*2*DAY),prevEnd=dayAt(now-(period+1)*DAY);
+ const reports=channels.map(channel=>{
+  const rows=s.rows.filter(r=>r.channel===channel);
+  const currentRows=rows.filter(r=>r.date>=start&&r.date<=end),previousRows=rows.filter(r=>r.date>=prevStart&&r.date<=prevEnd);
+  const current=aggregate(currentRows,period),previous=aggregate(previousRows,period);
+  return {channel,current,previous,series:Array.from({length:period},(_,i)=>{const date=dayAt(now-(period-i)*DAY),r=currentRows.find(x=>x.date===date);return {date,opens:r?.opens??null};}),recommendations:advice(current,previous)};
+ });
+ return {schema:"zen-stats/v1",source:s.updatedAt?"owner_confirmed_dzen_export":null,automaticSync:false,version:s.version,updatedAt:s.updatedAt,period,start,end,prevStart,prevEnd,reports};
+}
