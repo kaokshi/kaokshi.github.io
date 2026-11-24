@@ -382,3 +382,23 @@ test("preview endpoint rejects non-owner before storage and never reaches dispat
  const r=await worker.fetch(new Request("https://example.test/api/core/jobs/preview",{method:"POST",body:JSON.stringify({initData:signed(124),id:"agent:test",confirm:true})}),{...env,REVIEW_JOURNAL:{idFromName(){throw Error("must not touch storage");}}});
  assert.equal(r.status,401);
 });
+
+test("mode choice persists but does not enable production or the scheduler",async()=>{
+ const map=new Map();let alarm=null;
+ const storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),delete:async k=>map.delete(k),list:async({prefix})=>new Map([...map].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage),getAlarm:async()=>alarm,setAlarm:async n=>alarm=n,deleteAlarm:async()=>alarm=null};
+ const core=new CoreHandler({storage});const req=d=>new Request("https://core.internal/core/ops/settings",{method:"POST",body:JSON.stringify(d)});
+ assert.equal((await opsState(storage)).requestedMode,"manual");
+ await storage.put("core:settings",plan);await storage.setAlarm(Date.now()+60000);
+ const choose={action:"mode",mode:"autonomous",version:0,confirm:true};
+ assert.equal((await core.fetch(req({...choose,confirm:false}))).status,400);
+ assert.equal((await core.fetch(req({...choose,mode:"live"}))).status,400);
+ assert.equal((await core.fetch(req(choose))).status,200);
+ assert.equal((await core.fetch(req(choose))).status,409);
+ const view=await core.view();assert.equal(view.requestedMode,"autonomous");assert.equal(view.mode,"dry_run");assert.equal(view.productionEnabled,false);assert.equal(view.rssEnabled,false);assert.equal(view.settings.paused,true);assert.equal(await storage.getAlarm(),null);
+ assert.equal((await opsView(storage)).autonomousExecutionEnabled,false);
+ await core.fetch(req({action:"stop",version:1,confirm:true}));
+ assert.equal((await core.fetch(req({action:"mode",mode:"assisted",version:2,confirm:true}))).status,409);
+ assert.equal((await core.fetch(req({action:"mode",mode:"manual",version:2,confirm:true}))).status,200);
+ assert.equal((await opsState(storage)).stopped,true);
+ assert.equal((await new CoreHandler({storage}).view()).requestedMode,"manual");
+});
