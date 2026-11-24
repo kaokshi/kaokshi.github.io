@@ -1,4 +1,5 @@
 import {HTML,CSS,JS} from "./ui.mjs";
+import {buildSnapshot,readPrivateImage} from "./snapshot.mjs";
 const encoder=new TextEncoder();
 async function hmac(key,data){
  const k=await crypto.subtle.importKey("raw",key,{name:"HMAC",hash:"SHA-256"},false,["sign"]);
@@ -23,7 +24,7 @@ export async function verifyInitData(raw,env,now=Date.now()/1000){
  }catch{return false;}
 }
 const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"};
-function serve(body,type){return new Response(body,{headers:{...headers,"Content-Type":type,"Content-Security-Policy":"default-src 'none'; script-src 'self' https://telegram.org; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'"} });}
+function serve(body,type){return new Response(body,{headers:{...headers,"Content-Type":type,"Content-Security-Policy":"default-src 'none'; script-src 'self' https://telegram.org; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; base-uri 'none'; form-action 'none'"} });}
 export function readSnapshot(env){
  try{
   const count=Number(env.REVIEW_SNAPSHOT_COUNT);
@@ -43,12 +44,22 @@ export async function miniApp(request,env,getBalance){
   if(path==="/app.css")return serve(CSS,"text/css; charset=utf-8");
   if(path==="/app.js")return serve(JS,"application/javascript; charset=utf-8");
  }
- if(path!=="/api/dashboard")return null;
+ if(!["/api/dashboard","/api/image"].includes(path))return null;
  if(request.method!=="POST")return new Response("Method not allowed",{status:405,headers});
  let data;
  try{if(Number(request.headers.get("Content-Length")||0)>16000)throw Error();const raw=await request.text();if(raw.length>16000)throw Error();data=JSON.parse(raw);}catch{return new Response("Bad request",{status:400,headers});}
  if(!await verifyInitData(data?.initData,env))return new Response("Unauthorized",{status:401,headers});
- let balance=null;
- try{balance=await getBalance(env);}catch{}
- return Response.json({balance,checkedAt:new Date().toISOString(),mode:"read_only",review:readSnapshot(env)},{headers});
+ const token=env.EDITORIAL_REVIEW_READ_TOKEN;
+ if(path==="/api/image"){
+  if(!token)return new Response("Not configured",{status:503,headers});
+  let image=null;
+  try{image=await readPrivateImage(token,data.revision,data.path);}catch{}
+  if(!image)return new Response("Image unavailable",{status:404,headers});
+  return new Response(image.bytes,{headers:{...headers,"Content-Type":image.type,"Content-Security-Policy":"default-src 'none'; sandbox"}});
+ }
+ let balance=null,review=readSnapshot(env),sync=token?"fallback":"snapshot";
+ const jobs=[(async()=>{try{balance=await getBalance(env);}catch{}})()];
+ if(token)jobs.push((async()=>{try{const live=await buildSnapshot(token);if(live){review=live;sync="live";}}catch{}})());
+ await Promise.all(jobs);
+ return Response.json({balance,checkedAt:new Date().toISOString(),mode:"read_only",review,sync,imagePreview:sync==="live"},{headers});
 }
