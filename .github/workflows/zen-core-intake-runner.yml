@@ -1,0 +1,31 @@
+name: ZEN CORE cloud intake (no generation)
+on:
+  push:
+    branches: [integration/zen-core-routerai-20261124]
+    paths: ['.github/workflows/zen-core-intake-runner.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: zen-core-intake-runner
+  cancel-in-progress: false
+jobs:
+  intake:
+    if: github.ref == 'refs/heads/integration/zen-core-routerai-20261124'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check safety and cursor contract
+        run: python -m unittest tests.test_editorial_zen_intake_runner tests.test_editorial_zen_control -q
+      - name: Accept confirmed intents and return informational receipts only
+        env:
+          ZEN_CORE_INTAKE_ENDPOINT: 'https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/intake'
+          ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+        run: python -u telegram-control/intake_runner.py
