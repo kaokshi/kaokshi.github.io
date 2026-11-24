@@ -4,6 +4,7 @@ import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from 
 import {previewJob} from "./adapter.mjs";
 import {intakeView,controlView,queueView,accountView} from "./intake.mjs";
 import {recordReceipt} from "./receipt.mjs";
+import {runProbe} from "./probe.mjs";
 import {notifyReceipt} from "./notifications.mjs";
 import {readMemory,writeMemory} from "./memory.mjs";
 import {diagnose} from "./diagnostics.mjs";
@@ -92,6 +93,7 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core/jobs"){const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),readBudget(this.storage,now),opsState(this.storage),this.state()]);return Response.json({...jobs,requestedMode:ops.requestedMode,modeRevision:ops.modeRevision??0,stopped:ops.stopped,schedulePaused:settings.paused,readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict:!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop,ownerDailyRub:budget.policy.mainKop/100}});}
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/probe"){const r=await runProbe(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/watchdog")return Response.json(await this.watchdog(now));
   if(url.pathname==="/core/memory/settings"){const r=await writeMemory(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
