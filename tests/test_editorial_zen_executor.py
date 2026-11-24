@@ -62,6 +62,24 @@ class ExecutorTest(unittest.TestCase):
     def plan(self, router, message="fixture"):
         return router.request("legends", "plan", "brain", "/chat/completions", {"prompt": message}, 2)
 
+    def test_account_hold_closes_after_settlement_and_recovers_lost_close(self):
+        events = []
+        def account(action, job_id, operation, outcome=None):
+            events.append((action, operation, outcome))
+            if action == "close":
+                self.assertEqual(self.cloud.access(lambda c: c.snapshot())["budget"]["meteredRub"], "1.25")
+                if len(events) == 2:
+                    raise CoreBlocked("synthetic_close_receipt_lost")
+        def router():
+            return MeteredRouter(Session(CloudCore(self.store), self.article, account=account), "fixture",
+                                 transport=self.transport, balance=lambda _: 100)
+        with self.assertRaisesRegex(CoreBlocked, "close_receipt_lost"):
+            self.plan(router())
+        self.plan(router())
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([e[0] for e in events], ["claim", "close", "close"])
+        self.assertEqual(events[0][1], self.article + "/plan")
+
     def test_cloud_conflict_retries_reservation_but_response_replays_once(self):
         self.store.conflict = True
         first = self.plan(self.router())
