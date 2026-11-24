@@ -34,6 +34,8 @@ def accept(core, envelope, expected_id):
     job_id = core.submit(intent)
     if transition is not None:
         core.apply_mode(job_id, transition["mode"], transition["revision"])
+    if "stageIntent" in envelope:
+        core.accept_stage_intent(job_id, envelope["stageIntent"])
     return job_id
 
 
@@ -56,7 +58,7 @@ def pull(endpoint, secret, job_id):
         return json.loads(data)
 
 
-def build_receipt(core, job_id, observed_at=None):
+def build_receipt(core, job_id, observed_at=None, command_id=None):
     snapshot = core.snapshot()
     if snapshot.get("schema") != "zen-core/v1" or snapshot.get("executionMode") != "intents_only" or any(
             snapshot.get(k) is not False for k in ("executionEnabled", "publicationAuthorized", "rssEnabled")):
@@ -64,7 +66,8 @@ def build_receipt(core, job_id, observed_at=None):
     jobs = [j for j in snapshot["jobs"] if j["id"] == job_id]
     if len(jobs) != 1:
         raise ValueError("job_missing")
-    return {"schema": "zen-core/receipt-v1", "jobId": job_id,
+    return {**({"stageAcknowledgment": core.stage_acknowledgment(job_id, command_id)} if command_id else {}),
+            "schema": "zen-core/receipt-v1", "jobId": job_id,
             "observedAt": int(time.time() * 1000) if observed_at is None else observed_at,
             "modeRevision": jobs[0]["modeRevision"], "effectiveMode": jobs[0]["mode"],
             "articles": [{"id": a["id"], "meteredRub": a["meteredRub"],
@@ -144,7 +147,7 @@ def drain(core, endpoint, secret, *, max_pages=10, cursor=None, fetch_page=disco
                     continue
                 raise
             core.access(lambda c: accept(c, envelope, job_id), change=True)
-            receipt = core.access(lambda c: build_receipt(c, job_id))
+            receipt = core.access(lambda c: build_receipt(c, job_id, command_id=(envelope.get("stageIntent") or {}).get("id")))
             try:
                 send_receipt(endpoint, secret, receipt)
             except HTTPError as exc:
@@ -179,7 +182,7 @@ def main():
     envelope = pull(args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), args.job)
     job_id = core.access(lambda c: accept(c, envelope, args.job), change=True)
     if args.report:
-        push_receipt(args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), core.access(lambda c: build_receipt(c, job_id)))
+        push_receipt(args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), core.access(lambda c: build_receipt(c, job_id, command_id=(envelope.get("stageIntent") or {}).get("id"))))
     print(json.dumps({"id": job_id, "mode": "intents_only", "receiptConfirmed": args.report,
                       "executed": False, "publicationAuthorized": False}))
 
