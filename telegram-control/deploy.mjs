@@ -78,7 +78,7 @@ async function main(){
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"entry.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs"]){
+ for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }
@@ -115,7 +115,7 @@ async function main(){
  requireOk(ownerReply.ok,"owner_reply_http_"+ownerReply.status);
  console.log("OWNER_REPLY_CONFIRMED");
  stage="verify_miniapp";
- const page=await fetch(endpoint+"/app?v=6",{redirect:"error",signal:AbortSignal.timeout(8000)});
+ const page=await fetch(endpoint+"/app?v=7",{redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(page.ok&&(await page.text()).includes("ZEN CONTROL"),"app_page_unavailable");
  const unauthorized=await fetch(endpoint+"/api/dashboard",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({initData:"invalid"}),redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(unauthorized.status===401,"app_auth_gate_failed");
@@ -153,21 +153,37 @@ async function main(){
  requireOk(invalid.status===400,"review_action_gate_failed");
  console.log("REVIEW_JOURNAL_CONFIRMED");
  console.log("REVIEW_MUTATION_GATE_CONFIRMED");
+ stage="verify_core";
+ const core=await journalRequest("/api/core",{initData:params.toString()});
+ requireOk(core.ok,"core_read_http_"+core.status);
+ const state=await core.json();
+ requireOk(state.mode==="dry_run"&&state.productionEnabled===false&&state.rssEnabled===false,"core_safety_gate_failed");
+ const deniedCore=await journalRequest("/api/core",{initData:"invalid"});
+ requireOk(deniedCore.status===401,"core_auth_gate_failed");
+ const invalidSchedule=await journalRequest("/api/core/schedule",{initData:params.toString(),settings:{},version:0});
+ requireOk(invalidSchedule.status===400,"core_validation_failed");
+ const rss=await journalRequest("/api/rss",{initData:params.toString()});
+ requireOk(rss.ok,"rss_status_failed");
+ const feeds=await rss.json();
+ requireOk(feeds.deliveryEnabled===false&&feeds.feeds?.length===3,"rss_gate_failed");
+ console.log("CORE_DRY_RUN_CONFIRMED");
+ console.log("RSS_STATUS_CONFIRMED");
+
  console.log("PRIVATE_REVIEW_CONFIRMED");
  console.log("LIVE_REVIEW_SYNC="+(dashboard.sync==="live"));
  console.log("IMAGE_PREVIEW_CONFIGURED="+(dashboard.imagePreview===true));
  console.log("MINIAPP_AUTH_CONFIRMED");
  console.log("MINIAPP_BALANCE_AVAILABLE="+(typeof dashboard.balance==="number"));
  stage="miniapp_menu";
- requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=6"}}})===true,"miniapp_menu_failed");
+ requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=7"}}})===true,"miniapp_menu_failed");
  const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
- requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=6","miniapp_menu_not_verified");
+ requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=7","miniapp_menu_not_verified");
  console.log("MINIAPP_MENU_CONFIRMED");
  stage="send_inline_launch";
- const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=6"}}]]}});
+ const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=7"}}]]}});
  requireOk(Number.isInteger(launch?.message_id),"inline_launch_failed");
  console.log("INLINE_LAUNCH_SENT");
- console.log("MINIAPP_URL="+endpoint+"/app?v=6");
+ console.log("MINIAPP_URL="+endpoint+"/app?v=7");
  stage="commands";
  try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},
