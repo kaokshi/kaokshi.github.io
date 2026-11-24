@@ -14,3 +14,11 @@ export function rollbackBody(previous,current,expected){
  if(!uuid(previous?.version)||!uuid(expected?.version)||!uuid(expected?.id)||!uuid(current?.id)||!uuid(current?.version)||current.id!==expected.id||current.version!==expected.version||previous.version===current.version)throw Error("rollback_target_not_verified");
  return {strategy:"percentage",versions:[{version_id:previous.version,percentage:100}]};
 }
+
+export function latestVersion(result){
+ const rows=result?.items;
+ if(!Array.isArray(rows)||!rows.length||rows.some(v=>!uuid(v.id)||!Number.isSafeInteger(v.number)||v.number<1))throw Error("version_history_unverified");
+ const sorted=[...rows].sort((a,b)=>b.number-a.number);
+ if(sorted.length>1&&sorted[0].number===sorted[1].number)throw Error("version_order_ambiguous");
+ return sorted[0].id;
+}
