@@ -93,6 +93,44 @@ def channel_report(channel, token, get_json=get, today=None):
                     reports[label]["rows"] = [{"labels": [str(d.get("name","")) for d in r.get("dimensions",[])],
                                                  "metrics": r.get("metrics")} for r in rows]
         result["periods"][str(days)] = {"start": args["date1"], "end": args["date2"], **reports}
+    # Intraday data is provisional and never used in completed-period comparisons.
+    args = {"ids": cid, "date1": today.isoformat(), "date2": today.isoformat(),
+            "accuracy": "full", "limit": 100}
+    intraday = {"date": today.isoformat(), "status": "unavailable", "provisional": True}
+    # The reporting API groups by the counter's own timezone.
+    intraday["timezone"] = str(counter.get("time_zone_name") or counter.get("time_zone") or "")[:80] or None
+    code, totals = get_json(token, "/stat/v1/data", {**args, "metrics": METRICS})
+    def valid_report(code, payload, count):
+        import math
+        return (code == 200 and isinstance(payload, dict) and payload.get("sampled") is False
+                and isinstance(payload.get("totals"), list) and len(payload["totals"]) == count
+                and all(type(v) in (int,float) and math.isfinite(v) and v >= 0 for v in payload["totals"]))
+    if valid_report(code, totals, 6):
+        intraday["totals"] = totals["totals"]
+        intraday["metrics"] = METRICS.split(",")
+        intraday["status"] = "totals_only"
+        code, hourly = get_json(token, "/stat/v1/data", {**args, "metrics": "ym:s:visits,ym:s:pageviews",
+                                "dimensions": "ym:s:hour"})
+        if valid_report(code, hourly, 2):
+            rows = hourly.get("data")
+            if isinstance(rows, list) and len(rows) <= 24 and hourly.get("total_rows") == len(rows):
+                parsed, seen = [], set()
+                for row in rows:
+                    try:
+                        label = row["dimensions"][0]["name"]
+                        hour = int(label) if isinstance(label, str) and label.isdigit() else -1
+                        values = row["metrics"]
+                        if not 0 <= hour <= 23 or hour in seen or len(values) != 2 or any(type(v) not in (int,float) or v < 0 or not float(v).is_integer() for v in values):
+                            raise ValueError()
+                        seen.add(hour)
+                        parsed.append({"hour":hour,"visits":int(values[0]),"pageviews":int(values[1])})
+                    except (KeyError, IndexError, TypeError, ValueError, OverflowError):
+                        parsed = None
+                        break
+                if parsed is not None:
+                    intraday["hourly"] = sorted(parsed, key=lambda x:x["hour"])
+                    intraday["status"] = "available"
+    result["intraday"] = intraday
     result["status"] = "mixed_channel_traffic" if any_foreign else "binding_unverified"
     result["reason"] = "foreign_channel_page_seen" if any_foreign else "studio_binding_and_live_hit_not_confirmed"
     return result
