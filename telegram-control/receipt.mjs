@@ -30,8 +30,9 @@ function cleanReport(d,job,now){
  !["mainDailyRub","reserveDailyRub","mainRemainingRub","reserveRemainingRub","meteredRub"].every(k=>money(b[k]))||
  Number(b.mainDailyRub)!==300||Number(b.reserveDailyRub)!==50||
  Number(b.mainRemainingRub)>300||Number(b.reserveRemainingRub)>50||typeof b.unsettledRequest!=="boolean")return null;
+ if(d.modeRevision!==undefined&&(!Number.isSafeInteger(d.modeRevision)||d.modeRevision<0||!["manual","semi_autonomous","autonomous"].includes(d.effectiveMode)))return null;
  const budget=Object.fromEntries(["day","timezone","mainDailyRub","reserveDailyRub","mainRemainingRub","reserveRemainingRub","meteredRub","unsettledRequest"].map(k=>[k,b[k]]));
- return {schema:d.schema,jobId:d.jobId,observedAt:d.observedAt,articles,budget,source:"executor_report",executionEnabled:false,publicationAuthorized:false,rssEnabled:false};
+ return {schema:d.schema,jobId:d.jobId,observedAt:d.observedAt,...(d.modeRevision!==undefined?{modeRevision:d.modeRevision,effectiveMode:d.effectiveMode}:{}),articles,budget,source:"executor_report",executionEnabled:false,publicationAuthorized:false,rssEnabled:false};
 }
 export async function recordReceipt(storage,d,now=Date.now()){
  if(typeof d?.jobId!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(d.jobId))return bad(400,"invalid_job_id");
@@ -41,6 +42,9 @@ export async function recordReceipt(storage,d,now=Date.now()){
   const receipt=cleanReport(d,job,now);
   if(!receipt)return bad(409,"invalid_or_stale_receipt");
   const old=job.executorReceipt;
+  const ops=await tx.get("ops:state");
+  if(Number.isSafeInteger(ops?.modeRevision)&&ops.modeRevision>0&&(receipt.modeRevision!==ops.modeRevision||receipt.effectiveMode!==(ops.requestedMode==="assisted"?"semi_autonomous":ops.requestedMode)))return bad(409,"mode_sync_pending");
+  if(old&&(receipt.modeRevision??0)<(old.modeRevision??0))return bad(409,"stale_mode_receipt");
   if(old&&receipt.observedAt<old.observedAt)return bad(409,"stale_receipt");
   if(old&&receipt.observedAt===old.observedAt)return JSON.stringify(old)===JSON.stringify(receipt)?{status:200,body:{accepted:true,replay:true}}:bad(409,"receipt_conflict");
   if(old&&old.articles.some((a,i)=>a.stages.some((s,j)=>s.status==="passed"&&receipt.articles[i].stages[j].status!=="passed")))return bad(409,"passed_stage_regression");
