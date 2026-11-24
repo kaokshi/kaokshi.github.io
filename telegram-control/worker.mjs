@@ -1,3 +1,4 @@
+export {ReviewJournal} from "./journal.mjs";
 import {miniApp} from "./miniapp.mjs";
 // Owner-only, read-only Telegram control interface. No generation or publishing.
 const MENU = {keyboard:[[{text:"Состояние редакции"},{text:"Баланс RouterAI"}],[{text:"Модели"},{text:"Тесты"}],[{text:"Статьи"},{text:"Помощь"}]],resize_keyboard:true};
