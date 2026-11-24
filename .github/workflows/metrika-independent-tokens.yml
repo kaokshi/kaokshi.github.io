@@ -1,0 +1,58 @@
+name: Independent Metrika credentials test
+on:
+  push:
+    branches: [assistant/zen-control-statistics-20261124]
+    paths: ['.github/workflows/metrika-independent-tokens.yml']
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Verify credential isolation and report access
+        env:
+          CINEMA_TOKEN: ${{ secrets.YANDEX_METRIKA_CINEMA_TOKEN }}
+          SCIENCE_TOKEN: ${{ secrets.YANDEX_METRIKA_SCIENCE_TOKEN }}
+          LEGENDS_TOKEN: ${{ secrets.YANDEX_METRIKA_LEGENDS_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request,urllib.parse,urllib.error
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs): return None
+          opener=urllib.request.build_opener(NoRedirect)
+          targets={"CINEMA":("114654979","dzen.ru/kadrzkadr"),"SCIENCE":("114655465","dzen.ru/sciencebox"),"LEGENDS":("114655507","dzen.ru/darklegends")}
+          tokens={k:os.environ.get(k+"_TOKEN","").strip() for k in targets}
+          distinct=all(tokens.values()) and len(set(tokens.values()))==3
+          print("TOKENS_DISTINCT="+str(bool(distinct)).lower())
+          def get(token,path,params=None):
+              url="https://api-metrika.yandex.net"+path
+              if params: url+="?"+urllib.parse.urlencode(params)
+              try:
+                  with opener.open(urllib.request.Request(url,headers={"Authorization":"OAuth "+token,"Accept":"application/json"}),timeout=15) as r: return r.status,json.load(r)
+              except urllib.error.HTTPError as e: return e.code,None
+              except Exception: return 0,None
+          failed=not distinct
+          for owner,token in tokens.items():
+              if not token:
+                  print(owner+"_TOKEN_MISSING")
+                  failed=True
+                  continue
+              code,listing=get(token,"/management/v1/counters",{"per_page":100})
+              print(owner+"_LIST_HTTP="+str(code))
+              for channel,(cid,site) in targets.items():
+                  code,counter=get(token,"/management/v1/counter/"+cid)
+                  print(owner+"_TO_"+channel+"_HTTP="+str(code))
+                  if channel!=owner:
+                      failed=failed or code not in (403,404)
+                      continue
+                  c=(counter or {}).get("counter",{})
+                  match=code==200 and str(c.get("id"))==cid and str(c.get("site","")).removeprefix("https://").removeprefix("http://").rstrip("/")==site
+                  print(owner+"_SITE_MATCH="+str(match).lower())
+                  rc,report=get(token,"/stat/v1/data",{"ids":cid,"metrics":"ym:s:visits,ym:s:users,ym:s:pageviews","date1":"7daysAgo","date2":"today","accuracy":"full"})
+                  print(owner+"_REPORT_HTTP="+str(rc))
+                  valid=rc==200 and isinstance((report or {}).get("totals"),list) and len(report["totals"])==3
+                  print(owner+"_REPORT_VALID="+str(valid).lower())
+                  failed=failed or not match or not valid
+          raise SystemExit(int(failed))
+          PY
