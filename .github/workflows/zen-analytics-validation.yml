@@ -14,7 +14,7 @@ jobs:
       - name: Offline regression tests
         run: |
           python -m unittest discover -s tests -p test_zen_metrika_collector.py -v
-          node --test telegram-control/statistics.test.mjs
+          node --test telegram-control/statistics.test.mjs telegram-control/metrika.test.mjs
       - name: Read independent counters
         env:
           YANDEX_METRIKA_CINEMA_TOKEN: ${{ secrets.YANDEX_METRIKA_CINEMA_TOKEN }}
