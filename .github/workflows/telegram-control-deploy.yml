@@ -1,4 +1,4 @@
-name: ZEN CONTROL live sync activation
+name: ZEN CONTROL v0.4 private review journal
 on:
   push:
     branches: [feature/telegram-control-mvp]
