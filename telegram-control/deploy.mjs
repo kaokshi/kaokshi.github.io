@@ -38,12 +38,12 @@ async function main(){
  const inspectOnly=process.env.ZEN_CONTROL_PREFLIGHT_ONLY==="true";
  requireOk(inspectOnly||process.env.ZEN_CONTROL_CONFIRM_UPDATE==="true","explicit_update_confirmation_required");
  requireOk(/^[a-fA-F0-9]{64}$/.test(intakeSecret),"intake_secret_required");
- requireOk(/^[a-zA-Z0-9_-]{32,256}$/.test(webhookSecret),"existing_webhook_secret_required");
+ requireOk(!webhookSecret||/^[a-zA-Z0-9_-]{32,256}$/.test(webhookSecret),"existing_webhook_secret_invalid");
  requireOk(/^[a-f0-9]{32}$/i.test(account)&&cfToken,"cloudflare_config_missing");
  requireOk(/^\d+:[A-Za-z0-9_-]+$/.test(botToken),"bot_token_missing_or_invalid");
  requireOk(/^[1-9]\d{0,15}$/.test(owner)&&Number.isSafeInteger(Number(owner)),"owner_id_missing_or_invalid");
  // Only print known-safe labels, never API responses or secret values.
- console.log("::add-mask::"+webhookSecret);
+ if(webhookSecret)console.log("::add-mask::"+webhookSecret);
  console.log("::add-mask::"+intakeSecret);
  stage="telegram_identity";
  const me=await telegram("getMe");
@@ -74,20 +74,20 @@ async function main(){
  console.log("PREVIOUS_DEPLOYMENT_ID="+previousDeployment.id);
  console.log("PREVIOUS_VERSION_ID="+previousDeployment.version);
  stage="verify_existing_webhook_secret";
- const oldProbe=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:"{}",redirect:"error",signal:AbortSignal.timeout(8000)});
- requireOk(oldProbe.status===200,"existing_webhook_secret_not_verified");
+ if(webhookSecret){const oldProbe=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:"{}",redirect:"error",signal:AbortSignal.timeout(8000)});requireOk(oldProbe.status===200,"existing_webhook_secret_not_verified");}
  stage="prepare_worker";
  const code=await readFile(new URL("./worker.mjs",import.meta.url),"utf8");
  const bindings=[
   {type:"secret_text",name:"TELEGRAM_BOT_TOKEN",text:botToken},
   {type:"secret_text",name:"TELEGRAM_OWNER_ID",text:owner},
-  {type:"secret_text",name:"TELEGRAM_WEBHOOK_SECRET",text:webhookSecret}
+  {type:"inherit",name:"TELEGRAM_WEBHOOK_SECRET"}
  ];
  bindings.push(...privateBindings);
  bindings.push({type:"secret_text",name:"EDITORIAL_REVIEW_READ_TOKEN",text:readToken});
  if(router)bindings.push({type:"secret_text",name:"ROUTERAI_API_KEY",text:router});
  if(intakeSecret){requireOk(/^[a-fA-F0-9]{64}$/.test(intakeSecret),"invalid_intake_secret");bindings.push({type:"secret_text",name:"ZEN_CORE_INTAKE_SECRET",text:intakeSecret});}
  const settings=await cf("/scripts/"+SCRIPT+"/settings");
+ requireOk(Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="TELEGRAM_WEBHOOK_SECRET"&&b.type==="secret_text"),"existing_webhook_binding_required");
  const hasJournal=Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="REVIEW_JOURNAL"&&b.type==="durable_object_namespace"&&b.class_name==="ReviewJournal");
  bindings.push({type:"durable_object_namespace",name:"REVIEW_JOURNAL",class_name:"ReviewJournal"});
  requireOk(hasJournal,"existing_journal_binding_required");
@@ -103,7 +103,7 @@ async function main(){
  const beforeUpload=activeDeployment(await cf(deploymentPath));
  requireOk(beforeUpload.id===previousDeployment.id&&beforeUpload.version===previousDeployment.version,"deployment_changed_during_preflight");
  stage="upload_worker";
- await cf("/scripts/"+SCRIPT,"PUT",form);
+ await cf("/scripts/"+SCRIPT+"?bindings_inherit=strict","PUT",form);
  const updatedDeployment=activeDeployment(await cf(deploymentPath));
  requireOk(updatedDeployment.id!==previousDeployment.id&&updatedDeployment.version!==previousDeployment.version,"new_deployment_unverified");
  console.log("NEW_DEPLOYMENT_ID="+updatedDeployment.id);
@@ -121,6 +121,7 @@ async function main(){
  requireOk(ready,"worker_health_failed");
  const denied=await fetch(endpoint+"/telegram",{method:"POST",body:"{}",redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(denied.status===403,"webhook_secret_gate_failed");
+ if(webhookSecret){
  let ignored;
  for(let i=0;i<8;i++){
  ignored=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:JSON.stringify({message:{chat:{type:"private",id:0},from:{id:0,is_bot:false},text:"/balance"}}),redirect:"error",signal:AbortSignal.timeout(8000)});
@@ -129,6 +130,7 @@ async function main(){
  await new Promise(r=>setTimeout(r,2500));
  }
  requireOk(ignored?.status===200,"non_owner_gate_failed_"+ignored?.status);
+ }
  // Existing webhook and verified secret are deliberately unchanged.
  stage="verify_webhook";
  const info=await telegram("getWebhookInfo");
@@ -247,10 +249,12 @@ async function main(){
  console.log("IMAGE_PREVIEW_CONFIGURED="+(dashboard.imagePreview===true));
  console.log("MINIAPP_AUTH_CONFIRMED");
  console.log("MINIAPP_BALANCE_AVAILABLE="+(typeof dashboard.balance==="number"));
+ if(webhookSecret){
  stage="verify_owner_reply";
  const ownerReply=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:JSON.stringify({message:{chat:{type:"private",id:Number(owner)},from:{id:Number(owner),is_bot:false},text:"/start"}}),redirect:"error",signal:AbortSignal.timeout(20000)});
  requireOk(ownerReply.ok,"owner_reply_http_"+ownerReply.status);
  console.log("OWNER_REPLY_CONFIRMED");
+ }else console.log("OWNER_WEBHOOK_REPLY_REQUIRES_MANUAL_TEST");
  stage="miniapp_menu";
  requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=11"}}})===true,"miniapp_menu_failed");
  const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
