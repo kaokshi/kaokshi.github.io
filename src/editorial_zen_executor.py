@@ -138,6 +138,7 @@ class Session:
         self.prefix = "articles/" + digest(article) + "/"
         self.instructions = self.plan["instructions"]
         self.mode = self.plan.get("mode", "manual")
+        self.mode_revision = self.plan.get("modeRevision", 0)
         if self.next_stage and self.mode == "manual" and self.target != self.next_stage:
             raise CoreBlocked("manual_next_stage_required")
 
@@ -158,7 +159,9 @@ class Session:
 
     def check_control(self):
         if self.guard is not None:
-            self.guard(self.article.split("/", 1)[0], self.mode)
+            revision = self.guard(self.article.split("/", 1)[0], self.mode)
+            if revision != self.mode_revision:
+                raise CoreBlocked("control_mode_revision_changed")
 
     def permit(self, stage):
         self.check_control()
