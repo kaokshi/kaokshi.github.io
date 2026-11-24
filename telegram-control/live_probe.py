@@ -5,11 +5,12 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from urllib.request import Request, build_opener
+from urllib.request import Request
 from urllib.error import HTTPError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.editorial_zen_core import Core
-from intake_client import NoRedirect, accept, build_receipt
+from intake_client import accept, build_receipt
+from src.editorial_zen_transport import bridge_opener
 
 def main():
     run = os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
@@ -18,7 +19,7 @@ def main():
     account = os.environ["CLOUDFLARE_ACCOUNT_ID"]
     if not re.fullmatch(r"[0-9]{1,20}-[0-9]{1,3}", run) or not re.fullmatch(r"[a-fA-F0-9]{64}", secret) or not re.fullmatch(r"[a-fA-F0-9]{32}", account):
         raise ValueError("invalid_configuration")
-    opener = build_opener(NoRedirect())
+    opener = bridge_opener()
     with opener.open(Request("https://api.cloudflare.com/client/v4/accounts/"+account+"/workers/subdomain", headers={"Authorization":"Bearer "+token}), timeout=15) as response:
         cf = json.load(response)
     sub = cf.get("result", {}).get("subdomain", "")
@@ -41,12 +42,14 @@ def main():
     except HTTPError as exc:
         if exc.code != 401:
             raise
-    print("PROBE_AUTH_GATE_OK")
+    print("PROBE_AUTH_GATE_OK", flush=True)
     expected = "probe:"+run
     try:
+        print("PROBE_STAGE_START", flush=True)
         start = call("start")
         assert start["id"] == expected and start["executionEnabled"] is False
         assert call("queue")["ids"] == [expected]
+        print("PROBE_STAGE_INTAKE", flush=True)
         envelope = call("intake")
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)/"probe.sqlite"
@@ -65,6 +68,7 @@ def main():
             finally:
                 core.db.close()
         print("PROBE_EXECUTOR_PERSISTENCE_OK")
+        print("PROBE_STAGE_RECEIPT", flush=True)
         assert call("receipt", receipt=report)["accepted"] is True
         assert call("receipt", receipt=report)["replay"] is True
         assert call("queue")["ids"] == []
