@@ -1,4 +1,5 @@
 import {HTML,CSS,JS} from "./ui.mjs";
+import {coreStub,rssStatus} from "./core.mjs";
 import {journalStub,validateDecision} from "./journal.mjs";
 import {buildSnapshot,readPrivateImage} from "./snapshot.mjs";
 const encoder=new TextEncoder();
@@ -45,11 +46,21 @@ export async function miniApp(request,env,getBalance){
   if(path==="/app.css")return serve(CSS,"text/css; charset=utf-8");
   if(path==="/app.js")return serve(JS,"application/javascript; charset=utf-8");
  }
- if(!["/api/dashboard","/api/image","/api/review","/api/journal"].includes(path))return null;
+ if(!["/api/dashboard","/api/image","/api/review","/api/journal","/api/core","/api/core/schedule","/api/core/order","/api/rss"].includes(path))return null;
  if(request.method!=="POST")return new Response("Method not allowed",{status:405,headers});
  let data;
  try{if(Number(request.headers.get("Content-Length")||0)>16000)throw Error();const raw=await request.text();if(raw.length>16000)throw Error();data=JSON.parse(raw);}catch{return new Response("Bad request",{status:400,headers});}
  if(!await verifyInitData(data?.initData,env))return new Response("Unauthorized",{status:401,headers});
+ if(path==="/api/rss")return Response.json(await rssStatus(),{headers});
+ if(path==="/api/core"||path.startsWith("/api/core/")){
+  const stub=coreStub(env);
+  if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
+  try{
+   const target="https://core.internal"+path.slice(4);
+   const r=await stub.fetch(target,path==="/api/core"?{method:"GET"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({settings:data.settings,version:data.version,text:data.text,id:data.id})});
+   return Response.json(await r.json(),{status:r.status,headers});
+  }catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
+ }
  const token=env.EDITORIAL_REVIEW_READ_TOKEN;
  if(path==="/api/journal"||path==="/api/review"){
   const stub=journalStub(env);
