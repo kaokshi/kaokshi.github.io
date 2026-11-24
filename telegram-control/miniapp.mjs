@@ -46,7 +46,7 @@ export async function miniApp(request,env,getBalance){
   if(path==="/app.css")return serve(CSS,"text/css; charset=utf-8");
   if(path==="/app.js")return serve(JS,"application/javascript; charset=utf-8");
  }
- if(!["/api/dashboard","/api/image","/api/review","/api/journal","/api/core","/api/core/schedule","/api/core/order","/api/core/agent","/api/core/agent/chat","/api/core/agent/apply","/api/core/jobs","/api/core/jobs/cancel","/api/core/budget","/api/core/budget/settings","/api/core/ops","/api/core/ops/settings","/api/rss"].includes(path))return null;
+ if(!["/api/dashboard","/api/image","/api/review","/api/journal","/api/core","/api/core/schedule","/api/core/order","/api/core/agent","/api/core/agent/chat","/api/core/agent/apply","/api/core/jobs","/api/core/jobs/cancel","/api/core/jobs/preview","/api/core/budget","/api/core/budget/settings","/api/core/ops","/api/core/ops/settings","/api/rss"].includes(path))return null;
  if(request.method!=="POST")return new Response("Method not allowed",{status:405,headers});
  let data;
  try{if(Number(request.headers.get("Content-Length")||0)>16000)throw Error();const raw=await request.text();if(raw.length>16000)throw Error();data=JSON.parse(raw);}catch{return new Response("Bad request",{status:400,headers});}
