@@ -58,7 +58,7 @@ export class AgentHandler{
    const ledger=await tx.get(budgetKey)||{reserved:0,calls:0};
    if(ledger.reserved+bound>DAILY||ledger.calls>=20)return false;
    await tx.put(budgetKey,{reserved:ledger.reserved+bound,calls:ledger.calls+1});
-   await tx.put("agent:id:"+id,{id,text,status:"pending",at:new Date(now).toISOString(),reserved:bound});return true;
+   const pending={id,text,status:"pending",at:new Date(now).toISOString(),reserved:bound,cost:null,proposal:null};await tx.put("agent:id:"+id,pending);await tx.put("agent:message:"+String(now).padStart(15,"0")+":"+id,pending);return true;
   });
   if(!reserved)return {status:409,body:{error:"budget_or_duplicate"}};
   let message={id,text,at:new Date(now).toISOString(),status:"failed",cost:null,reserved:bound,reply:"Ответ не подтверждён. Запрос мог быть оплачен; повтор автоматически не выполняется.",proposal:null,version:state.version};
