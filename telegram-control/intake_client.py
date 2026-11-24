@@ -9,11 +9,7 @@ import time
 import urllib.request
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+from src.editorial_zen_transport import bridge_opener
 
 
 def accept(core, envelope, expected_id):
@@ -53,7 +49,7 @@ def pull(endpoint, secret, job_id):
     request = urllib.request.Request(endpoint, data=json.dumps({"id": job_id}).encode(),
                                      headers={"Authorization": "Bearer " + secret,
                                               "Content-Type": "application/json"}, method="POST")
-    with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+    with bridge_opener().open(request, timeout=15) as response:
         data = response.read(16385)
         if len(data) > 16384:
             raise ValueError("intake_too_large")
@@ -92,7 +88,7 @@ def push_receipt(endpoint, secret, receipt):
                                      data=json.dumps(receipt).encode(),
                                      headers={"Authorization": "Bearer " + secret,
                                               "Content-Type": "application/json"}, method="POST")
-    with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+    with bridge_opener().open(request, timeout=15) as response:
         raw = response.read(1025)
         if len(raw) > 1024 or json.loads(raw).get("accepted") is not True:
             raise ValueError("receipt_not_confirmed")
@@ -109,7 +105,7 @@ def discover(endpoint, secret, cursor=None):
                                      data=json.dumps({"cursor": cursor}).encode(),
                                      headers={"Authorization": "Bearer " + secret,
                                               "Content-Type": "application/json"}, method="POST")
-    with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+    with bridge_opener().open(request, timeout=15) as response:
         raw = response.read(8193)
         if len(raw) > 8192:
             raise ValueError("queue_response_too_large")
