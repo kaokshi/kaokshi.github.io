@@ -1,4 +1,4 @@
-name: ZEN CONTROL v0.7 queue and offline previews
+name: ZEN CONTROL v0.8 budget and reserve
 on:
   push:
     branches: [feature/telegram-control-mvp]
