@@ -84,3 +84,21 @@ test("signed owner gets balance only, without credentials",async()=>{
   assert.equal(Object.hasOwn(d,"token"),false);
  }finally{globalThis.fetch=original;}
 });
+
+import {runInNewContext} from "node:vm";
+import {JS as appScript} from "./ui.mjs";
+test("client recovers signed launch data from hash without Telegram SDK",async()=>{
+ const raw=signed();
+ let submitted=null;
+ const elements=new Map();
+ const get=id=>{if(!elements.has(id))elements.set(id,{classList:{add(){},remove(){}},addEventListener(){}});return elements.get(id);};
+ const context={window:{},location:{hash:"#tgWebAppData="+encodeURIComponent(raw),search:""},document:{getElementById:get,querySelectorAll:()=>[]},URLSearchParams,Intl,Date,JSON,setTimeout,fetch:async(url,options)=>{
+  submitted=JSON.parse(options.body).initData;
+  assert.equal(url,"/api/dashboard");
+  return {ok:true,json:async()=>({balance:99.98,checkedAt:new Date().toISOString()})};
+ }};
+ runInNewContext(appScript,context);
+ await new Promise(r=>setImmediate(r));
+ assert.equal(submitted,raw);
+ assert.equal(get("auth").textContent,"Владелец");
+});
