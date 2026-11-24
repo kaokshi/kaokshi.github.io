@@ -1,6 +1,7 @@
 // Read-only bridge from confirmed Telegram jobs to the existing Python Core intake.
 import {validateJob} from "./production.mjs";
 import {opsState} from "./ops.mjs";
+import {claimProduction,closeProduction} from "./account.mjs";
 const encoder=new TextEncoder();
 async function matches(secret,header){
  if(typeof secret!=="string"||! /^[a-fA-F0-9]{64}$/.test(secret)||typeof header!=="string"||!/^Bearer [a-fA-F0-9]{64}$/.test(header))return false;
@@ -55,7 +56,9 @@ export async function intakeView(storage,id){
 // Fresh control observation, not an execution permit.
 export async function controlView(storage,id,now=Date.now()){
  if(typeof id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(id))return {status:400,body:{error:"invalid_job_id"}};
- return storage.transaction(async tx=>{
+ return storage.transaction(tx=>controlSnapshot(tx,id,now));
+}
+async function controlSnapshot(tx,id,now){
   const ops=await opsState(tx),job=await tx.get("production:job:"+id),intent=exportIntent(job);
   const mode=modeFor(ops),transition=transitionFor(ops),settings=await tx.get("core:settings");
   const effective=transition?job?.executorReceipt?.effectiveMode:intent?.mode;
@@ -63,11 +66,19 @@ export async function controlView(storage,id,now=Date.now()){
   const mismatch=Boolean(policy&&(policy.mainKop!==30000||policy.reserveKop!==5000));
   const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":job.origin==="schedule"&&settings?.paused!==false?"schedule_paused":transition&&job.executorReceipt?.modeRevision!==transition.revision?"mode_sync_pending":effective!==mode?"mode_changed":mismatch?"budget_policy_mismatch":null;
   return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:effective??null,modeRevision:transition?.revision??0,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
+}
+export async function accountView(storage,d,now=Date.now()){
+ if(!d||typeof d.id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(d.id)||!["claim","close"].includes(d.action))return {status:400,body:{error:"invalid_account_request"}};
+ return storage.transaction(async tx=>{
+  if(d.action==="close")return closeProduction(tx,d,now);
+  const control=(await controlSnapshot(tx,d.id,now)).body;
+  if(!control.controlClear||control.executionEnabled!==true)return {status:409,body:{error:"execution_disabled"}};
+  return claimProduction(tx,d,now);
  });
 }
 export async function bridgeRequest(request,env){
  const path=new URL(request.url).pathname;
- if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control","/internal/zen-core/queue"].includes(path))return null;
+ if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control","/internal/zen-core/queue","/internal/zen-core/account"].includes(path))return null;
  const receipt=path.endsWith("/receipt"),route=path.split("/").pop();
  const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"};
  if(request.method!=="POST")return Response.json({error:"method_not_allowed"},{status:405,headers});
@@ -75,5 +86,5 @@ export async function bridgeRequest(request,env){
  let d;try{const raw=await request.text();if(raw.length>(receipt?16384:512))throw Error();d=JSON.parse(raw);}catch{return Response.json({error:"invalid_request"},{status:400,headers});}
  const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName("zen-core-scheduler-v1"));
  if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
- try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt?d:route==="queue"?{cursor:d?.cursor??null}:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
+ try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt||route==="account"?d:route==="queue"?{cursor:d?.cursor??null}:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
 }
