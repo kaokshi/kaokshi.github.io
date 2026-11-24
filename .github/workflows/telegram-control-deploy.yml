@@ -1,5 +1,8 @@
 name: Telegram control deployment
 on:
+  push:
+    branches: [feature/telegram-control-mvp]
+    paths: ['.github/workflows/telegram-control-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -8,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/telegram-control-mvp'
+    if: github.ref == 'refs/heads/feature/telegram-control-mvp'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
