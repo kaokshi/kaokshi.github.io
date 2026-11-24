@@ -1,8 +1,6 @@
-name: Gemini API access and quota visibility (read-only)
+name: Gemini API access and quota visibility (read-only) — legacy manual diagnostics
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '35 6 * * *'
   pull_request:
     paths:
       - '.github/workflows/gemini-quota.yml'
