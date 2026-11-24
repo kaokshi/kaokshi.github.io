@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 from decimal import Decimal, InvalidOperation
 from functools import partial
+import hashlib
 import io
 import json
 import os
@@ -15,11 +16,12 @@ from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .editorial_images import ImageIndex, decode_candidate, warm_visual_matcher
+from .editorial_routerai_diagrams import COMET_SOURCE, render_diagram
+from .editorial_images import ImageIndex, commons_photos, decode_candidate, warm_visual_matcher
 from .editorial_layout import arrange
 from .editorial_memory import digest
 from .editorial_no_repeat import topic_duplicate_reason
-from .editorial_providers import Blocked
+from .editorial_providers import Blocked, ProviderError, request
 from .editorial_review import (
     RULES, canonical, fact_evidence, grammar, parse_article, source_context, sources,
     structural_checks,
@@ -80,12 +82,26 @@ def github_private(prefix, token, filename, content=None):
         if receipt.get("path") != path or receipt.get("encoding") != "base64":
             raise UnsafeToTest("private_resume_receipt_invalid")
         return base64.b64decode(receipt["content"])
-    receipt = api("/contents/" + path, {
-        "message": "Save private RouterAI evaluation evidence",
-        "content": base64.b64encode(content).decode(),
-        "branch": "main",
-    })
-    if (receipt.get("content") or {}).get("path") != path:
+    route = "/contents/" + path
+    blob = hashlib.sha1(f"blob {len(content)}\0".encode() + content, usedforsecurity=False).hexdigest()
+    payload = {"message": "Save private RouterAI evaluation evidence",
+               "content": base64.b64encode(content).decode(), "branch": "main"}
+    for attempt in range(3):
+        try:
+            receipt = api(route, payload).get("content") or {}
+        except UnsafeToTest as exc:
+            if str(exc) not in {"private_storage_unavailable", "private_storage_http_409",
+                                "private_storage_http_422", "private_storage_http_502",
+                                "private_storage_http_503", "private_storage_http_504"}:
+                raise
+            try:
+                receipt = api(route + "?ref=main")
+            except UnsafeToTest:
+                if attempt == 2:
+                    raise exc
+                continue
+        if receipt.get("path") == path and receipt.get("sha") == blob:
+            return
         raise UnsafeToTest("private_storage_receipt_invalid")
 
 
@@ -109,7 +125,7 @@ class Spend:
         self.report = report
         self.total = sum((money(row["cost_rub"]) for row in report["calls"]), Decimal(0))
         self.initial = credits(token) + self.total
-        catalog = call("/models", token, limit=8_000_000).get("data", [])
+        catalog = call("/models", token, limit=8_000_000, exact_numbers=True).get("data", [])
         self.prices = {row["id"]: row for row in catalog if row.get("id") in MODELS.values()}
         if set(self.prices) != set(MODELS.values()):
             raise UnsafeToTest("required_model_missing_in_catalog")
@@ -162,7 +178,7 @@ class Spend:
                 prompt = max(prompt, self.price(role, field, "token"))
         return input_tokens * prompt + output_tokens * self.price(role, "completion", "token")
 
-    def request(self, channel, stage, role, path, payload, bound, *, reserve=Decimal(0)):
+    def request(self, channel, stage, role, path, payload, bound, *, reserve=Decimal(0), retain_image=None):
         before = credits(self.token)
         consumed = max(self.total, self.initial - before)
         if consumed + bound + reserve > BUDGET or before < bound + reserve:
@@ -172,15 +188,34 @@ class Spend:
                  "outcome": "cost_unknown"}
         self.report["calls"].append(entry)
         answer = call(path, self.token, {"model": MODELS[role], **payload},
-                      limit=12_000_000 if role == "image" else 350000, timeout=180)
+                      limit=12_000_000 if role == "image" else 350000, timeout=180, exact_numbers=True)
         usage = answer.get("usage") or {}
         entry.update(model_reported=answer.get("model"), tokens_in=usage.get("prompt_tokens"),
                      tokens_out=usage.get("completion_tokens"))
         if role == "image":
             entry["images"] = len(answer["data"]) if isinstance(answer.get("data"), list) else 0
-        actual = money(usage.get("cost"))
-        self.total += actual
-        entry.update(cost_rub=str(actual), outcome="metered")
+        # Retain the bytes even if the usage or subsequent balance read is invalid.
+        actual = None
+        try:
+            actual = money(usage.get("cost"))
+        except UnsafeToTest:
+            if retain_image is None:
+                raise
+        if actual is not None:
+            self.total += actual
+            entry.update(cost_rub=str(actual), outcome="metered")
+        if retain_image is not None:
+            try:
+                raw = base64.b64decode(answer["data"][0]["b64_json"], validate=True)
+                if not raw or len(answer["data"]) != 1:
+                    raise ValueError
+            except (KeyError, IndexError, ValueError, TypeError):
+                raise UnsafeToTest("seedream_invalid_image_response") from None
+            entry["image_sha256"] = digest(raw)
+            retain_image(raw)
+            entry["image_retained"] = True
+        if actual is None:
+            raise UnsafeToTest("routerai_cost_or_price_unavailable")
         after = credits(self.token)
         self.report["balance_delta_rub"] = str(self.initial - after)
         if (actual > bound or before - after > bound + BALANCE_PRECISION
@@ -212,17 +247,11 @@ class Spend:
             raise UnsafeToTest("routerai_incomplete_chat_response") from None
         return body.strip()
 
-    def generate(self, channel, stage, prompt, reserve):
-        answer = self.request(channel, stage, "image", "/images", {
+    def generate(self, channel, stage, prompt, reserve, retain_image):
+        self.request(channel, stage, "image", "/images", {
             "prompt": prompt, "n": 1, "aspect_ratio": "3:2",
             "resolution": "1K", "output_format": "jpeg",
-        }, self.image_price, reserve=reserve)
-        try:
-            if len(answer["data"]) != 1:
-                raise ValueError
-            return base64.b64decode(answer["data"][0]["b64_json"], validate=True)
-        except (KeyError, IndexError, ValueError, TypeError):
-            raise UnsafeToTest("seedream_invalid_image_response") from None
+        }, self.image_price, reserve=reserve, retain_image=retain_image)
 
 
 def object_response(text):
@@ -267,7 +296,7 @@ def check_text(raw, channel, history, final=False):
     return article, checks
 
 
-def plan_images(answer, sections):
+def plan_images(answer, sections, *, science=False, legacy=False):
     visual = field(answer, "style", 950)
     scenes = answer.get("images")
     if not isinstance(scenes, list) or len(scenes) != len(sections) + 1:
@@ -276,74 +305,144 @@ def plan_images(answer, sections):
     for slot, row in enumerate(scenes):
         if not isinstance(row, dict):
             raise UnsafeToTest("image_plan_row_invalid")
-        result.append({"section": max(1, slot), "subject": field(row, "subject", 240),
-                       "brief": field(row, "brief", 900)})
+        kind = row.get("kind") if science and not legacy else "illustration"
+        if kind not in {"illustration", "photo", "diagram"}:
+            raise UnsafeToTest("image_plan_kind_invalid")
+        scene = {"section": max(1, slot), "subject": field(row, "subject", 240),
+                 "brief": field(row, "brief", 900), "kind": kind}
+        if not legacy:
+            anchor = field(row, "anchor", 350)
+            if slot and anchor not in " ".join(sections[slot - 1]["paragraphs"]):
+                raise UnsafeToTest("image_plan_anchor_outside_section")
+            scene["anchor"] = anchor
+        if kind == "photo":
+            scene["query"] = field(row, "query", 130)
+        if kind == "diagram":
+            scene["template"] = field(row, "template", 80)
+        result.append(scene)
+    if science and not legacy and {row["kind"] for row in result} != {"illustration", "photo", "diagram"}:
+        raise UnsafeToTest("science_visual_mix_required")
     if len(set(row["brief"].casefold() for row in result)) != len(result):
         raise UnsafeToTest("image_plan_duplicate_brief")
     return visual, result
 
 
-def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, *, skip_cover=False, prior_section_attempt=False):
+def science_asset(scene, records, photo_offset):
+    """Only verified Commons rights or an explicit, source-backed diagram template."""
+    if scene["kind"] == "diagram":
+        return render_diagram(scene["template"], records)
+    try:
+        verified = (row for row in commons_photos(scene["query"])
+                    if row["rights_status"] == "license_metadata_verified")
+        row = next((row for i, row in enumerate(verified) if i == photo_offset), None)
+        if row:
+            raw = request(row["asset_url"], row.pop("domains"), timeout=10)
+            return raw, {**row, "label": "Фотография", "ai_generated": False}
+    except ProviderError:
+        pass
+    raise UnsafeToTest("verified_photo_unavailable")
+
+
+def illustration_prompt(brief, style):
+    return (f"{brief}\nShared palette and rendering: {style}. "
+            "Use the location and objects specified for this scene. Landscape. "
+            "No watermark, captions, or AI labels in the pixels. Avoid incidental text; "
+            "only keep a short diegetic identifier if the section explicitly calls for it.")
+
+
+def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, records, *, skip_cover=False, prior_section_attempt=False):
     rows, previews = [], []
     failed = [0] if skip_cover else []
     for slot, scene in enumerate(scenes):
         if slot == 0 and skip_cover:
             continue
-        reserve = (reserve_next + len(scenes) - slot - 1) * spend.image_price
-        prompt = (
-            f"{scene['brief']}\nArticle visual continuity: {visual}. "
-            "Landscape illustration, no watermark or lettering. "
-            + ("Strong editorial cover, coherent with the whole article." if not slot else
-               "Depict the specific section, use a distinct composition.")
-        )
+        reserve = (reserve_next + sum(other["kind"] == "illustration"
+                                       for other in scenes[slot + 1:])) * spend.image_price
+        prompt = illustration_prompt(scene["brief"], visual)
         first_attempt = 2 if slot == 1 and prior_section_attempt else 1
         for attempt in range(first_attempt, 4):
             stage = f"image-{slot:02d}-attempt-{attempt}"
             report["stage"] = f"{channel}/{stage}"
-            raw = spend.generate(channel, stage, prompt, reserve)
-            save(f"{channel}/attempts/{stage}.jpeg", raw)
-            record = {"slot": slot, "attempt": attempt, "prompt": prompt, "model": MODELS["image"],
+            extension = {"illustration": "jpeg", "photo": "source", "diagram": "png"}[scene["kind"]]
+            filename = f"{channel}/attempts/{stage}.{extension}"
+            if scene["kind"] == "illustration":
+                retained = []
+                def retain(raw):
+                    save(filename, raw)
+                    retained.append(raw)
+                spend.generate(channel, stage, prompt, reserve, retain)
+                raw = retained[0]
+                metadata = {"kind": "illustration", "source": "RouterAI", "model": MODELS["image"],
+                            "label": "ИИ-иллюстрация", "ai_generated": True,
+                            "rights_status": "rights_review_pending"}
+            else:
+                raw, metadata = science_asset(scene, records, attempt - 1)
+                save(filename, raw)
+            record = {"slot": slot, "attempt": attempt, "prompt": prompt, "asset": metadata,
                       "original_sha256": digest(raw), "status": "pending"}
             save(f"{channel}/attempts/{stage}.json", json_bytes(record))
             issues, pixels, captions, preview = [], {}, "", None
-            metadata = {"kind": "illustration", "source": "RouterAI", "model": MODELS["image"],
-                        "label": "ИИ-иллюстрация", "rights_status": "rights_review_pending"}
             candidate = path / channel / "images" / f"image-{slot:02d}.jpg"
             candidate.parent.mkdir(parents=True, exist_ok=True)
             try:
                 image, _ = decode_candidate(raw)
                 preview = thumbnail(image)
-                captions = describe_pixels(image)
+                try:
+                    captions = describe_pixels(image)
+                except Blocked:
+                    captions = None
                 scores, _ = compare_pixels("siglip", image, [
                     scene["subject"], "an unrelated image with no connection to the scene",
                 ])
                 pixels = {"florence_caption": captions, "siglip_scores": scores}
                 if scores[0] <= scores[1]:
-                    issues.append("siglip_unrelated_ranks_first")
-                row = index.save(raw, metadata, scene, title, candidate)
+                    pixels["siglip_scene_flag"] = True
+                row = index.save(raw, metadata, scene, title, candidate, require_scene_score=False)
                 pixels.update(clip_scene=row["scene_similarity"], clip_topic=row["topic_similarity"],
+                              clip_scene_flag=row["scene_score_flags"],
                               cover_score=row["cover_score"], perceptual_hash=row["perceptual_hash"])
             except (OSError, ValueError) as exc:
                 issues.append(str(exc) if type(exc) is ValueError and
                               str(exc).startswith("image_") else "image_decode_or_match_failed")
 
             section = title if not slot else article["sections"][slot - 1]["heading"]
+            section_text = (" ".join(article["intro"]) if not slot else
+                            "\n".join(article["sections"][slot - 1]["paragraphs"]))
             verdict = object_response(spend.chat(channel, stage + "-qas", "brain", (
                 f"Проверь пиксели редакционной иллюстрации канала {CHANNELS[channel]}. "
-                f"Статья {title}. Смысл блока {section}. Цель кадра {scene['subject']}. "
-                f"Стиль {visual}. Первая картинка — кандидат, вторая при наличии — эталон статьи. "
-                "Проверь смысл, анатомию, артефакты, визуальную связность и пригодность "
-                "для указанной роли. При отсутствии пикселей опирайся на дефекты. "
-                + ("Для научпопа проверь предметную точность и маркировку ИИ-иллюстрации в пакете."
-                   if channel == "science" else "Сцена из художественного вымысла.")
-                + f" Локальная диагностика {issues}. Автоописание Florence-2 вне изображения: {captions}. "
-                'Верни JSON {"passed":boolean,"issues":[строки],"fix":строка}. '
-                "При дефекте сформулируй конкретное корректирующее задание для Seedream. При одобрении issues: []."
-            ), 700, pictures=tuple(p for p in (preview, previews[0] if previews else None) if p),
+                f"Роль кадра: {'обложка' if not slot else 'иллюстрация раздела'}. "
+                f"Раздел: {section}. Текст раздела:\n{section_text}\n"
+                f"Задача: {scene['subject']}. Задание: {scene['brief']}. Тип: {scene['kind']}. "
+                f"Общий стиль: {visual}. Смена места или времени допустима по тексту. "
+                "Для обложки отдельно проверь, что её обещание поддерживает содержание статьи. "
+                "Проверь первый кадр по этому разделу. Другие объекты статьи не обязательны. "
+                "Проверь видимые дефекты, физику, анатомию, артефакты и соответствие разделу. "
+                "Для каждого замечания укажи наблюдаемую область и связь с текстом. "
+                "Маркировка ИИ добавляется программно. Отсутствие водяного знака не дефект. "
+                "При неясном соответствии или сомнительной физике отклони. "
+                f"Проверенные материалы: {source_context(records)}. "
+                f"Источник схемы, если есть: {metadata.get('source') if scene['kind'] == 'diagram' else None}. "
+                'Верни JSON {"passed":boolean,"issues":[строки],"evidence":"видимое основание вердикта",'
+                '"fix":"полное новое задание для кадра при дефекте"}. При одобрении issues: []. '
+                "Для исправления сохрани раздел, локацию и нужные объекты, не добавляй водяных знаков."
+            ), 1000, pictures=(preview,) if preview else (),
                 reserve=reserve))
             if type(verdict.get("passed")) is not bool or not isinstance(verdict.get("issues"), list):
                 raise UnsafeToTest("image_qa_invalid")
-            accepted = verdict["passed"] and not verdict["issues"] and not issues and preview is not None
+            accepted = (verdict["passed"] and not verdict["issues"] and not issues and preview is not None
+                        and isinstance(verdict.get("evidence"), str) and bool(verdict["evidence"].strip()))
+            if accepted and (pixels.get("siglip_scene_flag") or pixels.get("clip_scene_flag")):
+                review = object_response(spend.chat(channel, stage + "-scene-review", "brain", (
+                    f"Независимо сверь первый кадр с конкретным текстом:\n{section_text}\n"
+                    f"Роль: {scene['kind']}. Цель: {scene['subject']}. "
+                    "Назови наблюдаемый элемент и точный фрагмент текста, которому он соответствует. "
+                    "Проверь видимые дефекты и, для научпопа, предметную точность. Отклони при сомнении. "
+                    f"Источники: {source_context(records)}. "
+                    'Только JSON {"passed":boolean,"issues":[строки],"evidence":"основание"}.'
+                ), 700, pictures=(preview,), reserve=reserve))
+                record["scene_review"] = review
+                accepted = (review.get("passed") is True and review.get("issues") == []
+                            and isinstance(review.get("evidence"), str) and bool(review["evidence"].strip()))
             record.update(status="passed" if accepted else "rejected", local_checks=pixels,
                           local_issues=issues, qwen=verdict)
             save(f"{channel}/attempts/{stage}-qa.json", json_bytes(record))
@@ -355,13 +454,16 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 break
             candidate.unlink(missing_ok=True)
             candidate.with_suffix(".json").unlink(missing_ok=True)
-            if attempt == 3:
+            if attempt == 3 or scene["kind"] == "diagram":
                 failed.append(slot)
                 break
+            if scene["kind"] == "photo":
+                continue
             if not isinstance(verdict.get("fix"), str) or len(verdict["fix"].strip()) < 4:
                 correction = object_response(spend.chat(channel, stage + "-correction", "brain", (
                     "Локальная проверка отклонила редакционную иллюстрацию. "
-                    f"Причины {issues}; целевая сцена {scene['subject']}. "
+                    f"Причины {issues}; целевая сцена {scene['subject']}; исходная сцена {scene['brief']}. "
+                    "Сохрани место действия и нужные объекты. Без водяного знака. "
                     'Дай конкретное исправление для Seedream в JSON {"fix":"инструкция"}.'
                 ), 300, reserve=reserve))
                 if not isinstance(correction.get("fix"), str) or len(correction["fix"].strip()) < 4:
@@ -369,8 +471,17 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                     break
                 verdict["fix"] = correction["fix"]
                 save(f"{channel}/attempts/{stage}-correction.json", json_bytes(correction))
-            prompt = (f"{scene['brief']}\nСтиль всей статьи: {visual}. "
-                      f"Исправление Qwen: {field(verdict, 'fix', 1200)}. Пейзажный формат, без надписей.")
+            revised_brief = field(verdict, "fix", 1200)
+            policy = object_response(spend.chat(channel, stage + "-retry-check", "brain", (
+                f"Раздел: {section_text}\nИсходная сцена: {scene['brief']}\n"
+                f"Предлагаемая замена: {revised_brief}\n"
+                "Убедись, что замена исправляет дефект, сохраняет сюжетное место и цель кадра, "
+                'и не добавляет водяной знак или подпись. Только JSON {"compatible":true или false}.'
+            ), 200, reserve=reserve))
+            if policy.get("compatible") is not True:
+                failed.append(slot)
+                break
+            prompt = illustration_prompt(revised_brief, visual)
     return rows, previews, failed
 
 
@@ -390,10 +501,18 @@ def contact_sheet(previews):
 def render(article, title, cover, pictures, records):
     lines = [f"# {title}", "", "Оглавление", ""]
     lines.extend(f"- {section['heading']}" for section in article["sections"])
-    lines.extend(["", f"![ИИ-иллюстрация](images/{cover['file']})", "", *article["intro"]])
+    def image_lines(row):
+        label = row.get("label", "ИИ-иллюстрация")
+        if row.get("kind") == "diagram" and row.get("source"):
+            label += f" · [научный источник]({row['source']})"
+        if row.get("source_page"):
+            label += f" · {row['attribution']} · [{row['license']}]({row['license_url']}) · [источник]({row['source_page']})"
+        return [f"![{row.get('label', 'ИИ-иллюстрация')}](images/{row['file']})", "", label, ""]
+
+    lines.extend(["", *image_lines(cover), *article["intro"]])
     for position, section in enumerate(article["sections"], 1):
         lines.extend(["", f"**{section['heading']}**",
-                      f"![ИИ-иллюстрация](images/{pictures[position]['file']})", ""])
+                      *image_lines(pictures[position])])
         for paragraph in section["paragraphs"]:
             lines.extend([paragraph, ""])
     if records:
@@ -412,6 +531,12 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     mode = ("Оригинальная вымышленная городская мистика без псевдодокументальных ссылок."
             if channel == "legends" else
             "Научпоп. Выбери тему из предложенного каталога первичных источников.")
+    if channel == "science" and not resume:
+        # Only offer topics with an implemented, source-backed schematic template.
+        catalogue = [row for row in catalogue
+                     if "https://science.nasa.gov/solar-system/comets/" in row["sources"]]
+        if not catalogue:
+            raise UnsafeToTest("science_topic_without_verified_diagram_template")
     options = json.dumps([{"title": row["title"], "angle": row["angle"]} for row in catalogue],
                          ensure_ascii=False) if channel == "science" else "[]"
     raw_plan = resume["plan"] if resume else spend.chat(channel, "plan", "brain", (
@@ -436,7 +561,10 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         if not source_entry or topic_duplicate_reason(channel, source_topic, history_titles):
             raise UnsafeToTest("science_topic_unverified_or_duplicate")
         domains = json.loads((ROOT / "config/editorial_production.json").read_text())["science_source_domains"]
-        records = sources(source_entry["sources"], domains)
+        urls = list(source_entry["sources"])
+        if "https://science.nasa.gov/solar-system/comets/" in urls:
+            urls.append(COMET_SOURCE)
+        records = sources(urls, domains)
         save(f"{channel}/sources.json", json_bytes(records))
         if len(records) < 2 or any(row["status"] != "accessible" for row in records):
             raise UnsafeToTest("science_primary_sources_unavailable")
@@ -491,12 +619,18 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
                                   for i, row in enumerate(records, 1)) if records else facts)
     audit = resume["audit"] if resume and "audit" in resume else object_response(spend.chat(channel, "editorial_and_image_plan", "brain", (
         f"Канал «{name}». {verify} Оцени весь текст после правки DeepSeek на живой русский "
-        "язык, связность, повторы и естественный призыв подписаться. В issues укажи только "
+        "язык, связность, повторы, соответствие заголовка содержанию и естественный призыв подписаться. В issues укажи только "
         "проблемы, которые действительно мешают принять текст для указанного жанра. "
         "Если блокирующих проблем нет, верни пустой массив issues: []. Не вставляй туда вывод. "
-        "Составь ровно семь промптов Seedream: индекс 0 — самая сильная обложка; "
+        "В сюжетном плане локация и действующие лица каждого кадра следуют конкретному разделу. "
+        "Составь ровно семь визуальных заданий: индекс 0 — самая сильная обложка; "
         "индексы 1–6 — по одному изображению на каждый из шести разделов в исходном порядке. "
         "Для каждого промпта дай subject и brief по-английски, brief максимум две фразы. "
+        + ("Для научпопа используй разные kind: photo с query для документальных объектов, "
+           "diagram с template comet-tails для двух хвостов (NASA) или comet-cold-storage для летучих веществ (ESA), "
+           "illustration для художественных сцен. Включи все три типа, пригодных к статье. "
+           if records else "")
+        + "В каждом задании anchor — дословная короткая выдержка именно из нужного раздела (для обложки из вступления). "
         'Верни JSON с ключами "issues" (массив строк), "claims" (массив), "style" '
         '(общая визуальная инструкция), "images" (ровно 7 объектов subject и brief). '
         f"Тема: {title}. СТАТЬЯ:\n{canonical(article)}\nПЕРВИЧНЫЕ ИСТОЧНИКИ И ПРИМЕЧАНИЯ:\n{audit_sources}"
@@ -518,10 +652,11 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     save(f"{channel}/qwen-visual-plan.json", json_bytes(audit))
     if status["text_qa"] != "passed":
         raise UnsafeToTest("qwen_text_or_source_qa_failed")
-    visual, scenes = plan_images(audit, article["sections"])
+    visual, scenes = plan_images(audit, article["sections"], science=bool(records),
+                                legacy=bool(resume and "audit" in resume))
     status["image_qa"] = "running"
     rows, previews, failed = illustrate(spend, save, report, channel, article, title, visual, scenes,
-                                        index, path, other_images, skip_cover=skip_cover,
+                                        index, path, other_images, records, skip_cover=skip_cover,
                                         prior_section_attempt=bool(resume and resume.get("lost_image")))
     status["accepted_images"] = len(rows)
     if failed:
@@ -535,7 +670,11 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     review = object_response(spend.chat(channel, "article_visual_review", "brain", (
         "Рассмотри контактный лист: порядок слева направо и сверху вниз, начиная с 0. "
         "Слот 0 — задуманная обложка, слоты 1–6 — иллюстрации разделов. Проверь согласованность "
-        "героев и локаций, цельность стиля, отсутствие повторов и что слот 0 — сильнейшая "
+        "повторяющихся героев, цельность стиля, отсутствие повторов и что слот 0 — сильнейшая "
+        "Не требуй одну локацию: смена места и времени по сюжету допустима. "
+        "Для научпопа фото, программная схема и художественная иллюстрация закономерно различаются. "
+        "Сверяй смысл со списком разделов по порядку. "
+        f"Разделы: {[row['heading'] for row in article['sections']]}. "
         f"обложка именно этой статьи. Тема {title}. Стиль {visual}. "
         'Верни JSON {"passed":boolean,"best_cover_slot":целое число,"issues":[строки]}.'
     ), 1000, pictures=(contact_sheet(previews),), reserve=other_images * spend.image_price))

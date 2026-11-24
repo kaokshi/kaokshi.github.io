@@ -32,7 +32,7 @@ class UnsafeToTest(RuntimeError):
     pass
 
 
-def call(path, token, payload=None, *, limit=350000, timeout=None):
+def call(path, token, payload=None, *, limit=350000, timeout=None, exact_numbers=False):
     if not token:
         raise UnsafeToTest("routerai_api_key_missing")
     request = Request(BASE + path,
@@ -53,7 +53,7 @@ def call(path, token, payload=None, *, limit=350000, timeout=None):
     except (URLError, TimeoutError, OSError):
         raise UnsafeToTest("routerai_connection_failed") from None
     try:
-        answer = json.loads(raw)
+        answer = json.loads(raw, parse_float=Decimal if exact_numbers else float)
     except (UnicodeError, ValueError):
         raise UnsafeToTest("routerai_non_json_response") from None
     if not isinstance(answer, dict):
@@ -62,7 +62,7 @@ def call(path, token, payload=None, *, limit=350000, timeout=None):
 
 
 def credits(token):
-    result = call("/credits", token)
+    result = call("/credits", token, exact_numbers=True)
     data = result.get("data") or {}
     if not isinstance(data, dict):
         raise UnsafeToTest("balance_schema_not_recognized")

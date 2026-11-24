@@ -178,12 +178,13 @@ class ImageIndex:
             except (OSError, ValueError):
                 continue
 
-    def save(self, raw, metadata, scene, subject, path):
+    def save(self, raw, metadata, scene, subject, path, *, require_scene_score=True):
         import imagehash
         image, contrast = decode_candidate(raw)
         model, scores, embedding = similarity(image, [scene["subject"], subject,
                                             "an unrelated image with no connection with this topic"])
-        if scores[0] < .19 or scores[0] <= scores[2] + .015:
+        scene_score_flags = scores[0] < .19 or scores[0] <= scores[2] + .015
+        if require_scene_score and scene_score_flags:
             raise ValueError("image_scene_match_below_threshold")
         quality = (min(1, image.width / 1200) * .3
                    + min(1, contrast / 60) * .25
@@ -211,6 +212,7 @@ class ImageIndex:
             row = {**metadata, "file": path.name, "sha256": sha, "original_sha256": raw_sha,
                    "perceptual_hash": phash, "size": list(image.size), "match_model": model, "image_embedding": embedding,
                    "scene_similarity": scores[0], "topic_similarity": scores[1],
+                   "scene_score_flags": scene_score_flags,
                    "cover_score": round(scores[1] * 2 + scores[0] * .3 + quality * .3, 4),
                    "section": scene["section"], "scene": scene["subject"]}
             write(path, rendered)

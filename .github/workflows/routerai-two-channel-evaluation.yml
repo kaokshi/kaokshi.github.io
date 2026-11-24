@@ -7,6 +7,11 @@ on:
       - 'tests/test_editorial_routerai_*.py'
   workflow_dispatch:
     inputs:
+      confirm_paid:
+        description: Explicitly acknowledge a paid run
+        required: true
+        type: boolean
+        default: false
       resume_run_id:
         description: Previous private run ID to continue from an incomplete text-stage response
         required: false
@@ -30,7 +35,7 @@ jobs:
         run: python -m unittest tests.test_editorial_routerai_adapter tests.test_editorial_routerai_two_articles -q
   private-test:
     if: >-
-      github.event_name == 'workflow_dispatch' &&
+      github.event_name == 'workflow_dispatch' && inputs.confirm_paid &&
       github.repository == 'kaokshi/kaokshi.github.io' &&
       github.ref == 'refs/heads/codex/routerai-seedream-two-channel' &&
       github.run_attempt == 1
