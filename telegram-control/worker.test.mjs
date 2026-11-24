@@ -229,12 +229,13 @@ test("Qwen chat consent, persistent receipt, duplicate protection and confirmed 
  const storage={get:async k=>store.get(k),put:async(k,v)=>store.set(k,v),delete:async k=>store.delete(k),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage),getAlarm:async()=>alarm,setAlarm:async n=>alarm=n,deleteAlarm:async()=>alarm=null};
  const core=new CoreHandler({storage}),agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},core);
  const id="9b00a000-1111-4222-8333-444444444444",msg={id,text:"Тест расписания",consent:true};
+ const notes=[{kind:"style",text:"Живой русский язык"}];await writeMemory(storage,{notes,version:0,confirm:true});
  const original=globalThis.fetch;let paid=0;
  globalThis.fetch=async(url,opts)=>{
   if(url.endsWith("/models"))return Response.json({data:[priceRow]});
   if(url.endsWith("/credits"))return Response.json({data:{credits:100}});
   assert.ok(url.endsWith("/chat/completions"));paid++;
-  const payload=JSON.parse(opts.body);assert.equal(payload.model,MODEL);assert.equal(payload.max_tokens,700);
+  const payload=JSON.parse(opts.body);assert.equal(payload.model,MODEL);assert.equal(payload.max_tokens,700);assert.deepEqual(JSON.parse(payload.messages[1].content).editorialMemory,notes);
   return Response.json({model:MODEL,usage:{cost:0.01},choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply:"Предлагаю расписание",proposal:plan})}}]});
  };
  try{
