@@ -86,3 +86,5 @@ jobs:
           status("PREFLIGHT_CREDENTIALS_READY",Object.values(checks).every(Boolean)&&cf&&telegram&&hook&&review&&router);
           console.log("NO_DEPLOYMENT_NO_PAID_REQUEST_NO_PUBLICATION");
           JS
+
+# Recheck protected configuration after owner added intake secret.
