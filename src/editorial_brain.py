@@ -97,6 +97,21 @@ class Article:
     def model(self, stage, provider, prompt, *, validate=None, tokens=None, metadata=None, repair=False):
         if tokens is None:
             tokens = 3700
+        if provider in ("routerai", "routerai_review", "routerai_brain"):
+            if provider == "routerai":
+                allowed = stage == "draft" or stage.startswith("repair-")
+            elif provider == "routerai_review":
+                allowed = stage in ("full-edit", "full-edit-retry")
+            else:
+                allowed = (stage.startswith(("topics-", "topics-json-retry-", "image-plan-"))
+                           or stage == "editorial-audit")
+            if not allowed:
+                raise Blocked("routerai_model_role_not_allowed")
+            route = self.config.get("routerai_editor", {})
+            if (route.get("enabled") is not True or
+                    (provider == "routerai_brain" and route.get("brain_enabled") is not True) or
+                    os.environ.get("EDITORIAL_ROUTERAI_EDITOR_ALLOWED") != "true"):
+                raise Blocked("routerai_spend_guard_not_ready")
         if provider == "gemini":
             if stage not in ("full-edit", "full-edit-retry"):
                 raise Blocked("gemini_is_independent_editor_only")
@@ -135,6 +150,12 @@ class Article:
                            execute, minimum_seconds=130,
                            validator=(lambda response: validate(json_reply(response))) if validate else None)
         return json_reply(result) if validate else result["text"]
+
+    def brain_provider(self):
+        route = self.config.get("routerai_editor", {})
+        if route.get("enabled") is True and route.get("brain_enabled") is True:
+            return "routerai_brain"
+        return "groq"
 
     def source_seed(self, history):
         registry = read_json(CONFIG / "editorial_science_sources.json", [])
@@ -199,7 +220,7 @@ class Article:
                     raise Blocked("topic_list_missing")
             topic_prompt = prompt + (f" В этот раз выбери иные предметы для набора {shift}." if shift else "")
             try:
-                result = self.model(f"topics-{shift + 1}", "groq", topic_prompt,
+                result = self.model(f"topics-{shift + 1}", self.brain_provider(), topic_prompt,
                                     validate=is_valid, tokens=3200)
             except Blocked as exc:
                 # Retry malformed JSON as a new, metered model task. Never
@@ -211,7 +232,7 @@ class Article:
                                  "с массивом topics; без Markdown, пояснений или "
                                  "текста до/после JSON. Не придумывай идентификаторы "
                                  "каталога фильмов, если не уверен.")
-                result = self.model(f"topics-json-retry-{shift + 1}", "groq",
+                result = self.model(f"topics-json-retry-{shift + 1}", self.brain_provider(),
                                     strict_prompt, validate=is_valid, tokens=3200)
             for row in result["topics"][:8]:
                 if not isinstance(row, dict):
@@ -297,7 +318,7 @@ class Article:
                            + "\nЕсли статья свыше 6000 знаков, проверь конкретность и необходимость обоснования.")
             if reference:
                 prompt += "\nПРЕДЫДУЩАЯ ВЕРСИЯ ДЛЯ СРАВНЕНИЯ:\n" + canonical(reference["article"])
-            return self.model("editorial-audit", "groq", prompt, validate=lambda x: None,
+            return self.model("editorial-audit", self.brain_provider(), prompt, validate=lambda x: None,
                               metadata={"text_sha256": sha}, tokens=2900, repair=repair)
         report = self.task("qa", "local-qa-and-editorial-review",
                            {"text_sha256": sha, "reference": reference and reference["text_sha256"],
@@ -328,8 +349,10 @@ class Article:
                  "не вставляй URL или Markdown-ссылку: кликабельную ссылку "
                  "редакция добавит сама при экспорте.\n"
                  f"Тема: {self.title}\nЗамысел: {angle}\nИСТОЧНИКИ:\n{facts}")
-        author = "groq"
-        editor = "gemini" if self.config.get("gemini_quota_guard", {}).get("automated_generation_enabled") else None
+        routerai_active = self.config.get("routerai_editor", {}).get("enabled") is True
+        author = "routerai" if routerai_active else "groq"
+        editor = ("routerai_review" if routerai_active else
+                  "gemini" if self.config.get("gemini_quota_guard", {}).get("automated_generation_enabled") else None)
         raw = self.model("draft", author, brief, metadata={"topic": self.title})
         self.memory.article(self.id, draft_provider=author, independent_editor_provider=editor)
         self.current = self.remember_version(raw)
@@ -346,7 +369,7 @@ class Article:
                                     metadata={"source_sha256": original["text_sha256"]})
                 self.remember_version(edited)
             except Blocked as exc:
-                # Never accept a Groq self-review as independent or bypass a Gemini quota stop.
+                # Never bypass the paid RouterAI gate or pretend an unavailable editor completed.
                 self.blockers.append("independent_edit_unavailable: " + str(exc))
         else:
             self.blockers.append("independent_edit_unavailable: gemini_limits_not_verified")
@@ -389,7 +412,7 @@ class Article:
                       f"\nТЕКУЩАЯ ВЕРСИЯ:\n{self.current['raw']}")
             errors = []
             response = None
-            for provider in ("groq",):
+            for provider in (("routerai",) if self.config.get("routerai_editor", {}).get("enabled") else ("groq",)):
                 try:
                     response = self.model(f"repair-{attempt}", provider, prompt)
                     break
@@ -440,7 +463,7 @@ class Article:
                   + self.current["raw"])
         plan = None
         last = None
-        for attempt, provider in enumerate(("groq", "groq"), 1):
+        for attempt, provider in enumerate((self.brain_provider(), self.brain_provider()), 1):
             try:
                 plan = self.model(f"image-plan-{attempt}", provider,
                                   prompt + (f"\nИсправь: {last}." if last else ""),

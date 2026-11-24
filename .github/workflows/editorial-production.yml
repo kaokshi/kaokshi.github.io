@@ -90,6 +90,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_QUOTA_TOKEN: ${{ secrets.CLOUDFLARE_QUOTA_TOKEN }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
+      EDITORIAL_ROUTERAI_EDITOR_ALLOWED: "false"  # until validated durable spend preflight
       GH_TOKEN: ${{ github.token }}
       TOKENIZERS_PARALLELISM: 'false'
       OMP_NUM_THREADS: '2'
