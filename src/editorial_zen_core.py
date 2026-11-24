@@ -70,6 +70,7 @@ class Core:
         self.reserve = amount(self.policy["reserve_daily_rub"])
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, intent TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS job_modes (job TEXT PRIMARY KEY, mode TEXT NOT NULL, revision INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS stages (
                 article TEXT NOT NULL, stage TEXT NOT NULL, result TEXT NOT NULL,
                 PRIMARY KEY(article, stage));
@@ -107,6 +108,29 @@ class Core:
                 raise CoreBlocked("job_id_conflict")
         return job_id
 
+    def mode_state(self, job_id, plan):
+        row = self.db.execute("SELECT mode,revision FROM job_modes WHERE job=?", (job_id,)).fetchone()
+        return (row["mode"], row["revision"]) if row else (plan.get("mode", "manual"), 0)
+
+    def apply_mode(self, job_id, mode, revision):
+        if mode not in ("manual", "semi_autonomous", "autonomous") or type(revision) is not int or not 0 < revision <= 2**53-1:
+            raise CoreBlocked("invalid_mode_transition")
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            job = self.db.execute("SELECT intent FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not job:
+                raise CoreBlocked("unknown_job")
+            plan = json.loads(job[0])
+            previous, current = self.mode_state(job_id, plan)
+            if revision < current or revision == current and mode != previous:
+                raise CoreBlocked("stale_mode_transition")
+            if revision == current:
+                return
+            self.db.execute("INSERT OR REPLACE INTO job_modes VALUES (?,?,?)", (job_id, mode, revision))
+            # Reconfirm future human boundaries after a mode change; completed stages remain immutable.
+            for article in self.articles(job_id, plan):
+                self.db.execute("DELETE FROM approvals WHERE article=? AND stage NOT IN (SELECT stage FROM stages WHERE article=? AND json_extract(result,'$.status')='passed')", (article, article))
+
     @staticmethod
     def articles(job_id, plan):
         return [f"{job_id}/{row['channel']}/{index}"
@@ -125,6 +149,8 @@ class Core:
         if plan["day"] and plan["day"] > self.day():
             raise CoreBlocked("scheduled_job_not_due")
         rows = dict(self.db.execute("SELECT stage,result FROM stages WHERE article=?", (article,)))
+        mode, revision = self.mode_state(job_id, plan)
+        plan = {**plan, "mode": mode, "modeRevision": revision}
         return plan, next((stage for stage in STAGES
                            if json.loads(rows.get(stage, "{}")).get("status") != "passed"), None)
 
@@ -355,8 +381,9 @@ class Core:
                                      "stages": [{"id": stage, **json.loads(statuses.get(stage, '{"status":"not_started"}'))}
                                                 for stage in STAGES]})
                 # Owner instructions and private result bodies are not a control-plane payload.
+                mode, revision = self.mode_state(row["id"], plan)
                 jobs.append({"id": row["id"], "items": plan["items"], "day": plan["day"],
-                             "releaseAt": plan["releaseAt"], "mode": plan.get("mode", "manual"),
+                             "releaseAt": plan["releaseAt"], "mode": mode, "modeRevision": revision,
                              "articles": articles})
             budget = self.budget(self.day())
         enabled = self.policy.get("execution_enabled") is True
