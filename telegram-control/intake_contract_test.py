@@ -65,6 +65,28 @@ class IntakeContract(unittest.TestCase):
         self.assertFalse(snapshot["executionEnabled"])
         self.assertEqual(received[0]["articles"], received[1]["articles"])
 
+    def test_mode_change_preserves_checkpoints_and_rejects_old_revision(self):
+        envelope = json.loads(envelope_path.read_text())
+        job_id = envelope["intent"]["id"]
+        store = Store()
+        cloud = CloudCore(store)
+        cloud.access(lambda c: client.accept(c, envelope, job_id), change=True)
+        article = job_id + "/legends/1"
+        cloud.access(lambda c: c.stage_result(article, "plan", {"status": "passed"}), change=True)
+        before = cloud.access(lambda c: c.snapshot())
+        for mode, revision in (("autonomous", 2), ("manual", 3), ("semi_autonomous", 4)):
+            changed = {**envelope, "modeTransition": {"mode": mode, "revision": revision}}
+            for _ in range(2):
+                cloud.access(lambda c: client.accept(c, changed, job_id), change=True)
+            report = cloud.access(lambda c: client.build_receipt(c, job_id))
+            self.assertEqual(report["effectiveMode"], mode)
+            self.assertEqual(report["modeRevision"], revision)
+            self.assertEqual(report["articles"][0]["stages"][0]["status"], "passed")
+            self.assertEqual(report["budget"]["meteredRub"], before["budget"]["meteredRub"])
+        with self.assertRaises(CoreBlocked):
+            cloud.access(lambda c: client.accept(c, {**envelope, "modeTransition": {"mode": "autonomous", "revision": 2}}, job_id), change=True)
+        self.assertEqual(len(cloud.access(lambda c: c.snapshot())["jobs"]), 1)
+
     def test_worker_payload_to_real_core(self):
         envelope = json.loads(envelope_path.read_text())
         with tempfile.TemporaryDirectory() as temp:
