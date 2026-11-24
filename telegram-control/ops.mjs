@@ -39,7 +39,7 @@ export async function opsView(storage){
    if(type==="budget")events.push({type,at:v.updated.updatedAt,mainKop:v.updated.mainKop,reserveKop:v.updated.reserveKop});
    if(type==="chat")events.push({type,at:v.at,status:v.status,cost:v.cost});
    if(type==="job"){const j=await storage.get("production:job:"+v);if(j)events.push({type,at:j.cancelledAt||j.createdAt,status:j.status,items:j.plan.items});}
-   if(type==="notification")events.push({type,at:v.at,status:v.status,count:v.count});
+   if(type==="notification")events.push({type,at:v.at,status:v.status,count:v.count,kind:v.kind||"timer"});
   }return events;
  }))).flat().sort((a,b)=>String(b.at).localeCompare(String(a.at))).slice(0,60);
  return {state,events:rows,scope:"zen_control_only",externalStopConnected:false,modeEffective:"dry_run",autonomousExecutionEnabled:false,publicationAuthorized:false};
