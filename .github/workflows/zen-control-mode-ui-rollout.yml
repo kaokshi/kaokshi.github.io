@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: '22'
       - name: Validate pinned candidate offline
-        run: node --test *.test.mjs
+        run: node --test ./*.test.mjs
       - name: Upgrade existing Worker only and verify
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
