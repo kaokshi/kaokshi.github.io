@@ -10,6 +10,7 @@ import {previewJob} from "./adapter.mjs";
 import {queueView,intakeView,controlView} from "./intake.mjs";
 import {recordReceipt} from "./receipt.mjs";
 import {opsState,updateOps} from "./ops.mjs";
+import {requestStage} from "./stage-intent.mjs";
 import {initial} from "./core.mjs";
 const temp=mkdtempSync(join(tmpdir(),"zen-mode-"));
 const db=join(temp,"mode.sqlite");
@@ -26,7 +27,7 @@ try:
  accept(c,d["envelope"],d["id"])
  if d["mark_plan"]:
   c.stage_result(d["id"]+"/science/1","plan",{"status":"passed"})
- print(json.dumps(build_receipt(c,d["id"],d["now"])))
+ print(json.dumps(build_receipt(c,d["id"],d["now"],command_id=(d["envelope"].get("stageIntent") or {}).get("id"))))
 finally:
  c.db.close()
 `;
@@ -43,7 +44,21 @@ try{
  assert.equal(first.effectiveMode,"manual");
  assert.equal((await recordReceipt(storage,first,now)).status,200);
  assert.equal((await controlView(storage,id,now)).body.controlClear,true);
- let last=first;
+ const request={id,article:id+"/science/1",stage:"draft",observedAt:now,modeRevision:0,version:0,confirm:true};
+ assert.equal((await requestStage(storage,{...request,stage:"images"},now)).status,409);
+ assert.equal((await requestStage(storage,{...request,confirm:false},now)).status,400);
+ assert.equal((await requestStage(storage,request,now)).status,200);
+ assert.equal((await requestStage(storage,request,now)).body.replay,true);
+ assert.deepEqual((await queueView(storage)).body.ids,[id]);
+ const cmdEnvelope=(await intakeView(storage,id)).body;
+ const cmdReport=executor(cmdEnvelope,false,now+100);
+ assert.equal(cmdReport.stageAcknowledgment.status,"recorded_only");
+ assert.equal(cmdReport.articles[0].stages[1].status,"not_started");
+ assert.equal((await recordReceipt(storage,{...cmdReport,stageAcknowledgment:{...cmdReport.stageAcknowledgment,id:"forged"}},now+100)).status,409);
+ assert.equal((await recordReceipt(storage,cmdReport,now+100)).status,200);
+ assert.deepEqual((await queueView(storage)).body.ids,[]);
+ console.log("STAGE_INTENT_RECORDED_NO_GENERATION");
+ let last=cmdReport;
  for(const [i,mode,effective] of [[1,"assisted","semi_autonomous"],[2,"autonomous","autonomous"],[3,"manual","manual"]]){
   const t=now+i*1000,old=await opsState(storage);
   assert.equal((await updateOps(storage,{action:"mode",mode,version:old.version,confirm:true},t,initial)).status,200);
