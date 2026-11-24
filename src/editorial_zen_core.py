@@ -73,6 +73,7 @@ class Core:
             CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, intent TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS job_modes (job TEXT PRIMARY KEY, mode TEXT NOT NULL, revision INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS stage_intents (id TEXT PRIMARY KEY, job TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS recovery_attempts (article TEXT NOT NULL, stage TEXT NOT NULL, count INTEGER NOT NULL, last_at INTEGER NOT NULL, PRIMARY KEY(article,stage));
             CREATE TABLE IF NOT EXISTS stages (
                 article TEXT NOT NULL, stage TEXT NOT NULL, result TEXT NOT NULL,
                 PRIMARY KEY(article, stage));
