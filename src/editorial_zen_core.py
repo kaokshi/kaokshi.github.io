@@ -72,6 +72,7 @@ class Core:
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, intent TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS job_modes (job TEXT PRIMARY KEY, mode TEXT NOT NULL, revision INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS stage_intents (id TEXT PRIMARY KEY, job TEXT NOT NULL, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS stages (
                 article TEXT NOT NULL, stage TEXT NOT NULL, result TEXT NOT NULL,
                 PRIMARY KEY(article, stage));
@@ -154,6 +155,43 @@ class Core:
         plan = {**plan, "mode": mode, "modeRevision": revision}
         return plan, next((stage for stage in STAGES
                            if json.loads(rows.get(stage, "{}")).get("status") != "passed"), None)
+
+    def accept_stage_intent(self, job_id, command):
+        # Acknowledgment is durable, but does not mark a stage passed or approve a paid call.
+        if (not isinstance(command, dict) or set(command) != {"id", "article", "stage", "mode", "modeRevision", "createdAt"}
+                or type(command["modeRevision"]) is not int or type(command["createdAt"]) is not int
+                or command["stage"] not in STAGES or not isinstance(command["article"], str)
+                or not command["article"].startswith(job_id + "/")
+                or command["id"] != f"stage:{command['modeRevision']}:{command['article']}:{command['stage']}"):
+            raise CoreBlocked("invalid_stage_intent")
+        encoded = json.dumps(command, sort_keys=True)
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            job = self.db.execute("SELECT intent FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not job:
+                raise CoreBlocked("unknown_job")
+            plan = json.loads(job[0])
+            mode, revision = self.mode_state(job_id, plan)
+            if (mode != command["mode"] or revision != command["modeRevision"]
+                    or not (mode == "manual" or mode == "semi_autonomous" and command["stage"] in ("images", "package"))):
+                raise CoreBlocked("stale_stage_intent")
+            old = self.db.execute("SELECT payload FROM stage_intents WHERE id=?", (command["id"],)).fetchone()
+            if old:
+                if old[0] != encoded:
+                    raise CoreBlocked("stage_intent_conflict")
+                return
+            rows = self.check_stage(command["article"], command["stage"])
+            next_stage = next((s for s in STAGES if json.loads(rows.get(s, "{}")).get("status") != "passed"), None)
+            if next_stage != command["stage"]:
+                raise CoreBlocked("stage_not_available")
+            self.db.execute("INSERT INTO stage_intents VALUES (?,?,?)", (command["id"], job_id, encoded))
+
+    def stage_acknowledgment(self, job_id, command_id):
+        row = self.db.execute("SELECT payload FROM stage_intents WHERE job=? AND id=?", (job_id, command_id)).fetchone()
+        if not row:
+            raise CoreBlocked("stage_intent_not_recorded")
+        c = json.loads(row[0])
+        return {"id": c["id"], "modeRevision": c["modeRevision"], "status": "recorded_only"}
 
     def approve_stage(self, article, stage):
         if stage not in ("images", "package"):
