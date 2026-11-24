@@ -46,5 +46,9 @@ def dispatch_one(cloud, article, token, *, guard, execute):
     # Execution has its own per-request budget, account and control guards.
     if guard(job, plan["mode"]) != plan["modeRevision"]:
         raise CoreBlocked("control_mode_revision_changed")
-    execute(cloud, article, token, target=plan["stage"], guard=guard)
+    def pinned_guard(job_id, mode):
+        if job_id != job or mode != plan["mode"] or guard(job_id, mode) != plan["modeRevision"]:
+            raise CoreBlocked("control_mode_revision_changed")
+        return plan["modeRevision"]
+    execute(cloud, article, token, target=plan["stage"], guard=pinned_guard)
     return {"status": "attempt_finished", "stage": plan["stage"]}
