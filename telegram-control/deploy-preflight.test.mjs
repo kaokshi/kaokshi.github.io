@@ -11,9 +11,9 @@ test("confirmed upgrade without dedicated bridge secret fails before network",()
  const run=spawnSync(process.execPath,[script.pathname],{env:{PATH:process.env.PATH,ZEN_CONTROL_CONFIRM_UPDATE:"true"},encoding:"utf8",timeout:5000});
  assert.equal(run.status,1);assert.match(run.stdout+run.stderr,/intake_secret_required/);
 });
-test("upgrade refuses to rotate a missing existing webhook secret",()=>{
- const run=spawnSync(process.execPath,[script.pathname],{env:{PATH:process.env.PATH,ZEN_CONTROL_CONFIRM_UPDATE:"true",ZEN_CORE_INTAKE_SECRET:"a".repeat(64)},encoding:"utf8",timeout:5000});
- assert.equal(run.status,1);assert.match(run.stdout+run.stderr,/existing_webhook_secret_required/);
+test("upgrade rejects malformed supplied webhook secret before network",()=>{
+ const run=spawnSync(process.execPath,[script.pathname],{env:{PATH:process.env.PATH,ZEN_CONTROL_CONFIRM_UPDATE:"true",ZEN_CORE_INTAKE_SECRET:"a".repeat(64),TELEGRAM_WEBHOOK_SECRET:"bad"},encoding:"utf8",timeout:5000});
+ assert.equal(run.status,1);assert.match(run.stdout+run.stderr,/existing_webhook_secret_invalid/);
 });
 test("deployment is manual and carries all imported modules",()=>{
  const workflow=readFileSync(new URL("../.github/workflows/telegram-control-deploy.yml",import.meta.url),"utf8");
@@ -35,4 +35,12 @@ test("rollback refuses unknown history, split traffic or an intervening deployme
 test("rollback requires explicit confirmation before network",()=>{
  const run=spawnSync(process.execPath,[new URL("./rollback.mjs",import.meta.url).pathname],{env:{PATH:process.env.PATH},encoding:"utf8",timeout:5000});
  assert.equal(run.status,1);assert.match(run.stdout,/explicit_rollback_confirmation_required/);
+});
+
+test("existing webhook secret is inherited strictly, never replaced or registered again",()=>{
+ const deploy=readFileSync(script,"utf8");
+ assert.match(deploy,/type:"inherit",name:"TELEGRAM_WEBHOOK_SECRET"/);
+ assert.match(deploy,/bindings_inherit=strict/);
+ assert.doesNotMatch(deploy,/telegram\("setWebhook"/);
+ assert.match(deploy,/existing_webhook_binding_required/);
 });
