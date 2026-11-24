@@ -18,7 +18,7 @@ export function authorized(message, env) {
  message.from.is_bot === false;
 }
 async function getJson(url, token, extra={}) {
- const response=await fetch(url,{headers:{Authorization:"Bearer "+token,Accept:"application/json",...extra},redirect:"error",signal:AbortSignal.timeout(8000)});
+ const response=await fetch(url,{headers:{Authorization:"Bearer "+token,Accept:"application/json",...extra},redirect:"manual",signal:AbortSignal.timeout(8000)});
  if(!response.ok) throw Error("upstream_unavailable");
  return response.json();
 }
@@ -66,8 +66,10 @@ export default {async fetch(request,env) {
  let reply;
  try{reply=await command(message.text,env);}catch{reply="Не удалось получить данные. Проверь настройки подключения. Платные запросы не выполнялись.";}
  try{
- const sent=await fetch("https://api.telegram.org/bot"+env.TELEGRAM_BOT_TOKEN+"/sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:env.TELEGRAM_OWNER_ID,text:reply.slice(0,3900),reply_markup:MENU,link_preview_options:{is_disabled:true}}),redirect:"error",signal:AbortSignal.timeout(10000)});
+ const sent=await fetch("https://api.telegram.org/bot"+env.TELEGRAM_BOT_TOKEN+"/sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:env.TELEGRAM_OWNER_ID,text:reply.slice(0,3900),reply_markup:MENU,link_preview_options:{is_disabled:true}}),redirect:"manual",signal:AbortSignal.timeout(10000)});
  if(!sent.ok)return new Response("Delivery failed",{status:502});
+ const receipt=await sent.json();
+ if(receipt.ok!==true)return new Response("Delivery failed",{status:502});
  }catch{return new Response("Delivery failed",{status:502});}
  return new Response("ok");
 }};
