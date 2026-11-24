@@ -32,7 +32,7 @@ class UnsafeToTest(RuntimeError):
     pass
 
 
-def call(path, token, payload=None):
+def call(path, token, payload=None, *, limit=350000, timeout=None):
     if not token:
         raise UnsafeToTest("routerai_api_key_missing")
     request = Request(BASE + path,
@@ -44,8 +44,10 @@ def call(path, token, payload=None):
                                "Content-Type": "application/json"},
                       )
     try:
-        with urlopen(request, timeout=75 if payload else 20) as response:
-            raw = response.read(350000)
+        with urlopen(request, timeout=timeout or (75 if payload else 20)) as response:
+            raw = response.read(limit + 1)
+            if len(raw) > limit:
+                raise UnsafeToTest("routerai_response_too_large")
     except HTTPError as exc:
         raise UnsafeToTest("routerai_http_" + str(exc.code)) from None
     except (URLError, TimeoutError, OSError):
