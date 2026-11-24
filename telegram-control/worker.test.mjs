@@ -453,3 +453,16 @@ test("diagnostics endpoint rejects non-owner before config or storage access",as
  const r=await worker.fetch(new Request("https://example.test/api/core/diagnostics",{method:"POST",body:JSON.stringify({initData:signed(124)})}),{...env,REVIEW_JOURNAL:{idFromName(){throw Error("must not access");}}});
  assert.equal(r.status,401);
 });
+
+test("unknown Qwen charge persists across Moscow midnight and prevents another paid request",async()=>{
+ const map=new Map(),storage={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v),delete:async k=>map.delete(k),list:async({prefix})=>new Map([...map].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage),getAlarm:async()=>null};
+ const core=new CoreHandler({storage}),agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},core);
+ const now=Date.parse("2026-11-24T20:59:00Z"),id="9b00a000-1111-4222-8333-444444444444";
+ const orig=globalThis.fetch;let paid=0;globalThis.fetch=async(url)=>{if(url.endsWith("/models"))return Response.json({data:[priceRow]});if(url.endsWith("/credits"))return Response.json({data:{credits:100}});paid++;throw Error("fixture timeout");};
+ try{
+ const first=await agent.chat({id,text:"fixture",consent:true},now);assert.equal(first.body.message.status,"failed");
+ assert.equal((await storage.get("agent:charge-hold")).status,"unknown");
+ assert.equal((await agent.chat({id:"9b00a000-1111-4222-8333-555555555555",text:"next",consent:true},now+120000)).body.error,"charge_reconciliation_required");
+ assert.equal(paid,1);assert.equal((await agent.view(now+120000)).enabled,false);
+ }finally{globalThis.fetch=orig;}
+});
