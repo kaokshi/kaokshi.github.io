@@ -16,8 +16,8 @@ from src.editorial_zen_core import CoreBlocked
 from src.editorial_zen_dispatch import dispatch_one
 from src.editorial_zen_executor import execute
 from src.editorial_zen_recovery import AUTO_RETRY
-from src.editorial_routerai_smoke import UnsafeToTest
-from src.editorial_providers import Blocked
+from src.editorial_routerai import UnsafeToTest
+from src.editorial_http import Blocked
 
 DISPATCH_CURSOR = "dispatch-cursor.json"
 ENDPOINT = "https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/intake"

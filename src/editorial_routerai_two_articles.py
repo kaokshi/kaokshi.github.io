@@ -21,12 +21,12 @@ from .editorial_images import ImageIndex, commons_photos, decode_candidate, warm
 from .editorial_layout import arrange
 from .editorial_memory import digest
 from .editorial_no_repeat import topic_duplicate_reason
-from .editorial_providers import Blocked, ProviderError, request
+from .editorial_http import Blocked, ProviderError, request
 from .editorial_review import (
     RULES, canonical, fact_evidence, grammar, parse_article, source_context, sources,
     structural_checks,
 )
-from .editorial_routerai_smoke import UnsafeToTest, call, credits
+from .editorial_routerai import MODELS, UnsafeToTest, call, credits
 from .editorial_visual_matching import compare_pixels, describe_pixels, load_model
 
 PRIVATE_REPO = "kaokshi/zen-editorial-review"
@@ -35,12 +35,6 @@ BUDGET = Decimal("70")
 BALANCE_PRECISION = Decimal("0.000001")
 DAILY = Decimal("300")
 MONTHLY = DAILY * 30
-MODELS = {
-    "brain": "qwen/qwen3.6-plus",
-    "draft": "anthropic/claude-sonnet-5.5",
-    "edit": "deepseek/deepseek-v4-pro-0813",
-    "image": "bytedance-seed/seedream-5-0-flash",
-}
 CHANNELS = {"legends": "Легенды тёмных улиц", "science": "За гранью очевидного"}
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = (
@@ -887,7 +881,7 @@ def evaluate(prefix, token, secret, report, resume_id=""):
         warm_visual_matcher()
         load_model("siglip")
         load_model("florence")
-        from .editorial_brain import archive
+        from .editorial_archive import archive
 
         with tempfile.TemporaryDirectory() as workspace:
             path = Path(workspace)

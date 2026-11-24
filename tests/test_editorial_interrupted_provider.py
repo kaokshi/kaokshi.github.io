@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from src.editorial_memory import Memory, digest, json_bytes
-from src.editorial_providers import ProviderError, Blocked
+from src.editorial_http import ProviderError, Blocked
 
 
 class InterruptedProviderTests(unittest.TestCase):

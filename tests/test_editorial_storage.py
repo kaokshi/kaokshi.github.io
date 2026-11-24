@@ -16,13 +16,12 @@ from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption,
 from docx import Document
 from PIL import Image
 
-from src.editorial_brain import Memory, review, settings
 from src.editorial_delivery import restore_blob, retrieve, save_outputs
 from src.editorial_groq_budget import snapshot
 from src.editorial_groq_ledger import archive_document, collection
-from src.editorial_memory import digest, read_json, write_json
-from src.editorial_package import ArticleHTML, package
-from src.editorial_providers import Blocked
+from src.editorial_memory import Memory, digest, read_json, write_json
+from src.editorial_package import ArticleHTML, package, zip_packet
+from src.editorial_http import Blocked
 from src.editorial_review import canonical, parse_article
 
 
@@ -32,7 +31,7 @@ ARTICLE_IDS = ("legends-01", "science-01")
 
 
 def build_fixture(root):
-    memory = Memory(root, DAY, datetime.now(timezone.utc), settings())
+    memory = Memory(root, DAY, datetime.now(timezone.utc), {})
     image_folder = root / "images"
     image_folder.mkdir(parents=True)
     for article_id in ARTICLE_IDS:
@@ -48,7 +47,15 @@ def build_fixture(root):
                 {"article": FIXTURE, "text_sha256": digest(canonical(FIXTURE)), "facts": {"evidence": []}},
                 images, image_folder, {"status": "rights_review_pending"})
         memory.data["articles"][article_id] = {"status": "rights_review_pending"}
-    review(memory)
+    review = memory.folder / "review"
+    write_json(review / "Статус комплекта.json", {
+        "day": DAY, "articles": dict.fromkeys(ARTICLE_IDS, "rights_review_pending"),
+        "publication_authorized": False,
+    })
+    packet = memory.folder / "Комплект согласования.zip"
+    sha = zip_packet(review, packet)
+    packet.with_suffix(".sha256").write_text(sha + "\n", encoding="utf-8")
+    memory.save()
 
 
 def write_owner_key(path, key):

@@ -9,7 +9,7 @@ from .editorial_length import HARD_MAX, MIN_CHARS, check_length
 from .editorial_language_tool import serialize_match
 from .editorial_memory import digest
 from .editorial_no_repeat import normalize, words
-from .editorial_providers import Blocked, ProviderError, check_url, request
+from .editorial_http import Blocked, ProviderError, check_url, request
 from .editorial_quality import text_style
 
 HEADING = re.compile(r"\*\*([^*\n]{2,125})\*\*")

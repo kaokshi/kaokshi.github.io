@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from src import editorial_storage_probe as store
-from src.editorial_providers import Blocked
+from src.editorial_http import Blocked
 
 
 class PrivateStorageProbeTests(unittest.TestCase):

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import re
 
-from .editorial_providers import Blocked
+from .editorial_http import Blocked
 
 SIGLIP = ("google/siglip2-base-patch16-224", "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2")
 FLORENCE = ("florence-community/Florence-2-base", "00921df66db728a9ceb750f5eca43e5c203a2051")

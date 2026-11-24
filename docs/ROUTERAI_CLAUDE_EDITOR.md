@@ -1,5 +1,7 @@
 # RouterAI — Claude Sonnet 5.5 автор, DeepSeek V4 Pro независимый редактор
 
+> Архив раннего пилота. Текущий производственный маршрут и роли описаны в контракте ZEN CORE. [Действующая инструкция](EDITORIAL_PRODUCTION.md)
+
 Интеграция в коде уже добавлена, но **платная генерация пока выключена**: `config/editorial_production.json` содержит `routerai_editor.enabled=false`, а GitHub workflow устанавливает `EDITORIAL_ROUTERAI_EDITOR_ALLOWED=false`. Смена этих полей без контроля баланса и суточной резервации бюджета **запрещена**.
 
 ## Подключение
