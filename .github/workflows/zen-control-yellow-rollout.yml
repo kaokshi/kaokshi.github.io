@@ -1,0 +1,53 @@
+# Owner explicitly requested immediate mode UI update.
+# One-shot pinned release. No repeat on later commits or reruns. Main untouched.
+name: ZEN CONTROL Yellow Street rollout
+on:
+  push:
+    branches: [assistant/zen-control-ui-polish-20261124]
+    paths: ['.github/workflows/zen-control-yellow-rollout.yml']
+permissions:
+  contents: read
+concurrency:
+  group: telegram-control-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/assistant/zen-control-ui-polish-20261124' && github.event.before == 'bf61f7f49e2e8de552a2c9b93cad9a8b39fa8120' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: telegram-control
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bf61f7f49e2e8de552a2c9b93cad9a8b39fa8120
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate pinned candidate offline
+        run: node --test ./*.test.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate cross-language stage commands and dispatcher
+        working-directory: .
+        run: |
+          node telegram-control/mode_contract_test.mjs
+          python -m unittest tests.test_editorial_zen_dispatch tests.test_editorial_zen_recovery -q
+      - name: Upgrade existing Worker only and verify
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          EDITORIAL_REVIEW_READ_TOKEN: ${{ secrets.EDITORIAL_REVIEW_READ_TOKEN }}
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+          ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
+          ZEN_CONTROL_EXPECTED_PREVIOUS_VERSION: '97dbd91d-808f-4a05-bb16-fe7c577f63fa'
+          ZEN_CONTROL_PREFLIGHT_ONLY: 'false'
+          ZEN_CONTROL_CONFIRM_UPDATE: 'true'
+        run: node deploy.mjs
