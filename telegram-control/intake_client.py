@@ -7,6 +7,7 @@ import os
 import re
 import time
 import urllib.request
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 
@@ -87,14 +88,88 @@ def push_receipt(endpoint, secret, receipt):
             raise ValueError("receipt_not_confirmed")
 
 
+def discover(endpoint, secret, cursor=None):
+    parsed = urlsplit(endpoint)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.path != "/internal/zen-core/intake"):
+        raise ValueError("invalid_intake_endpoint")
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", secret or ""):
+        raise ValueError("missing_intake_secret")
+    request = urllib.request.Request(endpoint.removesuffix("/intake") + "/queue",
+                                     data=json.dumps({"cursor": cursor}).encode(),
+                                     headers={"Authorization": "Bearer " + secret,
+                                              "Content-Type": "application/json"}, method="POST")
+    with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+        raw = response.read(8193)
+        if len(raw) > 8192:
+            raise ValueError("queue_response_too_large")
+        row = json.loads(raw)
+    if (not isinstance(row, dict) or row.get("schema") != "zen-core/queue-v1"
+            or row.get("mode") != "intents_only" or type(row.get("stopped")) is not bool
+            or any(row.get(k) is not False for k in ("executionEnabled", "publicationAuthorized", "rssEnabled"))):
+        raise ValueError("unsafe_queue_response")
+    ids = row.get("ids")
+    nxt = row.get("nextCursor")
+    if (not isinstance(ids, list) or len(ids) > 20
+            or any(not isinstance(i, str) or not re.fullmatch(r"[-a-zA-Z0-9:]{1,120}", i) for i in ids)
+            or len(set(ids)) != len(ids) or row["stopped"] and (ids or nxt is not None)
+            or nxt is not None and (not isinstance(nxt, str)
+                or not re.fullmatch(r"production:index:\\d{15}:[-a-zA-Z0-9:]{1,120}", nxt))):
+        raise ValueError("invalid_queue_response")
+    return ids, nxt
+
+
+def drain(core, endpoint, secret, *, max_pages=10, cursor=None, fetch_page=discover,
+          fetch_intent=pull, send_receipt=push_receipt):
+    # One bounded polling cycle. Only durable intent submission and receipt delivery.
+    delivered, skipped = 0, 0
+    seen = set()
+    for _ in range(max_pages):
+        ids, nxt = fetch_page(endpoint, secret, cursor)
+        for job_id in ids:
+            if job_id in seen:
+                continue
+            seen.add(job_id)
+            try:
+                envelope = fetch_intent(endpoint, secret, job_id)
+            except HTTPError as exc:
+                if exc.code in (404, 409):
+                    skipped += 1
+                    continue
+                raise
+            core.access(lambda c: accept(c, envelope, job_id), change=True)
+            receipt = core.access(lambda c: build_receipt(c, job_id))
+            try:
+                send_receipt(endpoint, secret, receipt)
+            except HTTPError as exc:
+                if exc.code in (404, 409):
+                    skipped += 1
+                    continue
+                raise
+            delivered += 1
+        if nxt is None:
+            return {"delivered": delivered, "skipped": skipped, "nextCursor": None}
+        if cursor is not None and nxt <= cursor:
+            raise ValueError("queue_cursor_not_advancing")
+        cursor = nxt
+    return {"delivered": delivered, "skipped": skipped, "nextCursor": cursor}
+
+
 def main():
     from src.editorial_zen_cloud import CloudCore, GitHubStore
     parser = argparse.ArgumentParser()
     parser.add_argument("--endpoint", required=True)
-    parser.add_argument("--job", required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--job")
+    group.add_argument("--queue", action="store_true")
+    parser.add_argument("--cursor")
     parser.add_argument("--report", action="store_true", help="Send informational snapshot after intake")
     args = parser.parse_args()
     core = CloudCore(GitHubStore(os.environ.get("EDITORIAL_PRIVATE_TOKEN")))
+    if args.queue:
+        result = drain(core, args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), cursor=args.cursor)
+        print(json.dumps({**result, "mode": "intents_only", "executed": False, "publicationAuthorized": False}))
+        return
     envelope = pull(args.endpoint, os.environ.get("ZEN_CORE_INTAKE_SECRET"), args.job)
     job_id = core.access(lambda c: accept(c, envelope, args.job), change=True)
     if args.report:
