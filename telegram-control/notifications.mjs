@@ -19,7 +19,7 @@ export function reportEvents(old,next){
 }
 export async function notifyReceipt(storage,env,receipt,events,now=Date.now()){
  if(!events.length||!env?.TELEGRAM_BOT_TOKEN||!/^[1-9]\d{0,15}$/.test(env.TELEGRAM_OWNER_ID||""))return;
- const key="ops:notification:"+String(now).padStart(15,"0")+":receipt:"+receipt.jobId+":"+receipt.observedAt;
+ const key="ops:notification:"+String(receipt.observedAt).padStart(15,"0")+":receipt:"+receipt.jobId;
  const claim=await storage.transaction(async tx=>{
   if(!(await opsState(tx)).notifications||await tx.get(key))return false;
   await tx.put(key,{at:new Date(now).toISOString(),status:"sending",count:events.length,kind:"executor_report"});return true;
