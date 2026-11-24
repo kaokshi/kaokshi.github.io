@@ -28,7 +28,9 @@ export async function previewJob(storage,id,now,validateJob,stages){
   const plan=buildDryRun(job,validateJob,stages);
   if(!plan)return {status:409,body:{error:"invalid_or_paused_channel"}};
   if(job.preview)return {status:200,body:{preview:job.preview}};
-  const preview={...plan,createdAt:new Date(now).toISOString()};
+  const requested=(await tx.get("ops:state"))?.requestedMode;
+  const executorMode=requested==="assisted"?"semi_autonomous":requested==="autonomous"?"autonomous":"manual";
+  const preview={...plan,executorMode,createdAt:new Date(now).toISOString()};
   await tx.put(key,{...job,preview});
   return {status:200,body:{preview}};
  });
