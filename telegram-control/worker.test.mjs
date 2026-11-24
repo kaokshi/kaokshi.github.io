@@ -488,3 +488,10 @@ test("owner chat is blocked by production charge hold before network access",asy
  const orig=globalThis.fetch;globalThis.fetch=async()=>{throw Error("must not contact provider");};
  try{assert.equal((await agent.chat({id:"9b00a000-1111-4222-8333-444444444444",text:"fixture",consent:true})).body.error,"account_charge_hold");assert.equal((await agent.view()).enabled,false);}finally{globalThis.fetch=orig;}
 });
+
+test("release metadata is owner-only and explicitly prelaunch",async()=>{
+ const req=id=>new Request("https://example.test/api/release",{method:"POST",body:JSON.stringify({initData:signed(id)})});
+ assert.equal((await worker.fetch(req(124),env)).status,401);
+ const r=await worker.fetch(req(123),env);assert.equal(r.status,200);const d=await r.json();
+ assert.equal(d.version,"1.0.0-rc.1");assert.equal(d.productionEnabled,false);assert.equal(d.publicationAuthorized,false);assert.equal(d.rssEnabled,false);
+});
