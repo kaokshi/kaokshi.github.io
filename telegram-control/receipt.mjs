@@ -4,7 +4,7 @@ import {STAGES} from "./production.mjs";
 import {reportEvents} from "./notifications.mjs";
 const stages=STAGES.filter(s=>s.id!=="rss").map(s=>s.id);
 const statuses=new Set(["not_started","passed","failed","blocked"]);
-const money=v=>typeof v==="string"&&/^\d{1,9}(?:\.\d{1,12})?$/.test(v)&&Number.isFinite(Number(v));
+const money=v=>typeof v==="string"&&/^\d{1,9}(?:\.\d{1,28})?$/.test(v)&&Number.isFinite(Number(v));
 const bad=(status,error)=>({status,body:{error}});
 function cleanReport(d,job,now){
  const intent=exportIntent(job);
@@ -38,10 +38,14 @@ function cleanReport(d,job,now){
  if(rolling.some(k=>Object.hasOwn(b,k))){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(b.rollingStart)||![b.rollingCapRub,b.rollingRemainingRub,b.rollingMeteredRub].every(money)||Number(b.rollingCapRub)!==9000||Number(b.rollingRemainingRub)>9000||typeof b.rollingOverrun!=="boolean"||typeof b.overrun!=="boolean")return null;
  }
+ if(d.dispatchReason!==undefined&&(typeof d.dispatchReason!=="string"||! /^[a-z0-9_]{1,120}$/.test(d.dispatchReason)))return null;
+ const reasons=d.reserveReasons;
+ if(reasons!==undefined&&(!Array.isArray(reasons)||reasons.length>12||
+    new Set(reasons.map(x=>x?.reason)).size!==reasons.length||reasons.some(x=>!x||! /^[a-z0-9_]{1,80}$/.test(x.reason||"")||!money(x.rub)||Number(x.rub)>50)))return null;
  const ack=d.stageAcknowledgment;
  if(ack!==undefined&&(!ack||ack.status!=="recorded_only"||ack.id!==job.stageIntent?.id||ack.modeRevision!==job.stageIntent?.modeRevision||ack.modeRevision!==d.modeRevision))return null;
  const budget=Object.fromEntries(["day","timezone","mainDailyRub","reserveDailyRub","mainRemainingRub","reserveRemainingRub","meteredRub","unsettledRequest",...rolling.filter(k=>Object.hasOwn(b,k))].map(k=>[k,b[k]]));
- return {schema:d.schema,jobId:d.jobId,observedAt:d.observedAt,...(d.modeRevision!==undefined?{modeRevision:d.modeRevision,effectiveMode:d.effectiveMode}:{}),articles,budget,...(ack?{stageAcknowledgment:{id:ack.id,modeRevision:ack.modeRevision,status:ack.status}}:{}),source:"executor_report",executionEnabled:false,publicationAuthorized:false,rssEnabled:false};
+ return {schema:d.schema,jobId:d.jobId,observedAt:d.observedAt,...(d.modeRevision!==undefined?{modeRevision:d.modeRevision,effectiveMode:d.effectiveMode}:{}),articles,budget,...(d.dispatchReason?{dispatchReason:d.dispatchReason}:{}),...(reasons?{reserveReasons:reasons.map(x=>({reason:x.reason,rub:x.rub}))}:{}),...(ack?{stageAcknowledgment:{id:ack.id,modeRevision:ack.modeRevision,status:ack.status}}:{}),source:"executor_report",executionEnabled:false,publicationAuthorized:false,rssEnabled:false};
 }
 export async function recordReceipt(storage,d,now=Date.now()){
  if(typeof d?.jobId!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(d.jobId))return bad(400,"invalid_job_id");
@@ -60,7 +64,7 @@ export async function recordReceipt(storage,d,now=Date.now()){
   if(old&&old.articles.some((a,i)=>a.acceptedImageSlots?.some(s=>!receipt.articles[i].acceptedImageSlots?.includes(s))))return bad(409,"accepted_image_regression");
   await tx.put(key,{...job,executorReceipt:receipt,...(receipt.stageAcknowledgment?{stageAcknowledgment:receipt.stageAcknowledgment}:{})});
   const latest=await tx.get("budget:executor-report");
-  if(!latest||receipt.observedAt>latest.observedAt)await tx.put("budget:executor-report",{observedAt:receipt.observedAt,budget:receipt.budget});
+  if(!latest||receipt.observedAt>latest.observedAt)await tx.put("budget:executor-report",{observedAt:receipt.observedAt,budget:receipt.budget,reserveReasons:receipt.reserveReasons??[]});
   return {status:200,body:{accepted:true,replay:false},receipt,events:reportEvents(old,receipt)};
  });
 }

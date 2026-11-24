@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: '22'
       - name: Offline authorization tests
-        run: node --test *.test.mjs
+        run: node --test ./*.test.mjs
       - name: Preflight or explicitly update existing Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}

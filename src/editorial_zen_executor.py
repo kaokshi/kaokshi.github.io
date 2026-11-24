@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 from .editorial_images import ImageIndex
 from .editorial_memory import digest
-from .editorial_providers import Blocked
+from .editorial_http import Blocked
 from .editorial_review import qa, sources
-from .editorial_routerai_smoke import UnsafeToTest, call, credits
+from .editorial_routerai import UnsafeToTest, call, credits
 from .editorial_routerai_two_articles import MODELS, ROOT, Spend, evaluate_channel, json_bytes, money, safe_reason
 from .editorial_zen_cloud import CloudCore, GitHubStore
 from .editorial_zen_core import CONFIG, STAGES, CoreBlocked
@@ -91,15 +91,19 @@ class MeteredRouter(Spend):
                 verify_seed_route(self.token, self.transport)
             if self.balance(self.token) < bound + reserve:
                 raise CoreBlocked("routerai_balance_insufficient")
-            self.session.account_call("claim", operation)
-            # Recheck available credits after taking the cross-lane hold.
-            if self.session.account is not None and self.balance(self.token) < bound + reserve:
-                self.session.account_call("close", operation, "not_sent")
-                raise CoreBlocked("routerai_balance_insufficient")
             self.session.core.access(
                 lambda core: core.reserve_call(operation, self.session.article, phase, reason, bound, slot=slot,
                                                hold=reserve), change=True)
-            # From this point an absent response means uncertain billing. Never resend.
+            try:
+                self.session.account_call("claim", operation)
+            except CoreBlocked as exc:
+                if str(exc) == "account_claim_rejected":
+                    self.session.core.access(lambda core: core.release_unsent(operation), change=True)
+                raise
+            # After taking the shared charge lock recheck balance and owner control.
+            # If either fails before the POST, retain the lock for explicit reconciliation.
+            if self.session.account is not None and self.balance(self.token) < bound + reserve:
+                raise CoreBlocked("routerai_balance_insufficient")
             self.session.check_control()
             answer = self.transport(path, self.token, body,
                                     limit=12_000_000 if role == "image" else 350000,
@@ -234,6 +238,12 @@ class Session:
 
     def quality(self, raw, audit, records, history, rows):
         report = qa(raw, self.channel, history, records, lambda *_: audit, lambda: 3600)
+        from html import escape
+        from .editorial_enhancements import readability
+        from .editorial_review import canonical
+
+        report["readability"] = readability({"channel": self.channel,
+                                               "body_html": "<p>" + escape(canonical(report["article"])) + "</p>"})
         encoded = json_bytes(report)
         self.save("quality/" + digest(encoded) + ".json", encoded)
         detectors_ok = (report["model_a"]["status"] == "completed"
@@ -267,7 +277,7 @@ def execute(core, article, token, *, target=None, transport=call, balance=credit
         return
     session.account = account or configured_account()
     router = MeteredRouter(session, token, transport=transport, balance=balance)
-    from .editorial_brain import archive
+    from .editorial_archive import archive
 
     report = {"articles": {}}
     with tempfile.TemporaryDirectory() as directory:

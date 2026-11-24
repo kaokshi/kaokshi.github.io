@@ -74,7 +74,7 @@ export class CoreHandler {
      if(await tx.get(key))continue;
      await tx.put(key,{...slot,recordedAt:now,status:"blocked_prelaunch",reason:slot.type==="prepare"?"production_not_connected":"rss_not_authorized"});
      batch.push(slot);
-     if(slot.type==="prepare")await saveJob(tx,"scheduled:"+slot.id,{items:[{channel:slot.channel,count:1}],day:slot.id.split(":")[1],instructions:"По сохранённому расписанию"},now,"schedule",slot.releaseAt);
+     if(slot.type==="prepare"&&slot.channel!=="cinema")await saveJob(tx,"scheduled:"+slot.id,{items:[{channel:slot.channel,count:1}],day:slot.id.split(":")[1],instructions:"По сохранённому расписанию"},now,"schedule",slot.releaseAt);
     }
    }
    await tx.put("core:cursor",now);await tx.put("core:lastTick",new Date(now).toISOString());return batch;
@@ -91,7 +91,19 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
-  if(request.method==="GET"&&url.pathname==="/core/jobs"){const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),readBudget(this.storage,now),opsState(this.storage),this.state()]);return Response.json({...jobs,requestedMode:ops.requestedMode,opsVersion:ops.version,modeRevision:ops.modeRevision??0,stopped:ops.stopped,schedulePaused:settings.paused,readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict:!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop,ownerDailyRub:budget.policy.mainKop/100}});}
+  if(request.method==="GET"&&url.pathname==="/core/jobs"){
+   const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),
+    readBudget(this.storage,now),opsState(this.storage),this.state()]);
+   const budgetConflict=!Number.isFinite(readiness.configuredDailyRub)||Math.round(readiness.configuredDailyRub*100)!==budget.policy.mainKop;
+   const verified=budget.production.ledgerConnected===true;
+   const reported=budget.production.reported?.budget;
+   const canExecute=this.env?.ZEN_CORE_EXECUTION_ENABLED==="true"&&readiness.privateExecutionConfigured===true&&
+    verified&&!budgetConflict&&!ops.stopped&&!reported?.unsettledRequest&&!reported?.overrun&&!reported?.rollingOverrun;
+   return Response.json({...jobs,productionEnabled:canExecute,requestedMode:ops.requestedMode,
+    opsVersion:ops.version,modeRevision:ops.modeRevision??0,stopped:ops.stopped,schedulePaused:settings.paused,
+    readiness:{...readiness,dryRunAdapterAvailable:true,budgetConflict,ownerDailyRub:budget.policy.mainKop/100,
+     sharedSpendGuardVerified:verified,canExecute}});
+  }
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
   if(url.pathname==="/core/probe"){const r=await runProbe(this.storage,d,now);return Response.json(r.body,{status:r.status});}
@@ -100,9 +112,9 @@ export class CoreHandler {
   if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/receipt"){const r=await recordReceipt(this.storage,d,now);if(r.receipt&&r.events?.length){try{await notifyReceipt(this.storage,this.env,r.receipt,r.events,now);}catch{}}return Response.json(r.body,{status:r.status});}
-  if(url.pathname==="/core/account"){const r=await accountView(this.storage,d,now);return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/account"){const r=await accountView(this.storage,d,now,this.env?.ZEN_CORE_EXECUTION_ENABLED==="true");return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/queue"){const r=await queueView(this.storage,d.cursor??null);return Response.json(r.body,{status:r.status});}
-  if(url.pathname==="/core/control"){const r=await controlView(this.storage,d.id,now);return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/control"){const r=await controlView(this.storage,d.id,now,this.env?.ZEN_CORE_EXECUTION_ENABLED==="true");return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/intake"){const r=await intakeView(this.storage,d.id);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/stage"){const r=await requestStage(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/preview"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const r=await previewJob(this.storage,d.id,now,validateJob,STAGES);return Response.json(r.body,{status:r.status});}

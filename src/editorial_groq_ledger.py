@@ -1,16 +1,16 @@
-"""Share numerical Groq accounting between Actions runners, without editorial material."""
+"""Read and validate historical Groq accounting, without inference or new reservations."""
 import argparse
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
-from uuid import uuid4
 
-from .editorial_groq_budget import HEADER_NUMBERS, HEADER_TIMES, charge, day_rows, instant
+from .editorial_groq_budget import HEADER_NUMBERS, HEADER_TIMES, instant
 from .editorial_memory import read_json, write_json
-from .editorial_providers import Blocked, GROQ
-from .editorial_schedule import CONFIG
+from .editorial_http import Blocked
+
+HISTORICAL_MODEL = "openai/gpt-oss-120b"
 
 NUMBERS = {"estimated_input_tokens", "estimated_output_tokens", "estimated_total_tokens",
            "input_tokens", "output_tokens", "total_tokens", "http_status", "estimated_requests"}
@@ -26,7 +26,7 @@ def clean(row):
             or not instant(row.get("sent_at") or row.get("at"))):
         raise Blocked("invalid_groq_ledger_row")
     out = {"request_id": row["request_id"], "status": row["status"], "lane": row["lane"],
-           "model": GROQ, "repair": row.get("repair") is True,
+           "model": HISTORICAL_MODEL, "repair": row.get("repair") is True,
            "operation": row["operation"] if row.get("operation") in OPERATIONS else "other"}
     for name in NUMBERS:
         value = row.get(name)
@@ -91,52 +91,13 @@ def collect(day):
     return collection(records)
 
 
-def reserve(previous, config, lane, now):
-    budget = config["groq_budget"]
-    limit = budget["experimental_daily_tokens"] if lane == "experiment" else budget["daily_tokens"]
-    today = day_rows(previous, now)
-    used = sum(charge(row, "total_tokens") for row in today if row["lane"] == lane)
-    if used >= limit:
-        raise Blocked("groq_editorial_budget_exhausted")
-    return {"request_id": uuid4().hex, "status": "run_reservation", "lane": lane,
-            "at": now.isoformat(), "estimated_total_tokens": limit - used,
-            "estimated_requests": config["daily_calls"]["groq"]}
-
-
-def used_rows(root):
-    seen = {}
-    earliest = datetime.now(timezone.utc) - timedelta(days=1)
-    for file in root.glob("????-??-??/state.json"):
-        for row in read_json(file).get("calls", []):
-            at = instant(row.get("sent_at") or row.get("at"))
-            if row["provider"] == "groq" and row.get("request_id") and at and at >= earliest:
-                seen[row["request_id"]] = row
-    return list(seen.values())
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("collect", "reserve", "finish"))
+    parser.add_argument("command", choices=("collect",))
+    parser.add_argument("--day", default=datetime.now(timezone.utc).date().isoformat())
     parser.add_argument("--file", type=Path, required=True)
-    parser.add_argument("--prior", type=Path)
-    parser.add_argument("--state", type=Path)
-    parser.add_argument("--probe-file", type=Path)
     args = parser.parse_args()
-    now = datetime.now(timezone.utc)
-    if args.command == "collect":
-        write_json(args.file, collect(now.date().isoformat()))
-        return
-    run = os.environ["GITHUB_RUN_ID"] + "." + os.environ["GITHUB_RUN_ATTEMPT"]
-    if args.command == "reserve":
-        lane = "experiment" if os.environ.get("EDITORIAL_ISOLATED_VALIDATION") == "true" else "production"
-        rows = [reserve(read_json(args.prior), read_json(CONFIG), lane, now)]
-        document = archive_document("reservation", run, rows)
-    else:
-        rows = used_rows(args.state) if args.state else []
-        if args.probe_file:
-            rows.extend(read_json(args.probe_file, []))
-        document = archive_document("usage", run, rows)
-    write_json(args.file, document)
+    write_json(args.file, collect(args.day))
 
 
 if __name__ == "__main__":

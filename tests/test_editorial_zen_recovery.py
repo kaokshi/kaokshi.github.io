@@ -36,7 +36,11 @@ class RecoveryTest(unittest.TestCase):
 
     def test_retry_budget_and_cooldown_survive_restart(self):
         self.c.stage_result(self.article,"plan",{"status":"blocked","reason":"control_unavailable"})
-        now=1000000
+        row=self.c.check_stage(self.article,"plan")["plan"]
+        import json
+        blocked=json.loads(row)["blockedAt"]
+        self.assertFalse(retry_window(self.c,self.article,"plan","control_unavailable",blocked+COOLDOWN_MS-1))
+        now=blocked+COOLDOWN_MS
         claim_retry(self.c,self.article,"plan",0,"control_unavailable",now)
         self.assertFalse(retry_window(self.c,self.article,"plan","control_unavailable",now+1))
         with self.assertRaises(CoreBlocked):

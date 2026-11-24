@@ -5,6 +5,7 @@ import re
 import time
 from urllib.parse import urlsplit
 from urllib.request import Request
+from urllib.error import HTTPError
 from .editorial_zen_transport import bridge_opener
 
 from .editorial_zen_core import CoreBlocked
@@ -80,10 +81,14 @@ def configured_account():
                 if len(raw) > 1024:
                     raise ValueError
                 row = json.loads(raw)
+        except HTTPError as exc:
+            if action == "claim" and exc.code in (400, 401, 403, 409):
+                raise CoreBlocked("account_claim_rejected") from None
+            raise CoreBlocked("account_gate_unavailable") from None
         except (OSError, ValueError):
             raise CoreBlocked("account_gate_unavailable") from None
         if action == "status":
-            if not isinstance(row, dict) or row.get("schema") != "zen-core/account-status-v1" or row.get("executionEnabled") is not False:
+            if not isinstance(row, dict) or row.get("schema") != "zen-core/account-status-v1" or type(row.get("executionEnabled")) is not bool:
                 raise CoreBlocked("account_status_invalid")
             return row
         if not isinstance(row, dict) or row.get("claimed" if action == "claim" else "closed") is not True:

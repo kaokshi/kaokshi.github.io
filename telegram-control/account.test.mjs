@@ -42,3 +42,12 @@ test("account status is read-only and omits private chat contents",async()=>{
  assert.equal(r.body.executionEnabled,false);
  assert.equal((await s.get("agent:charge-hold")).status,"unknown");
 });
+
+test("private execution authorization permits a matching claim only outside emergency stop",async()=>{
+ const s=fixture(),job={id:op.id,plan:{items:[{channel:"science",count:1}],day:null,instructions:"Synthetic fixture"},preview:{executorMode:"manual"},status:"blocked_prelaunch",executed:false,publicationAuthorized:false};
+ await s.put("production:job:"+op.id,job);
+ assert.equal((await accountView(s,{...op,action:"claim"},now,true)).status,200);
+ assert.equal((await accountView(s,{...op,action:"close",outcome:"settled"},now,true)).status,200);
+ await s.put("ops:state",{requestedMode:"manual",stopped:true,version:1,modeRevision:0});
+ assert.equal((await accountView(s,{...op,operation:op.id+"/science/1/draft",action:"claim"},now,true)).status,409);
+});

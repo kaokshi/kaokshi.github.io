@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 
 from .editorial_memory import digest, read_json
 from .editorial_no_repeat import normalize
-from .editorial_providers import Blocked, ProviderError, request
+from .editorial_http import Blocked, ProviderError, request
 from .editorial_review import sources
 from .movie_autonomous_research import movie_sources
 

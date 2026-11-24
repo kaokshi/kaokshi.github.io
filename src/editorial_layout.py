@@ -6,7 +6,7 @@ All source/rights/semantic checks remain mandatory in the image pipeline.
 from collections import Counter
 
 from .editorial_images import select_cover
-from .editorial_providers import Blocked
+from .editorial_http import Blocked
 
 
 def layout_issues(article, images, *, minimum=7, maximum=8):

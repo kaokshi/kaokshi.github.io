@@ -493,7 +493,7 @@ test("release metadata is owner-only and explicitly prelaunch",async()=>{
  const req=id=>new Request("https://example.test/api/release",{method:"POST",body:JSON.stringify({initData:signed(id)})});
  assert.equal((await worker.fetch(req(124),env)).status,401);
  const r=await worker.fetch(req(123),env);assert.equal(r.status,200);const d=await r.json();
- assert.equal(d.version,"1.0.0-rc.1");assert.equal(d.productionEnabled,false);assert.equal(d.publicationAuthorized,false);assert.equal(d.rssEnabled,false);
+ assert.equal(d.version,"1.0.0-rc.2");assert.equal(d.productionEnabled,false);assert.equal(d.publicationAuthorized,false);assert.equal(d.rssEnabled,false);
 });
 
 test("responsive mode controls are available in both Core and Settings without bypassing confirmation",async()=>{

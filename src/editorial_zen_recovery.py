@@ -48,7 +48,11 @@ def retry_window(core, article, stage, reason, now):
     if reason not in AUTO_RETRY:
         return False
     row = core.db.execute("SELECT count,last_at FROM recovery_attempts WHERE article=? AND stage=?", (article, stage)).fetchone()
-    return row is None or row["count"] < MAX_RETRIES and now - row["last_at"] >= COOLDOWN_MS
+    if row is not None:
+        return row["count"] < MAX_RETRIES and now - row["last_at"] >= COOLDOWN_MS
+    previous = core.db.execute("SELECT result FROM stages WHERE article=? AND stage=?", (article, stage)).fetchone()
+    blocked_at = json.loads(previous[0]).get("blockedAt") if previous else None
+    return blocked_at is None or now - blocked_at >= COOLDOWN_MS
 
 def claim_retry(core, article, stage, revision, reason, now):
     confirmed_retry(core, article, stage, revision, reason)

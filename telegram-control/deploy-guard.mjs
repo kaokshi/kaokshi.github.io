@@ -43,3 +43,25 @@ export async function readBridgeProbe(fetchProbe,validate,{attempts=4,pause=()=>
   await pause();
  }
 }
+
+// The Workers API can confirm deployment before the public edge serves its assets.
+export async function verifyDeployedAssets(fetchAsset, expected, {
+ attempts=6,pause=()=>new Promise(r=>setTimeout(r,2500))
+}={}){
+ if(!Number.isInteger(attempts)||attempts<1||attempts>8)throw Error("invalid_asset_probe_attempts");
+ for(let i=0;i<attempts;i++){
+  let stale=false;
+  for(const [path,body] of Object.entries(expected)){
+   let response;
+   try{response=await fetchAsset(path);}catch{stale=true;break;}
+   if(!response.ok){
+    if(![404,429,500,502,503,504].includes(response.status))throw Error("ui_asset_http_"+response.status);
+    stale=true;break;
+   }
+   if(await response.text()!==body){stale=true;break;}
+  }
+  if(!stale)return;
+  if(i+1<attempts)await pause();
+ }
+ throw Error("ui_assets_not_converged");
+}

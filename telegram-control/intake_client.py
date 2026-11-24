@@ -2,6 +2,7 @@
 Run from a private, persistent executor host with the PR85 Core installed.
 """
 import argparse
+from decimal import Decimal
 import json
 import os
 import re
@@ -12,7 +13,7 @@ from urllib.parse import urlsplit
 from src.editorial_zen_transport import bridge_opener
 
 
-def accept(core, envelope, expected_id):
+def accept(core, envelope, expected_id, *, production=False):
     if (not isinstance(envelope, dict)
             or envelope.get("schema") != "zen-core/intake-v1"
             or envelope.get("mode") != "intents_only"
@@ -24,7 +25,8 @@ def accept(core, envelope, expected_id):
         raise ValueError("intent_id_or_schema_mismatch")
     if intent["mode"] not in ("manual", "semi_autonomous", "autonomous"):
         raise ValueError("invalid_execution_mode")
-    if any(core.policy.get(k) is not False for k in ("execution_enabled", "publication_enabled", "rss_enabled")):
+    if (core.policy.get("execution_enabled") is not production
+            or any(core.policy.get(k) is not False for k in ("publication_enabled", "rss_enabled"))):
         raise ValueError("core_not_in_intake_only_mode")
     transition = envelope.get("modeTransition")
     if transition is not None and (not isinstance(transition, dict) or set(transition) != {"mode", "revision"}
@@ -58,27 +60,34 @@ def pull(endpoint, secret, job_id):
         return json.loads(data)
 
 
-def build_receipt(core, job_id, observed_at=None, command_id=None):
+def build_receipt(core, job_id, observed_at=None, command_id=None, *, production=False):
     snapshot = core.snapshot()
-    if snapshot.get("schema") != "zen-core/v1" or snapshot.get("executionMode") != "intents_only" or any(
-            snapshot.get(k) is not False for k in ("executionEnabled", "publicationAuthorized", "rssEnabled")):
+    if (snapshot.get("schema") != "zen-core/v1" or snapshot.get("executionMode") != ("private_executor" if production else "intents_only") or
+            snapshot.get("executionEnabled") is not production or any(
+            snapshot.get(k) is not False for k in ("publicationAuthorized", "rssEnabled"))):
         raise ValueError("unsafe_core_snapshot")
     jobs = [j for j in snapshot["jobs"] if j["id"] == job_id]
     if len(jobs) != 1:
         raise ValueError("job_missing")
+    reserve_by_reason = {}
+    for item in snapshot["budget"]["reserveUses"]:
+        reason = item["reason"]
+        reserve_by_reason[reason] = reserve_by_reason.get(reason, Decimal(0)) + Decimal(item["rub"])
     return {**({"stageAcknowledgment": core.stage_acknowledgment(job_id, command_id)} if command_id else {}),
             "schema": "zen-core/receipt-v1", "jobId": job_id,
             "observedAt": int(time.time() * 1000) if observed_at is None else observed_at,
             "modeRevision": jobs[0]["modeRevision"], "effectiveMode": jobs[0]["mode"],
-            "articles": [{"id": a["id"], "meteredRub": a["meteredRub"],
+            "articles": [{"id": a["id"], "meteredRub": format(Decimal(a["meteredRub"]), "f"),
                           "acceptedImageSlots": a["acceptedImageSlots"],
                           "stages": [{"id": s["id"], "status": s["status"],
                                       **({"reason": s["reason"]} if s.get("reason") else {})} for s in a["stages"]]}
                          for a in jobs[0]["articles"]],
-            "budget": {k: snapshot["budget"][k] for k in (
+            "budget": {k: (format(Decimal(snapshot["budget"][k]), "f") if k.endswith("Rub")
+                           else snapshot["budget"][k]) for k in (
                 "day", "timezone", "mainDailyRub", "reserveDailyRub", "mainRemainingRub",
                 "reserveRemainingRub", "meteredRub", "unsettledRequest", "overrun",
                 "rollingStart", "rollingCapRub", "rollingRemainingRub", "rollingMeteredRub", "rollingOverrun")},
+            "reserveReasons": [{"reason": k, "rub": format(v, "f")} for k, v in sorted(reserve_by_reason.items())],
             "executionEnabled": False, "publicationAuthorized": False, "rssEnabled": False}
 
 
@@ -131,7 +140,7 @@ def discover(endpoint, secret, cursor=None):
 
 
 def drain(core, endpoint, secret, *, max_pages=10, cursor=None, fetch_page=discover,
-          fetch_intent=pull, send_receipt=push_receipt):
+          fetch_intent=pull, send_receipt=push_receipt, production=False):
     # One bounded polling cycle. Only durable intent submission and receipt delivery.
     delivered, skipped = 0, 0
     seen = set()
@@ -148,8 +157,8 @@ def drain(core, endpoint, secret, *, max_pages=10, cursor=None, fetch_page=disco
                     skipped += 1
                     continue
                 raise
-            core.access(lambda c: accept(c, envelope, job_id), change=True)
-            receipt = core.access(lambda c: build_receipt(c, job_id, command_id=(envelope.get("stageIntent") or {}).get("id")))
+            core.access(lambda c: accept(c, envelope, job_id, production=production), change=True)
+            receipt = core.access(lambda c: build_receipt(c, job_id, command_id=(envelope.get("stageIntent") or {}).get("id"), production=production))
             try:
                 send_receipt(endpoint, secret, receipt)
             except HTTPError as exc:

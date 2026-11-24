@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageOps
 
 from .editorial_memory import digest, read_json, write, write_json
 from .editorial_images import COMMONS
-from .editorial_providers import ProviderError, request
+from .editorial_http import ProviderError, request
 from .editorial_visual_matching import (Scene, baseline_order, compare_pixels, describe_pixels, load_model,
                                         rank_key, shortlist, verified_order)
 

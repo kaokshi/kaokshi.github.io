@@ -3,7 +3,8 @@
 import {readFile} from "node:fs/promises";
 import {createHmac} from "node:crypto";
 import {buildSnapshot,snapshotBindings} from "./snapshot.mjs";
-import {activeDeployment,latestVersion,readBridgeProbe} from "./deploy-guard.mjs";
+import {activeDeployment,latestVersion,readBridgeProbe,verifyDeployedAssets} from "./deploy-guard.mjs";
+import {HTML,CSS,JS} from "./ui.mjs";
 const SCRIPT="zen-editorial-control";
 const account=process.env.CLOUDFLARE_ACCOUNT_ID||"";
 const cfToken=process.env.CLOUDFLARE_API_TOKEN||"";
@@ -141,7 +142,7 @@ async function main(){
  const info=await telegram("getWebhookInfo");
  requireOk(info.url===endpoint+"/telegram","webhook_url_mismatch");
  stage="verify_miniapp";
- const page=await fetch(endpoint+"/app?v=14",{redirect:"error",signal:AbortSignal.timeout(8000)});
+ const page=await fetch(endpoint+"/app?v=16",{redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(page.ok&&(await page.text()).includes("ZEN CONTROL"),"app_page_unavailable");
  const unauthorized=await fetch(endpoint+"/api/dashboard",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({initData:"invalid"}),redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(unauthorized.status===401,"app_auth_gate_failed");
@@ -180,7 +181,7 @@ async function main(){
  console.log("REVIEW_JOURNAL_CONFIRMED");
  console.log("REVIEW_MUTATION_GATE_CONFIRMED");
  stage="verify_release";
- const rel=await journalRequest("/api/release",{initData:params.toString()});requireOk(rel.ok,"release_unavailable");const rv=await rel.json();requireOk(rv.version==="1.0.0-rc.1"&&rv.productionEnabled===false&&rv.publicationAuthorized===false&&rv.rssEnabled===false,"release_gate_failed");
+ const rel=await journalRequest("/api/release",{initData:params.toString()});requireOk(rel.ok,"release_unavailable");const rv=await rel.json();requireOk(rv.version==="1.0.0-rc.2"&&rv.productionEnabled===false&&rv.publicationAuthorized===false&&rv.rssEnabled===false,"release_gate_failed");
  stage="verify_core";
  const core=await journalRequest("/api/core",{initData:params.toString()});
  requireOk(core.ok,"core_read_http_"+core.status);
@@ -213,7 +214,7 @@ async function main(){
  const budget=await journalRequest("/api/core/budget",{initData:params.toString()});
  requireOk(budget.ok,"budget_http_"+budget.status);
  const bv=await budget.json();
- requireOk(bv.policy.reserveKop===5000&&bv.executionEnabled===false&&bv.production.ledgerConnected===false&&bv.production.reserveRemainingKop===null,"budget_gate_failed");
+ requireOk(bv.policy.reserveKop===5000&&bv.executionEnabled===false&&typeof bv.production.ledgerConnected==="boolean"&&(bv.production.reserveRemainingKop===null||Number.isInteger(bv.production.reserveRemainingKop)&&bv.production.reserveRemainingKop>=0&&bv.production.reserveRemainingKop<=5000),"budget_gate_failed");
  const deniedBudget=await journalRequest("/api/core/budget",{initData:"invalid"});
  requireOk(deniedBudget.status===401,"budget_auth_gate_failed");
  const invalidBudget=await journalRequest("/api/core/budget/settings",{initData:params.toString(),confirm:false});
@@ -235,11 +236,10 @@ async function main(){
  requireOk(invalidOps.status===400,"ops_confirmation_failed");
  console.log("OPS_CONTROLS_CONFIRMED");
  stage="verify_mode_ui";
- const uiPage=await fetch(endpoint+"/app?v=14",{redirect:"error",signal:AbortSignal.timeout(10000)});
- requireOk(uiPage.ok&&(await uiPage.text()).includes('id="coremode"'),"mode_panel_not_deployed");
- const uiScript=await fetch(endpoint+"/app.js?v=1.0.0-rc.1-mode2",{redirect:"error",signal:AbortSignal.timeout(10000)});
- const uiCode=await uiScript.text();
- requireOk(uiScript.ok&&uiCode.includes("function renderModeControl")&&uiCode.includes("image-progress")&&uiCode.includes("stage-warning"),"recovery_ui_not_deployed");
+ requireOk(HTML.includes('id="coremode"')&&JS.includes("image-progress")&&JS.includes("stage-warning"),"local_ui_contract_invalid");
+ await verifyDeployedAssets(path=>fetch(endpoint+path+"?deploy="+updatedDeployment.version,{
+  redirect:"error",cache:"no-store",signal:AbortSignal.timeout(10000)
+ }),{"/app":HTML,"/app.js":JS,"/app.css":CSS});
  requireOk((await journalRequest("/api/core/jobs/stage",{initData:"invalid",confirm:true})).status===401,"stage_owner_gate_failed");
  let stageRejected=false;
  for(let attempt=0;attempt<3;attempt++){
@@ -281,15 +281,15 @@ async function main(){
  console.log("OWNER_REPLY_CONFIRMED");
  }else console.log("OWNER_WEBHOOK_REPLY_REQUIRES_MANUAL_TEST");
  stage="miniapp_menu";
- requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=14"}}})===true,"miniapp_menu_failed");
+ requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=16"}}})===true,"miniapp_menu_failed");
  const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
- requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=14","miniapp_menu_not_verified");
+ requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=16","miniapp_menu_not_verified");
  console.log("MINIAPP_MENU_CONFIRMED");
  stage="send_inline_launch";
- const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=14"}}]]}});
+ const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=16"}}]]}});
  requireOk(Number.isInteger(launch?.message_id),"inline_launch_failed");
  console.log("INLINE_LAUNCH_SENT");
- console.log("MINIAPP_URL="+endpoint+"/app?v=14");
+ console.log("MINIAPP_URL="+endpoint+"/app?v=16");
  stage="commands";
  try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},

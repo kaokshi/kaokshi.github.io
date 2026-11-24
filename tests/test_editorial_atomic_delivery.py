@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from src.editorial_delivery import publish_verified_directory, unpack
-from src.editorial_providers import Blocked
+from src.editorial_http import Blocked
 
 
 class AtomicOwnerDeliveryTests(unittest.TestCase):

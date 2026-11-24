@@ -150,7 +150,13 @@ class Core:
         if article not in self.articles(job_id, plan):
             raise CoreBlocked("unknown_article_or_stage")
         if plan["day"] and plan["day"] > self.day():
-            raise CoreBlocked("scheduled_job_not_due")
+            # Scheduler-created orders are arriving from an authenticated alarm.
+            # Permit just the configured maximum preparation window across midnight.
+            release = datetime.fromisoformat(plan["releaseAt"]) if plan["releaseAt"] else None
+            if (not job_id.startswith("scheduled:") or not release
+                    or release.astimezone(ZoneInfo(self.policy["timezone"])).date().isoformat() != plan["day"]
+                    or not timedelta(0) < release - self.clock() <= timedelta(hours=24)):
+                raise CoreBlocked("scheduled_job_not_due")
         rows = dict(self.db.execute("SELECT stage,result FROM stages WHERE article=?", (article,)))
         mode, revision = self.mode_state(job_id, plan)
         plan = {**plan, "mode": mode, "modeRevision": revision}
@@ -304,6 +310,12 @@ class Core:
                     status == "passed" and key.startswith("slot_") and checks.get(key) != "passed"
                     for key, status in previous.get("checks", {}).items()):
                 raise CoreBlocked("passed_image_slot_immutable")
+            if result["status"] in ("failed", "blocked"):
+                payload = json.loads(encoded)
+                payload["blockedAt"] = (previous.get("blockedAt") if previous.get("reason") == reason else None)
+                if payload["blockedAt"] is None:
+                    payload["blockedAt"] = int(self.clock().timestamp() * 1000)
+                encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False)
             self.db.execute("INSERT OR REPLACE INTO stages VALUES (?, ?, ?)", (article, stage, encoded))
 
     def budget(self, day):
@@ -377,6 +389,15 @@ class Core:
                 raise CoreBlocked("daily_budget_exhausted")
             self.db.execute("INSERT INTO spend VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                             (request_id, day, article, stage, reason, slot, str(quoted_main), str(quoted_reserve)))
+
+    def release_unsent(self, request_id):
+        """Only call after a definite pre-transport denial."""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self.db.execute("SELECT actual FROM spend WHERE id=?", (request_id,)).fetchone()
+            if not row or row["actual"] is not None:
+                raise CoreBlocked("request_not_pending")
+            self.db.execute("DELETE FROM spend WHERE id=?", (request_id,))
 
     def settle(self, request_id, actual):
         actual = amount(actual)

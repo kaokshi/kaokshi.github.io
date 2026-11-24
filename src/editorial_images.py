@@ -10,7 +10,7 @@ from urllib.parse import quote, urlencode
 
 from . import editorial_commons_images as commons
 from .editorial_memory import digest, read_json, write, write_json
-from .editorial_providers import KLEIN, Blocked, ProviderError, klein, request
+from .editorial_http import Blocked, ProviderError, request
 
 COMMONS = ("commons.wikimedia.org", "upload.wikimedia.org")
 NASA = ("images-api.nasa.gov", "images-assets.nasa.gov", "images.nasa.gov")
@@ -254,33 +254,6 @@ def photo(scene, subject, path, index, *, experimental=False):
             errors.append(str(exc) if isinstance(exc, ProviderError) else type(exc).__name__)
     detail = "photo_candidates_rejected" if had_candidate else "no_traceable_photo_found"
     raise Blocked(detail + (": " + ", ".join(dict.fromkeys(errors)) if errors else ""))
-
-
-def generated(scene, subject, path, index, task, article, channel):
-    warm_visual_matcher()
-    style = ("Cinematic realistic urban mystery, restrained color grading and atmospheric lighting."
-             if channel == "legends" else
-             "Modern moderately stylized science editorial illustration with a coherent muted palette. "
-             "Explanatory concept art with accurate geometry where applicable. Do not mimic documentary "
-             "evidence, scientific measurements or labeled diagrams.")
-    for attempt in range(2):
-        if index.memory.time_left() < 150:
-            raise Blocked("production_deadline")
-        prompt = f"{scene['brief']} Depict {scene['subject']}. {style} Landscape. No text or watermark."
-        if attempt:
-            prompt += " Isolate the main subject in a clear composition with distinct foreground and background."
-        raw, params = index.memory.call(task, article, "klein", lambda: klein(prompt))
-        try:
-            return index.save(raw, {"kind": "illustration", "source": "Cloudflare Workers AI",
-                                    "model": KLEIN, "prompt": prompt, "parameters": params,
-                                    "rights_status": "rights_review_pending",
-                                    "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
-                                    "label": "ИИ-иллюстрация" if channel != "legends" else None},
-                              scene, subject, path)
-        except (OSError, ValueError):
-            if attempt:
-                raise Blocked("generated_image_quality_or_match_failed") from None
-    raise AssertionError("unreachable image attempt")
 
 
 def select_cover(rows):

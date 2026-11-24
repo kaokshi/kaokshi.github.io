@@ -55,7 +55,19 @@ export async function productionReadiness(){
  const root="https://raw.githubusercontent.com/kaokshi/kaokshi.github.io/main/config/";
  const read=async file=>{const r=await fetch(root+file,{redirect:"manual",signal:AbortSignal.timeout(5000),cache:"no-store"});if(!r.ok)throw Error();return r.json();};
  try{
-  const [p,s,r]=await Promise.all([read("editorial_production.json"),read("site.json"),read("ai_revision_policy.json")]);
-  return {verified:true,scheduleEnabled:p.schedule?.enabled===true,ownerApproved:p.schedule?.owner_approved===true,routerBrainEnabled:p.routerai_editor?.brain_enabled===true,routerEditorEnabled:p.routerai_editor?.enabled===true,publicationEnabled:s.publication_enabled===true,projectLaunched:r.future_rss_delivery?.project_launched===true,activeChannels:(s.auto_release_active_channels||[]).filter(x=>channels.includes(x)),configuredDailyRub:p.routerai_editor?.daily_spend_cap_rub??null,configuredMonthlyRub:p.routerai_editor?.monthly_spend_cap_rub??null,adapterConnected:false,sharedSpendGuardVerified:false,canExecute:false};
+  const [site,policy,core]=await Promise.all([read("site.json"),read("ai_revision_policy.json"),
+    read("zen_core.json").catch(()=>null)]);
+  return {
+   verified:true,
+   publicationEnabled:site.publication_enabled===true,
+   projectLaunched:policy.future_rss_delivery?.project_launched===true,
+   activeChannels:(site.auto_release_active_channels||[]).filter(x=>channels.includes(x)),
+   configuredDailyRub:core?Number(core.main_daily_rub):null,
+   configuredMonthlyRub:core?Number(core.rolling_30_day_cap_rub):null,
+   adapterConnected:core?.version===1,
+   privateExecutionConfigured:core?.execution_enabled===true&&core?.publication_enabled===false&&core?.rss_enabled===false,
+   sharedSpendGuardVerified:false,
+   canExecute:false
+  };
  }catch{return {verified:false,adapterConnected:false,sharedSpendGuardVerified:false,canExecute:false};}
 }
