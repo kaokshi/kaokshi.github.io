@@ -86,6 +86,20 @@ class TwoArticleTest(unittest.TestCase):
         with self.assertRaisesRegex(two.UnsafeToTest, "image_plan_anchor_outside_section"):
             two.plan_images({"style": "Style", "images": rows}, [{"paragraphs": ["Actual section"]}])
 
+    def test_private_preview_keeps_missing_slots_visible(self):
+        article = {"intro": ["Вступление."],
+                   "sections": [{"heading": "Раздел", "paragraphs": ["Текст."]}]}
+        preview = two.render(article, "Заголовок", None, {}, [], private_preview=True)
+        self.assertEqual(preview.count("Иллюстрация ожидает"), 2)
+        self.assertIn("выпуск не согласован", preview)
+
+    def test_visual_approval_requires_evidence_and_preserves_hard_failures(self):
+        approved = {"passed": True, "issues": [], "evidence": "A visible detail"}
+        self.assertTrue(two.visual_passes(approved, [], has_pixels=True))
+        self.assertFalse(two.visual_passes(approved, ["image_duplicate"], has_pixels=True))
+        self.assertFalse(two.visual_passes(approved, [], has_pixels=False))
+        self.assertFalse(two.visual_passes({**approved, "evidence": ""}, [], has_pixels=True))
+
     def test_layout_places_illustrations_after_headings(self):
         sections = [{"heading": f"Блок {i}", "paragraphs": [f"Строка {i}."]} for i in range(6)]
         article = {"intro": ["Вступление."], "sections": sections}

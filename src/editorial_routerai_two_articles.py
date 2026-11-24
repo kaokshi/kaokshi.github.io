@@ -350,6 +350,13 @@ def illustration_prompt(brief, style):
             "only keep a short diegetic identifier if the section explicitly calls for it.")
 
 
+def visual_passes(verdict, hard_issues, *, has_pixels):
+    """A positive visual verdict needs pixel evidence and no unresolved defects."""
+    return (has_pixels and not hard_issues and verdict.get("passed") is True
+            and verdict.get("issues") == [] and isinstance(verdict.get("evidence"), str)
+            and bool(verdict["evidence"].strip()))
+
+
 def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, records, *, skip_cover=False, prior_section_attempt=False):
     rows, previews = [], []
     failed = [0] if skip_cover else []
@@ -429,8 +436,7 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 reserve=reserve))
             if type(verdict.get("passed")) is not bool or not isinstance(verdict.get("issues"), list):
                 raise UnsafeToTest("image_qa_invalid")
-            accepted = (verdict["passed"] and not verdict["issues"] and not issues and preview is not None
-                        and isinstance(verdict.get("evidence"), str) and bool(verdict["evidence"].strip()))
+            accepted = visual_passes(verdict, issues, has_pixels=preview is not None)
             if accepted and (pixels.get("siglip_scene_flag") or pixels.get("clip_scene_flag")):
                 review = object_response(spend.chat(channel, stage + "-scene-review", "brain", (
                     f"Независимо сверь первый кадр с конкретным текстом:\n{section_text}\n"
@@ -441,8 +447,7 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                     'Только JSON {"passed":boolean,"issues":[строки],"evidence":"основание"}.'
                 ), 700, pictures=(preview,), reserve=reserve))
                 record["scene_review"] = review
-                accepted = (review.get("passed") is True and review.get("issues") == []
-                            and isinstance(review.get("evidence"), str) and bool(review["evidence"].strip()))
+                accepted = visual_passes(review, issues, has_pixels=True)
             record.update(status="passed" if accepted else "rejected", local_checks=pixels,
                           local_issues=issues, qwen=verdict)
             save(f"{channel}/attempts/{stage}-qa.json", json_bytes(record))
@@ -498,10 +503,12 @@ def contact_sheet(previews):
     return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
 
 
-def render(article, title, cover, pictures, records):
+def render(article, title, cover, pictures, records, *, private_preview=False):
     lines = [f"# {title}", "", "Оглавление", ""]
     lines.extend(f"- {section['heading']}" for section in article["sections"])
     def image_lines(row):
+        if row is None and private_preview:
+            return ["> Иллюстрация ожидает проверки или подбора.", ""]
         label = row.get("label", "ИИ-иллюстрация")
         if row.get("kind") == "diagram" and row.get("source"):
             label += f" · [научный источник]({row['source']})"
@@ -509,10 +516,12 @@ def render(article, title, cover, pictures, records):
             label += f" · {row['attribution']} · [{row['license']}]({row['license_url']}) · [источник]({row['source_page']})"
         return [f"![{row.get('label', 'ИИ-иллюстрация')}](images/{row['file']})", "", label, ""]
 
+    if private_preview:
+        lines[2:2] = ["> Приватный просмотр · выпуск не согласован.", ""]
     lines.extend(["", *image_lines(cover), *article["intro"]])
     for position, section in enumerate(article["sections"], 1):
         lines.extend(["", f"**{section['heading']}**",
-                      *image_lines(pictures[position])])
+                      *image_lines(pictures.get(position) if private_preview else pictures[position])])
         for paragraph in section["paragraphs"]:
             lines.extend([paragraph, ""])
     if records:

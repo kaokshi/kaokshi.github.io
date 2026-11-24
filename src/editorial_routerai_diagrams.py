@@ -4,6 +4,7 @@ import io
 from .editorial_routerai_smoke import UnsafeToTest
 
 ESA_SOURCE = "https://www.esa.int/Science_Exploration/Space_Science/Rosetta/Comets_-_An_Introduction"
+ISON_SOURCE = "https://images.nasa.gov/details/PIA18153"
 COMET_SOURCE = "https://science.nasa.gov/solar-system/comets/facts/"
 
 
@@ -14,6 +15,10 @@ def render_diagram(template, records):
         url, terms = COMET_SOURCE, ("ion (gas) tail", "dust tail", "away from the sun")
     elif template == "comet-cold-storage":
         url, terms = ESA_SOURCE, ("volatile", "formed at large distances", "low temperatures")
+    elif template == "comet-asteroid-relationship":
+        url, terms = ESA_SOURCE, ("main-belt comet", "short-period comets", "depletion")
+    elif template == "comet-observation-inference":
+        url, terms = ISON_SOURCE, ("nucleus is unresolved", "symmetric and smooth")
     else:
         raise UnsafeToTest("diagram_template_or_evidence_unavailable")
     if not any(row["url"].rstrip("/") == url.rstrip("/") and row["status"] == "accessible"
@@ -34,6 +39,24 @@ def render_diagram(template, records):
             if i < len(panels) - 1:
                 draw.line((x + 320, 385, x + 368, 385), fill="#e2bd89", width=6)
                 draw.polygon([(x + 368, 385), (x + 353, 375), (x + 353, 395)], fill="#e2bd89")
+    elif template == "comet-asteroid-relationship":
+        draw.rounded_rectangle((80, 205, 1120, 385), radius=20, outline="#68ceff", width=4)
+        draw.text((120, 253), "Asteroid-belt object", fill="white", font=font)
+        draw.text((515, 253), "May display comet-like activity", fill="#68ceff", font=font)
+        draw.rounded_rectangle((80, 430, 1120, 610), radius=20, outline="#e2bd89", width=4)
+        draw.text((120, 478), "Short-period comet", fill="white", font=font)
+        draw.text((515, 478), "May become asteroid-like", fill="#e2bd89", font=font)
+        for y, color in ((270, "#68ceff"), (495, "#e2bd89")):
+            draw.line((452, y, 498, y), fill=color, width=4)
+            draw.polygon([(498, y), (485, y - 8), (485, y + 8)], fill=color)
+    elif template == "comet-observation-inference":
+        draw.line((600, 220, 600, 625), fill="#68819b", width=3)
+        draw.text((85, 245), "Hubble observation", fill="#68ceff", font=font)
+        draw.text((85, 350), "Smooth, symmetric coma", fill="white", font=font)
+        draw.text((85, 440), "Nucleus unresolved", fill="white", font=font)
+        draw.text((655, 245), "Inference", fill="#e2bd89", font=font)
+        draw.text((655, 350), "Consistent with an intact nucleus", fill="white", font=font)
+        draw.text((655, 440), "Not a direct view of the nucleus", fill="white", font=font)
     else:
         draw.ellipse((90, 315, 230, 455), fill="#ffc254")
         draw.text((125, 485), "Sun", fill="white", font=font)
