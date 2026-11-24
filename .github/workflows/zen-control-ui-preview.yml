@@ -1,0 +1,38 @@
+name: ZEN CONTROL presentation preview
+on:
+  push:
+    branches: [assistant/zen-control-ui-polish-20261124]
+    paths: ['telegram-control/ui.mjs', '.github/workflows/zen-control-ui-preview.yml']
+permissions:
+  contents: read
+jobs:
+  presentation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Offline application tests
+        run: node --test telegram-control/*.test.mjs
+      - name: Check light theme and static asset contract
+        run: |
+          node --input-type=module <<'JS'
+          import assert from "node:assert/strict";
+          import {HTML,CSS,JS} from "./telegram-control/ui.mjs";
+          assert.match(HTML,/name="color-scheme" content="light"/);
+          assert.equal((HTML.match(/class="zen-doodle"/g)||[]).length,2);
+          assert.equal((HTML.match(/data-tab="/g)||[]).length,6);
+          const ids=[...HTML.matchAll(/\bid="([^"]+)"/g)].map(x=>x[1]);
+          assert.equal(new Set(ids).size,ids.length);
+          for(const m of HTML.matchAll(/href="#([^"]+)"/g))assert.ok(ids.includes(m[1]));
+          assert.match(CSS,/color-scheme:light/);
+          assert.match(CSS,/#ffd43b/);
+          assert.match(JS,/setHeaderColor\("#ffffff"\)/);
+          assert.match(JS,/stage-row/);
+          assert.doesNotThrow(()=>new Function(JS));
+          console.log("LIGHT_THEME_CONTRACT_OK");
+          JS
