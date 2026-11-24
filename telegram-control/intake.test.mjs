@@ -44,3 +44,11 @@ test("owner mode revision resynchronizes an acknowledged job without replacing i
  assert.deepEqual((await queueView(s)).body.ids,[]);
  assert.equal((await controlView(s,j.id)).body.executionEnabled,false);
 });
+
+test("control does not authorize operations when owner budget differs from executor cap",async()=>{
+ const j={...job,preview:{executorMode:"manual"}};
+ const m=new Map([["production:job:"+j.id,j],["budget:policy",{mainKop:25000,reserveKop:5000}]]);
+ const s={get:async k=>m.get(k),transaction:async f=>f(s)};
+ assert.equal((await controlView(s,j.id)).body.reason,"budget_policy_mismatch");
+ assert.equal((await controlView(s,j.id)).body.executionEnabled,false);
+});
