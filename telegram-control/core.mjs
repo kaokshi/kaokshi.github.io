@@ -1,3 +1,4 @@
+import {readBudget,writeBudget} from "./budget.mjs";
 import {saveJob,jobsView,cancelJob,productionReadiness} from "./production.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
 // No calls to RouterAI, editorial workflows, or publishing systems.
@@ -64,9 +65,11 @@ export class CoreHandler {
  async fetch(request){
   const url=new URL(request.url),now=Date.now();
   if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
+  if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
   if(request.method==="GET"&&url.pathname==="/core/jobs")return Response.json({...await jobsView(this.storage),readiness:await productionReadiness()});
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/cancel"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const job=await cancelJob(this.storage,d.id);return Response.json(job?{job}:{error:"job_missing"},{status:job?200:404});}
   if(url.pathname==="/core/schedule"){
    const schedule=validateSchedule(d.settings);
