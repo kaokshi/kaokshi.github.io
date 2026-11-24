@@ -59,5 +59,6 @@ jobs:
           print("PRIVATE_REPORT_SAVED")
           for channel,entry in report["channels"].items():
               print(channel.upper()+"_REPORT_STATUS="+entry["status"])
+              print(channel.upper()+"_INTRADAY_STATUS="+entry.get("intraday",{}).get("status","unavailable"))
           if any(e["status"]=="unavailable" for e in report["channels"].values()): raise SystemExit("COLLECTOR_INCOMPLETE")
           PY
