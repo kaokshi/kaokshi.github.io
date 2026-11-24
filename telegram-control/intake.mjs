@@ -20,9 +20,10 @@ export function exportIntent(job){
  return {id:job.id,plan,releaseAt,mode};
 }
 const modeFor=ops=>ops.requestedMode==="assisted"?"semi_autonomous":ops.requestedMode;
+const transitionFor=ops=>Number.isSafeInteger(ops.modeRevision)&&ops.modeRevision>0?{mode:modeFor(ops),revision:ops.modeRevision}:null;
 function deliverable(job,ops,settings){
  const intent=exportIntent(job);
- if(!intent||ops.stopped||intent.mode!==modeFor(ops)||job.origin==="schedule"&&settings?.paused!==false)return null;
+ if(!intent||ops.stopped||(!transitionFor(ops)&&intent.mode!==modeFor(ops))||job.origin==="schedule"&&settings?.paused!==false)return null;
  return intent;
 }
 // Discover confirmed intents only. Pagination scans the durable index, not the UI's 40-row view.
@@ -36,7 +37,8 @@ export async function queueView(storage,cursor=null){
   const ids=[];
   for(const [,id] of rows){
    const job=await tx.get("production:job:"+id);
-   if(deliverable(job,ops,settings)&&!job.executorReceipt)ids.push(id);
+   const transition=transitionFor(ops);
+   if(deliverable(job,ops,settings)&&(!job.executorReceipt||(transition&&job.executorReceipt.modeRevision!==transition.revision)))ids.push(id);
   }
   return {status:200,body:{...base,ids,nextCursor:rows.size===20?[...rows.keys()].at(-1):null}};
  });
@@ -47,7 +49,7 @@ export async function intakeView(storage,id){
   if((await tx.get("ops:state"))?.stopped===true)return {status:409,body:{error:"emergency_paused"}};
   const ops=await opsState(tx);
   const intent=deliverable(await tx.get("production:job:"+id),ops,await tx.get("core:settings"));
-  return intent?{status:200,body:{schema:"zen-core/intake-v1",mode:"intents_only",intent,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
+  return intent?{status:200,body:{schema:"zen-core/intake-v1",mode:"intents_only",intent,...(transitionFor(ops)?{modeTransition:transitionFor(ops)}:{}),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
  });
 }
 // Fresh control observation, not an execution permit.
@@ -55,9 +57,10 @@ export async function controlView(storage,id,now=Date.now()){
  if(typeof id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(id))return {status:400,body:{error:"invalid_job_id"}};
  return storage.transaction(async tx=>{
   const ops=await opsState(tx),job=await tx.get("production:job:"+id),intent=exportIntent(job);
-  const mode=ops.requestedMode==="assisted"?"semi_autonomous":ops.requestedMode;
-  const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":intent.mode!==mode?"mode_changed":null;
-  return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:intent?.mode??null,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
+  const mode=modeFor(ops),transition=transitionFor(ops),settings=await tx.get("core:settings");
+  const effective=transition?job?.executorReceipt?.effectiveMode:intent?.mode;
+  const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":job.origin==="schedule"&&settings?.paused!==false?"schedule_paused":transition&&job.executorReceipt?.modeRevision!==transition.revision?"mode_sync_pending":effective!==mode?"mode_changed":null;
+  return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:effective??null,modeRevision:transition?.revision??0,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
  });
 }
 export async function bridgeRequest(request,env){
