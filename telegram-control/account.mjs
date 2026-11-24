@@ -21,3 +21,10 @@ export async function closeProduction(tx,d,now){
  await tx.delete(LOCK);
  return {status:200,body:{closed:true,replay:false}};
 }
+
+export async function accountStatus(tx,now){
+ const production=await tx.get(LOCK),chat=await tx.get("agent:charge-hold");
+ return {status:200,body:{schema:"zen-core/account-status-v1",observedAt:now,
+ production:production?{id:production.id,operation:production.operation,startedAt:production.startedAt}:null,
+ chat:chat?{id:chat.id,startedAt:chat.startedAt,status:chat.status}:null,executionEnabled:false}};
+}
