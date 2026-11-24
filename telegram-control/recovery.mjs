@@ -23,3 +23,21 @@ export async function recoverTimer(storage,initial,nextSlots,now=Date.now()){
   return event;
  });
 }
+
+// A killed Worker may have sent a paid request before recording the response.
+// Quarantine the operation without releasing its reservation or resending it.
+export async function recoverInterrupted(storage,now=Date.now()){
+ return storage.transaction(async tx=>{
+  const hold=await tx.get("agent:charge-hold");
+  if(!hold||hold.status!=="pending"||!Number.isSafeInteger(hold.startedAt)||now-hold.startedAt<GAP)return {status:"nothing_to_recover"};
+  const key="agent:id:"+hold.id,m=await tx.get(key);
+  if(!m||m.status!=="pending")return {status:"blocked",reason:"inconsistent_pending_charge"};
+  const message={...m,status:"failed",cost:null,reply:"Запрос прерван. Стоимость не подтверждена. Резерв сохранён, повтор заблокирован.",proposal:null,job:null,recovery:"charge_unknown"};
+  await tx.put(key,message);
+  await tx.put("agent:message:"+String(hold.startedAt).padStart(15,"0")+":"+hold.id,message);
+  await tx.put("agent:charge-hold",{...hold,status:"unknown"});
+  const event={status:"quarantined",reason:"interrupted_paid_chat",attemptAt:now,productionEnabled:false};
+  await tx.put("recovery:event:"+String(now).padStart(15,"0")+":chat:"+hold.id,event);
+  return event;
+ });
+}
