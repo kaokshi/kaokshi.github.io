@@ -20,3 +20,19 @@ test("deployment is manual and carries all imported modules",()=>{
  assert.match(workflow,/workflow_dispatch:/);assert.doesNotMatch(workflow,/\n  push:/);
  const deploy=readFileSync(script,"utf8");for(const module of ["account.mjs","intake.mjs","receipt.mjs","recovery.mjs"])assert.ok(deploy.includes('"'+module+'"'));
 });
+
+import {activeDeployment,rollbackBody} from "./deploy-guard.mjs";
+const prior={id:"10000000-0000-4000-8000-000000000001",version:"20000000-0000-4000-8000-000000000001"};
+const next={id:"10000000-0000-4000-8000-000000000002",version:"20000000-0000-4000-8000-000000000002"};
+const deployment=(d,created_on)=>({id:d.id,created_on,versions:[{version_id:d.version,percentage:100}]});
+test("rollback refuses unknown history, split traffic or an intervening deployment",()=>{
+ const old=deployment(prior,"2026-11-24T10:00:00Z"),fresh=deployment(next,"2026-11-24T11:00:00Z");
+ assert.deepEqual(activeDeployment({deployments:[old,fresh]}),next);
+ for(const data of [{},{deployments:[]},{deployments:[{...fresh,versions:[{version_id:next.version,percentage:50}]}]}])assert.throws(()=>activeDeployment(data));
+ assert.throws(()=>rollbackBody(prior,prior,next));
+ assert.deepEqual(rollbackBody(prior,next,next),{strategy:"percentage",versions:[{version_id:prior.version,percentage:100}]});
+});
+test("rollback requires explicit confirmation before network",()=>{
+ const run=spawnSync(process.execPath,[new URL("./rollback.mjs",import.meta.url).pathname],{env:{PATH:process.env.PATH},encoding:"utf8",timeout:5000});
+ assert.equal(run.status,1);assert.match(run.stdout,/explicit_rollback_confirmation_required/);
+});
