@@ -86,6 +86,10 @@ async function main(){
  stage="verify_webhook";
  const info=await telegram("getWebhookInfo");
  requireOk(info.url===endpoint+"/telegram","webhook_url_mismatch");
+ stage="verify_owner_reply";
+ const ownerReply=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:JSON.stringify({message:{chat:{type:"private",id:Number(owner)},from:{id:Number(owner),is_bot:false},text:"/start"}}),redirect:"error",signal:AbortSignal.timeout(20000)});
+ requireOk(ownerReply.ok,"owner_reply_http_"+ownerReply.status);
+ console.log("OWNER_REPLY_CONFIRMED");
  stage="commands";
  try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},
