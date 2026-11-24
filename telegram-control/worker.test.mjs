@@ -295,3 +295,31 @@ test("offline preview image access permits only fixed raster paths",async()=>{
   assert.equal(result.type,"image/jpeg");
  }finally{globalThis.fetch=orig;}
 });
+
+import {budgetDecision,initialBudget,validateBudget,readBudget,writeBudget} from "./budget.mjs";
+test("reserve is only for required completion after main budget and at most 50 rubles",()=>{
+ const p=initialBudget(),l={verified:true,mainKop:29900,reserveKop:0};
+ const op={kind:"missing_image",started:true,required:true,attempt:1,boundKop:200};
+ assert.deepEqual(budgetDecision(p,l,op),{allowed:true,mainKop:100,reserveKop:100,reason:"missing_image"});
+ for(const change of [{started:false},{required:false},{kind:"new_article"},{attempt:4}]){
+  assert.equal(budgetDecision(p,l,{...op,...change}).allowed,false);
+ }
+ assert.equal(budgetDecision(p,{...l,verified:false},op).allowed,false);
+ assert.equal(budgetDecision(p,{...l,reserveKop:5000},op).allowed,false);
+ assert.equal(validateBudget({...p,reserveKop:5100}),null);
+});
+test("budget update is owner-confirmed, revision checked and spend remains unknown",async()=>{
+ const store=new Map(),storage={get:async k=>store.get(k),put:async(k,v)=>store.set(k,v),transaction:async fn=>fn(storage)};
+ const d={budget:{mainKop:32000,reserveKop:5000},version:0,confirm:true};
+ assert.equal((await writeBudget(storage,{...d,confirm:false})).status,400);
+ assert.equal((await writeBudget(storage,d)).status,200);
+ assert.equal((await writeBudget(storage,d)).status,409);
+ const v=await readBudget(storage);
+ assert.equal(v.totalKop,37000);assert.equal(v.production.reserveRemainingKop,null);assert.equal(v.executionEnabled,false);
+});
+test("budget endpoints deny non-owner",async()=>{
+ for(const path of ["/api/core/budget","/api/core/budget/settings"]){
+ const r=await worker.fetch(new Request("https://example.test"+path,{method:"POST",body:JSON.stringify({initData:signed(124)})}),env);
+ assert.equal(r.status,401);
+ }
+});
