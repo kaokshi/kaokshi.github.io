@@ -1,3 +1,4 @@
+import {miniApp} from "./miniapp.mjs";
 // Owner-only, read-only Telegram control interface. No generation or publishing.
 const MENU = {keyboard:[[{text:"Состояние редакции"},{text:"Баланс RouterAI"}],[{text:"Модели"},{text:"Тесты"}],[{text:"Статьи"},{text:"Помощь"}]],resize_keyboard:true};
 const COMMANDS = new Map([
@@ -26,13 +27,18 @@ async function github(env,path) {
  if(!env.EDITORIAL_PRIVATE_TOKEN) throw Error("missing_github_token");
  return getJson("https://api.github.com/"+path,env.EDITORIAL_PRIVATE_TOKEN,{"User-Agent":"ZenEditorialBot","X-GitHub-Api-Version":"2022-11-28"});
 }
-async function balance(env) {
- if(!env.ROUTERAI_API_KEY) return "Ключ RouterAI не настроен в Worker.";
+async function balanceValue(env) {
+ if(!env.ROUTERAI_API_KEY) return null;
  const res=await getJson("https://routerai.ru/api/v1/credits",env.ROUTERAI_API_KEY);
  const data=res.data;
  const raw=data?.credits ?? data?.total_credits;
- if(raw===null || raw===undefined || raw==="" || !["number","string"].includes(typeof raw) || !Number.isFinite(Number(raw))) return "Формат баланса не распознан. Проверь кабинет RouterAI.";
- return "Баланс RouterAI по API: "+Number(raw).toFixed(2)+" ₽. Данные могут обновляться с задержкой.";
+ if(raw===null || raw===undefined || raw==="" || !["number","string"].includes(typeof raw) || !Number.isFinite(Number(raw))) return null;
+ return Number(raw);
+}
+async function balance(env){
+ if(!env.ROUTERAI_API_KEY)return "Ключ RouterAI не настроен в Worker.";
+ const value=await balanceValue(env);
+ return value===null?"Баланс недоступен.":"Баланс RouterAI по API: "+value.toFixed(2)+" ₽. Данные могут обновляться с задержкой.";
 }
 async function articleReport(env) {
  const info=await github(env,"repos/"+PRIVATE);
@@ -54,6 +60,8 @@ export async function command(text,env) {
  }
 }
 export default {async fetch(request,env) {
+ const app=await miniApp(request,env,balanceValue);
+ if(app)return app;
  const url=new URL(request.url);
  if(request.method==="GET" && url.pathname==="/health") return new Response("ok");
  if(request.method!=="POST" || url.pathname!=="/telegram") return new Response("Not found",{status:404});
