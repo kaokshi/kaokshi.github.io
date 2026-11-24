@@ -12,3 +12,13 @@ test("private repository required",async()=>{let calls=0;assert.equal(await read
 test("fixed private file decoded",async()=>{const raw=Buffer.from(JSON.stringify(fixture()));let calls=0;const r=await readMetrika("fake",async(url,opts)=>{assert.equal(opts.redirect,"manual");calls++;return Response.json(calls===1?{full_name:"kaokshi/zen-editorial-review",private:true,visibility:"private"}:{path:"zen-analytics/collector-validation.json",type:"file",encoding:"base64",size:raw.length,content:raw.toString("base64")});},now);assert.equal(calls,2);assert.equal(r.reports.length,3);});
 test("analytics rejects unauthenticated requests",async()=>{const r=await miniApp(new Request("https://example.org/api/analytics/metrika",{method:"POST",body:JSON.stringify({initData:""})}),{},()=>{throw Error("unexpected");});assert.equal(r.status,401);});
 test("UI compiles with separate analytics views",()=>{assert.match(HTML,/id="metrikabody"/);assert.match(HTML,/id="statsbody"/);assert.match(JS,/\/api\/analytics\/metrika/);new Function(JS);});
+
+test("intraday counts stay separate from completed periods",()=>{
+ const f=fixture(),c=f.channels.cinema;
+ c.intraday={date:"2026-11-24",timezone:"Europe/Moscow",provisional:true,status:"available",metrics:c.periods[7].totals.metrics,totals:[2,1,3,0,1.5,10],hourly:[{hour:9,visits:2,pageviews:3}]};
+ const r=sanitizeMetrika(f,now).reports[0];
+ assert.equal(r.periods[7].visits,0);assert.equal(r.intraday.visits,2);assert.equal(r.intraday.hourly[0].pageviews,3);
+ c.intraday.hourly.push({hour:9,visits:1,pageviews:1});
+ assert.equal(sanitizeMetrika(f,now).reports[0].intraday.hourly,null);
+});
+test("today selector exists and UI compiles",()=>{assert.match(HTML,/id="metrikaperiod"/);assert.match(JS,/Просмотры по часам/);new Function(JS);});
