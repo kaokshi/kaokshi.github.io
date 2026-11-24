@@ -123,3 +123,28 @@ test("unsigned browser cannot access private snapshot, signed owner can",async()
  const allowed=await worker.fetch(new Request("https://example.test/api/dashboard",{method:"POST",body:JSON.stringify({initData:signed()})}),fullEnv);
  assert.deepEqual((await allowed.json()).review,sample);
 });
+
+import {readPrivateImage} from "./snapshot.mjs";
+test("image endpoint rejects unsigned access and missing read-only credential",async()=>{
+ const req=raw=>new Request("https://example.test/api/image",{method:"POST",body:JSON.stringify({initData:raw,revision:"a".repeat(40),path:"routerai-validation/45395283968/science/images/image-01.jpg"})});
+ assert.equal((await worker.fetch(req(signed(124)),env)).status,401);
+ assert.equal((await worker.fetch(req(signed()),env)).status,503);
+});
+test("image proxy refuses traversal and non-raster files before network",async()=>{
+ const original=globalThis.fetch;globalThis.fetch=async()=>{throw Error("must not call");};
+ try{
+  assert.equal(await readPrivateImage("fake","a".repeat(40),"routerai-validation/45395283968/../secret.jpg"),null);
+  assert.equal(await readPrivateImage("fake","a".repeat(40),"routerai-validation/45395283968/science/images/image-01.svg"),null);
+ }finally{globalThis.fetch=original;}
+});
+test("private image proxy validates repository and returns raster bytes",async()=>{
+ const original=globalThis.fetch;let calls=0;
+ globalThis.fetch=async(url,opts)=>{
+  calls++;assert.ok(url.startsWith("https://api.github.com/repos/kaokshi/zen-editorial-review"));assert.equal(opts.redirect,"manual");
+  return calls===1?Response.json({full_name:"kaokshi/zen-editorial-review",private:true,visibility:"private"}):new Response(new Uint8Array([255,216,255,0,0]));
+ };
+ try{
+  const result=await readPrivateImage("fake","a".repeat(40),"routerai-validation/45395283968/science/images/image-01.jpg");
+  assert.equal(result.type,"image/jpeg");assert.equal(calls,2);
+ }finally{globalThis.fetch=original;}
+});
