@@ -466,3 +466,18 @@ test("unknown Qwen charge persists across Moscow midnight and prevents another p
  assert.equal(paid,1);assert.equal((await agent.view(now+120000)).enabled,false);
  }finally{globalThis.fetch=orig;}
 });
+
+test("confirmed jobs in assisted or autonomous mode automatically get intake preview only",async()=>{
+ const map=new Map(),s={get:async k=>map.get(k),put:async(k,v)=>map.set(k,v)};
+ const p=validateJob({items:[{channel:"science",count:2}],day:null,instructions:"Synthetic fixture"});
+ await s.put("ops:state",{requestedMode:"assisted"});
+ const job=await saveJob(s,"agent:auto-intake",p,Date.now(),"agent");
+ assert.equal(job.preview.executorMode,"semi_autonomous");assert.equal(job.preview.providerCalls,0);assert.equal(job.executed,false);
+ await s.put("ops:state",{requestedMode:"autonomous"});
+ assert.equal((await saveJob(s,job.id,p,Date.now(),"agent")).preview.executorMode,"semi_autonomous");
+ const scheduled=await saveJob(s,"scheduled:auto-intake",p,Date.now(),"schedule");
+ assert.equal(scheduled.preview.executorMode,"autonomous");assert.equal(scheduled.publicationAuthorized,false);
+ const cinema=await saveJob(s,"agent:cinema-intake",{...p,items:[{channel:"cinema",count:1}]},Date.now(),"agent");assert.equal(cinema.preview,undefined);
+ await s.put("ops:state",{requestedMode:"manual"});
+ assert.equal((await saveJob(s,"agent:manual-intake",p,Date.now(),"agent")).preview,undefined);
+});
