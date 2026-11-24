@@ -17,18 +17,17 @@ export function validateDecision(data,review){
 export class ReviewJournal {
  constructor(ctx){this.storage=ctx.storage;}
  async fetch(request){
-  if(request.method==="GET")return Response.json({entries:await this.storage.get("entries")||[]});
+  if(request.method==="GET"){const rows=await this.storage.list({prefix:"event:",reverse:true,limit:100});return Response.json({entries:[...rows.values()]});}
   if(request.method!=="POST")return new Response("Method not allowed",{status:405});
   const entry=await request.json();
   const result=await this.storage.transaction(async tx=>{
-   const entries=await tx.get("entries")||[];
-   const existing=entries.find(e=>e.id===entry.id);
+   const key="id:"+entry.id;
+   const existing=await tx.get(key);
    if(existing){
     const fields=["action","channel","revision","run","target","note"];
     return fields.every(k=>existing[k]===entry[k])?{entry:existing}:{error:"id_conflict"};
    }
-   if(entries.length>=1000)return {error:"journal_full"};
-   entries.unshift(entry);await tx.put("entries",entries);return {entry};
+   await tx.put(key,entry);await tx.put("event:"+entry.at+":"+entry.id,entry);return {entry};
   });
   return Response.json(result,{status:result.error?409:200});
  }
