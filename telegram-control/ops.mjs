@@ -10,6 +10,7 @@ export async function updateOps(storage,d,now,initialSchedule){
   if(d.action==="notifications")value.notifications=d.enabled;
   else if(d.action==="mode"){
    value.requestedMode=d.mode;
+   value.modeRevision=value.version;
    // A change of intent never activates the scheduler or any paid lane.
    const schedule=await tx.get("core:settings")||initialSchedule();
    await tx.put("core:settings",{...schedule,paused:true,version:schedule.version+1,updatedAt:value.updatedAt});
