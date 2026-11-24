@@ -1,0 +1,59 @@
+name: Telegram owner connection diagnostic
+on:
+  push:
+    branches: [feature/telegram-control-mvp]
+    paths: ['.github/workflows/telegram-control-diagnostic.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/feature/telegram-control-mvp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check webhook and owner chat, without logging credentials
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request,urllib.error
+          key=os.environ.get("TELEGRAM_BOT_TOKEN","")
+          owner=os.environ.get("TELEGRAM_OWNER_ID","")
+          if not key or not owner.isdecimal():
+              print("CONFIG_INVALID")
+              raise SystemExit(1)
+          def api(method,payload):
+              req=urllib.request.Request("https://api.telegram.org/bot"+key+"/"+method,data=json.dumps(payload).encode(),headers={"Content-Type":"application/json"})
+              try:
+                  with urllib.request.urlopen(req,timeout=15) as r:
+                      data=json.load(r)
+              except urllib.error.HTTPError as e:
+                  try: data=json.load(e)
+                  except Exception: data={}
+                  print(method+"_HTTP="+str(e.code))
+                  desc=str(data.get("description","")).lower()
+                  for marker in ("chat not found","bot was blocked","bot can't initiate conversation","user is deactivated"):
+                      if marker in desc: print("CHAT_ERROR="+marker)
+                  return None
+              except Exception:
+                  print(method+"_NETWORK_ERROR")
+                  return None
+              return data.get("result") if data.get("ok") else None
+          info=api("getWebhookInfo",{})
+          if isinstance(info,dict):
+              print("WEBHOOK_PRESENT="+str(bool(info.get("url"))))
+              print("WEBHOOK_EXPECTED="+str(info.get("url","").startswith("https://zen-editorial-control.") and info.get("url","").endswith(".workers.dev/telegram")))
+              print("PENDING="+str(info.get("pending_update_count")))
+              print("LAST_ERROR_DATE="+str(info.get("last_error_date")))
+              msg=str(info.get("last_error_message","")).lower()
+              print("LAST_ERROR_CLASS="+next((s for s in ("403","404","502","503","500","timeout","ssl","connection","wrong response") if s in msg),"none" if not msg else "other"))
+          chat=api("getChat",{"chat_id":int(owner)})
+          if not isinstance(chat,dict) or chat.get("type")!="private" or chat.get("id")!=int(owner):
+              print("OWNER_CHAT_UNCONFIRMED")
+              raise SystemExit(1)
+          print("OWNER_CHAT_CONFIRMED")
+          sent=api("sendMessage",{"chat_id":int(owner),"text":"Диагностика: Telegram API подключён. Проверяем ответ на /start. Платные запросы не выполнялись."})
+          print("OWNER_TEST_MESSAGE="+("sent" if isinstance(sent,dict) else "failed"))
+          PY
