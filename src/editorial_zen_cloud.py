@@ -6,8 +6,9 @@ import json
 import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import Request, build_opener
 
+from .editorial_http import NoRedirect
 from .editorial_zen_core import Core, CoreBlocked
 
 REPO = "kaokshi/zen-editorial-review"
@@ -18,11 +19,6 @@ MAX_BYTES = 20_000_000
 
 class Conflict(CoreBlocked):
     pass
-
-
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None
 
 
 def blob_sha(data):

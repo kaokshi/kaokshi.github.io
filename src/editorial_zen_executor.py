@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 from .editorial_images import ImageIndex
 from .editorial_memory import digest
-from .editorial_providers import Blocked
+from .editorial_http import Blocked
 from .editorial_review import qa, sources
-from .editorial_routerai_smoke import UnsafeToTest, call, credits
+from .editorial_routerai import UnsafeToTest, call, credits
 from .editorial_routerai_two_articles import MODELS, ROOT, Spend, evaluate_channel, json_bytes, money, safe_reason
 from .editorial_zen_cloud import CloudCore, GitHubStore
 from .editorial_zen_core import CONFIG, STAGES, CoreBlocked
@@ -277,7 +277,7 @@ def execute(core, article, token, *, target=None, transport=call, balance=credit
         return
     session.account = account or configured_account()
     router = MeteredRouter(session, token, transport=transport, balance=balance)
-    from .editorial_brain import archive
+    from .editorial_archive import archive
 
     report = {"articles": {}}
     with tempfile.TemporaryDirectory() as directory:

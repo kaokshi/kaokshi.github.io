@@ -1,5 +1,7 @@
 # Cloudflare Workers AI: read-only quota monitor
 
+> Архив. Старый опрос квот Workers AI снят с эксплуатации. Cloudflare Worker и его штатное развёртывание сохранены. [Действующая инструкция](EDITORIAL_PRODUCTION.md)
+
 This is an isolated infrastructure diagnostic. It does not call AI models, alter
 Cloudflare resources, produce articles, publish RSS, or change editorial schedules.
 

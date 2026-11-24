@@ -6,7 +6,7 @@ from time import monotonic
 
 from .editorial_images import commons_photos, decode_candidate, nasa_photos
 from .editorial_memory import digest, write_json
-from .editorial_providers import Blocked, ProviderError, request
+from .editorial_http import Blocked, ProviderError, request
 from .editorial_visual_matching import MAX_CANDIDATES, Scene, compare_pixels, describe_pixels, shortlist, verified_order
 
 
@@ -109,7 +109,7 @@ def ranked_photo(scene, topic, path, index, *, finder=source_candidates, scorer=
                 return chosen
             except (ProviderError, ValueError, OSError) as exc:
                 item["trace"]["reason"] = str(exc)
-        raise Blocked("science_explainer_klein_candidate" if scene.get("allow_illustration") is True
+        raise Blocked("science_explainer_illustration_candidate" if scene.get("allow_illustration") is True
                       else "semantic_review_required")
     finally:
         diagnostics = Path(path).parent.parent / "image-diagnostics" / (Path(path).stem + ".json")

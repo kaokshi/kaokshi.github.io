@@ -4,7 +4,7 @@ on:
     branches: [integration/zen-core-routerai-20261124]
     paths: ['telegram-control/**', 'src/**', 'tests/**', 'config/zen_core.json', '.github/workflows/telegram-control-deploy.yml', '.github/workflows/zen-core-offline-tests.yml']
   pull_request:
-    branches: [feature/telegram-control-mvp, integration/zen-core-routerai-20261124]
+    branches: [feature/telegram-control-mvp, integration/zen-core-routerai-20261124, codex/zen-control-1-integration]
     paths: ['telegram-control/**', 'src/**', 'tests/**', 'config/**', '.github/workflows/zen-core-*.yml']
 permissions:
   contents: read

@@ -1,7 +1,7 @@
 """Deterministic, source-bound templates for the private science evaluation."""
 import io
 
-from .editorial_routerai_smoke import UnsafeToTest
+from .editorial_routerai import UnsafeToTest
 
 ESA_SOURCE = "https://www.esa.int/Science_Exploration/Space_Science/Rosetta/Comets_-_An_Introduction"
 ISON_SOURCE = "https://images.nasa.gov/details/PIA18153"
