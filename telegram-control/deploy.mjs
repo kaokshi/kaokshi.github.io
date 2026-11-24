@@ -71,6 +71,8 @@ async function main(){
  bindings.push(...privateBindings);
  bindings.push({type:"secret_text",name:"EDITORIAL_REVIEW_READ_TOKEN",text:readToken});
  if(router)bindings.push({type:"secret_text",name:"ROUTERAI_API_KEY",text:router});
+ const intakeSecret=process.env.ZEN_CORE_INTAKE_SECRET||"";
+ if(intakeSecret){requireOk(/^[a-fA-F0-9]{64}$/.test(intakeSecret),"invalid_intake_secret");bindings.push({type:"secret_text",name:"ZEN_CORE_INTAKE_SECRET",text:intakeSecret});}
  const settings=await cf("/scripts/"+SCRIPT+"/settings");
  const hasJournal=Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="REVIEW_JOURNAL"&&b.type==="durable_object_namespace"&&b.class_name==="ReviewJournal");
  bindings.push({type:"durable_object_namespace",name:"REVIEW_JOURNAL",class_name:"ReviewJournal"});
@@ -78,7 +80,7 @@ async function main(){
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"entry.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs","ops.mjs"]){
+ for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs","ops.mjs","adapter.mjs","intake.mjs","receipt.mjs","memory.mjs","notifications.mjs","diagnostics.mjs","recovery.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }
@@ -206,6 +208,12 @@ async function main(){
  const invalidOps=await journalRequest("/api/core/ops/settings",{initData:params.toString(),confirm:false});
  requireOk(invalidOps.status===400,"ops_confirmation_failed");
  console.log("OPS_CONTROLS_CONFIRMED");
+ const diag=await journalRequest("/api/core/diagnostics",{initData:params.toString()});
+ requireOk(diag.ok,"diagnostics_unavailable");
+ const dv=await diag.json();requireOk(dv.mode==="read_only"&&dv.productionEnabled===false&&dv.publicationAuthorized===false,"diagnostics_gate_failed");
+ // Existing cron settings are not overwritten by a normal deployment.
+ // Explicit operator configuration is required to enable a five-minute watchdog.
+ console.log("WATCHDOG_CRON_REQUIRES_OPERATOR_CONFIGURATION");
 
 
 
