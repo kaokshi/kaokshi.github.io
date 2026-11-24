@@ -1,3 +1,4 @@
+import {opsState} from "./ops.mjs";
 // Owner-initiated Qwen chat only. No autonomous paid calls, workflows or RSS writes.
 import {validateSchedule} from "./core.mjs";
 import {readBudget} from "./budget.mjs";
@@ -41,12 +42,13 @@ export class AgentHandler{
  async view(now=Date.now()){
   const rows=await this.storage.list({prefix:"agent:message:",reverse:true,limit:30});
   const ledger=await this.storage.get("agent:budget:"+dayKey(now))||{reserved:0,calls:0};
-  return {messages:[...rows.values()].reverse(),limit:DAILY,perCall:PER_CALL,chargedOrReserved:ledger.reserved,calls:ledger.calls,enabled:Boolean(this.env.ROUTERAI_API_KEY),mode:"owner_chat_only"};
+  return {messages:[...rows.values()].reverse(),limit:DAILY,perCall:PER_CALL,chargedOrReserved:ledger.reserved,calls:ledger.calls,enabled:Boolean(this.env.ROUTERAI_API_KEY)&&!(await opsState(this.storage)).stopped,mode:"owner_chat_only"};
  }
  async chat(d,now=Date.now()){
   if(d.consent!==true||typeof d.text!=="string"||!d.text.trim()||d.text.length>1200||!/^[a-f0-9-]{36}$/.test(d.id||""))return {status:400,body:{error:"invalid_chat"}};
   const text=d.text.trim(),id=d.id,existing=await this.storage.get("agent:id:"+id);
   if(existing)return {status:existing.text===text&&existing.status==="complete"?200:409,body:existing.text===text&&existing.status==="complete"?{message:existing}:{error:"already_submitted"}};
+  const ops=await opsState(this.storage);if(ops.stopped)return {status:409,body:{error:"emergency_paused"}};
   const state=await this.core.state(),history=(await this.view(now)).messages.filter(x=>x.status==="complete").slice(-3).map(x=>({user:x.text.slice(0,400),assistant:x.reply.slice(0,500)}));
   let snapshot=null;
   try{const s=await buildSnapshot(this.env.EDITORIAL_REVIEW_READ_TOKEN);if(s)snapshot={run:s.run,status:s.status,reason:s.reason,total:s.total,models:s.models.map(m=>({name:m.name,rub:m.rub,calls:m.calls})),articles:s.articles.map(a=>({channel:a.channel,textQA:a.textQA,imageQA:a.imageQA,assembled:a.assembled,accepted:a.accepted}))};}catch{}
@@ -59,7 +61,7 @@ export class AgentHandler{
   if(bound===null||bound>PER_CALL||balance===null||balance<bound)return {status:409,body:{error:"budget_or_price_unavailable"}};
   const budgetKey="agent:budget:"+dayKey(now);
   const reserved=await this.storage.transaction(async tx=>{
-   if(await tx.get("agent:id:"+id))return false;
+   if(await tx.get("agent:id:"+id)||(await opsState(tx)).stopped||(await opsState(tx)).version!==ops.version)return false;
    const ledger=await tx.get(budgetKey)||{reserved:0,calls:0};
    if(ledger.reserved+bound>DAILY||ledger.calls>=20)return false;
    await tx.put(budgetKey,{reserved:ledger.reserved+bound,calls:ledger.calls+1});
@@ -90,7 +92,8 @@ export class AgentHandler{
   if(d.confirm!==true||!/^[a-f0-9-]{36}$/.test(d.id||""))return {status:400,body:{error:"invalid_confirmation"}};
   const m=await this.storage.get("agent:id:"+d.id);
   if(!m||m.status!=="complete"||(!m.proposal&&!m.job))return {status:404,body:{error:"proposal_missing"}};
-  if(m.job){const plan=validateJob(m.job);if(!plan)return {status:400,body:{error:"invalid_job"}};const job=await this.storage.transaction(tx=>saveJob(tx,"agent:"+m.id,plan,Date.now(),"agent"));return {status:job?200:409,body:job?{job}:{error:"job_conflict"}};}
+  if((await opsState(this.storage)).stopped)return {status:409,body:{error:"emergency_paused"}};
+  if(m.job){const plan=validateJob(m.job);if(!plan)return {status:400,body:{error:"invalid_job"}};const job=await this.storage.transaction(async tx=>(await opsState(tx)).stopped?null:saveJob(tx,"agent:"+m.id,plan,Date.now(),"agent"));return {status:job?200:409,body:job?{job}:{error:"job_conflict"}};}
   const r=await this.core.fetch(new Request("https://core.internal/core/schedule",{method:"POST",body:JSON.stringify({settings:m.proposal,version:m.version})}));
   return {status:r.status,body:await r.json()};
  }
