@@ -125,7 +125,15 @@ class Spend:
             + 7 * self.text_bound("brain", 9000, 700)
             + self.text_bound("brain", 7500, 1000)
         )
-        if self.total:
+        if report.get("science_only"):
+            observed = {}
+            for row in report["calls"]:
+                observed[row["stage"]] = max(observed.get(row["stage"], Decimal(0)), money(row["cost_rub"]))
+            visual = max(cost for name, cost in observed.items() if name.endswith("-qas"))
+            forecast = 7 * self.image_price + observed["plan"] + observed["draft"] + observed["edit"] + (
+                observed["editorial_and_image_plan"] + 8 * visual
+            )
+        elif self.total:
             forecast -= self.text_bound("brain", 4200, 1200) + self.text_bound("draft", 8500, 3600)
             if report.get("resumed_edited_text"):
                 forecast -= self.text_bound("edit", 17000, 8000)
@@ -348,6 +356,17 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
             if attempt == 3:
                 failed.append(slot)
                 break
+            if not isinstance(verdict.get("fix"), str) or len(verdict["fix"].strip()) < 4:
+                correction = object_response(spend.chat(channel, stage + "-correction", "brain", (
+                    "Локальная проверка отклонила редакционную иллюстрацию. "
+                    f"Причины {issues}; целевая сцена {scene['subject']}. "
+                    'Дай конкретное исправление для Seedream в JSON {"fix":"инструкция"}.'
+                ), 300, reserve=reserve))
+                if not isinstance(correction.get("fix"), str) or len(correction["fix"].strip()) < 4:
+                    failed.append(slot)
+                    break
+                verdict["fix"] = correction["fix"]
+                save(f"{channel}/attempts/{stage}-correction.json", json_bytes(correction))
             prompt = (f"{scene['brief']}\nСтиль всей статьи: {visual}. "
                       f"Исправление Qwen: {field(verdict, 'fix', 1200)}. Пейзажный формат, без надписей.")
     return rows, previews, failed
@@ -603,8 +622,13 @@ def evaluate(prefix, token, secret, report, resume_id=""):
                           and previous.get("resumed_failed_cover") is True
                           and previous.get("reason") == "actual_spend_outside_estimate"
                           and money(calls[-1]["cost_rub"]) == money(calls[-1]["upper_estimate_rub"]))
-            if (not (first_edit or visual_plan or wrong_genre or rejected_acceptance or cover_rejected or lost_image)
-                    or (not (wrong_genre or rejected_acceptance or cover_rejected or lost_image) and previous.get("reason") != "routerai_incomplete_chat_response")
+            science_only = (stage == "legends/image-05-attempt-2"
+                            and previous.get("reason") == "editorial_field_invalid_fix"
+                            and previous.get("articles", {}).get("legends", {}).get("text_qa") == "passed"
+                            and all(row.get("channel") == "legends" for row in calls))
+            if (not (first_edit or visual_plan or wrong_genre or rejected_acceptance
+                     or cover_rejected or lost_image or science_only)
+                    or (not (wrong_genre or rejected_acceptance or cover_rejected or lost_image or science_only) and previous.get("reason") != "routerai_incomplete_chat_response")
                     or previous.get("spend", {}).get("unmetered_calls") != 0
                     or abs(money(previous["balance_delta_rub"])
                            - money(previous["spend"]["metered_total_rub"])) > BALANCE_PRECISION):
@@ -615,6 +639,19 @@ def evaluate(prefix, token, secret, report, resume_id=""):
             if digest(plan_file["output"]) != plan_file["sha256"] or digest(draft) != qa_file["text_sha256"]:
                 raise UnsafeToTest("private_resume_checkpoint_hash_mismatch")
             resume = {"plan": plan_file["output"], "draft": draft}
+            if science_only:
+                retained = []
+                for slot in (1, 4):
+                    row = json.loads(github_private(old, token, f"legends/images/image-{slot:02d}.json"))
+                    if row.get("model") != MODELS["image"]:
+                        raise UnsafeToTest("private_resume_accepted_image_invalid")
+                    retained.append(row["file"])
+                report["science_only"] = True
+                report["articles"]["legends"] = {
+                    "text_qa": "passed", "image_qa": "failed", "accepted_images": len(retained),
+                    "accepted_files": retained, "incomplete_slots": [5, 6], "evidence_path": old,
+                    "cover_attempts_path": previous.get("cover_attempts_path"),
+                }
             if visual_plan or wrong_genre or rejected_acceptance or cover_rejected or lost_image:
                 edited = github_private(old, token, "legends/deepseek-edited.md").decode()
                 qa_file = json.loads(github_private(old, token, "legends/text-structural-qa.json"))
@@ -659,6 +696,8 @@ def evaluate(prefix, token, secret, report, resume_id=""):
             memory = SimpleNamespace(root=path, lock=Lock(), save=lambda: None)
             index = ImageIndex(memory, photos)
             for channel in CHANNELS:
+                if channel == "legends" and report.get("science_only"):
+                    continue
                 evaluate_channel(channel, spend, save, report, index, path, catalogue,
                                  (titles[channel], prose), resume if channel == "legends" else None)
         if all(row.get("assembled") for row in report["articles"].values()):
