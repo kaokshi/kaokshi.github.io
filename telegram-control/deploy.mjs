@@ -67,11 +67,13 @@ async function main(){
   {type:"secret_text",name:"TELEGRAM_WEBHOOK_SECRET",text:webhookSecret}
  ];
  bindings.push(...privateBindings);
+ const readToken=process.env.EDITORIAL_REVIEW_READ_TOKEN||"";
+ if(readToken){requireOk(readToken!==process.env.EDITORIAL_PRIVATE_TOKEN,"review_token_must_be_separate");bindings.push({type:"secret_text",name:"EDITORIAL_REVIEW_READ_TOKEN",text:readToken});}
  if(router)bindings.push({type:"secret_text",name:"ROUTERAI_API_KEY",text:router});
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"worker.mjs",compatibility_date:"2026-11-24",bindings,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["miniapp.mjs","ui.mjs"]){
+ for(const module of ["miniapp.mjs","ui.mjs","snapshot.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }
@@ -102,7 +104,7 @@ async function main(){
  requireOk(ownerReply.ok,"owner_reply_http_"+ownerReply.status);
  console.log("OWNER_REPLY_CONFIRMED");
  stage="verify_miniapp";
- const page=await fetch(endpoint+"/app?v=3",{redirect:"error",signal:AbortSignal.timeout(8000)});
+ const page=await fetch(endpoint+"/app?v=4",{redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(page.ok&&(await page.text()).includes("ZEN CONTROL"),"app_page_unavailable");
  const unauthorized=await fetch(endpoint+"/api/dashboard",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({initData:"invalid"}),redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(unauthorized.status===401,"app_auth_gate_failed");
@@ -114,20 +116,22 @@ async function main(){
  requireOk(appResponse.ok,"signed_dashboard_failed");
  const dashboard=await appResponse.json();
  requireOk(dashboard.mode==="read_only","app_mode_invalid");
- requireOk(dashboard.review?.run===snapshot.run&&dashboard.review.articles?.length>0,"private_snapshot_delivery_failed");
+ requireOk(dashboard.review?.articles?.length>0,"private_snapshot_delivery_failed");
  console.log("PRIVATE_REVIEW_CONFIRMED");
+ console.log("LIVE_REVIEW_SYNC="+(dashboard.sync==="live"));
+ console.log("IMAGE_PREVIEW_CONFIGURED="+(dashboard.imagePreview===true));
  console.log("MINIAPP_AUTH_CONFIRMED");
  console.log("MINIAPP_BALANCE_AVAILABLE="+(typeof dashboard.balance==="number"));
  stage="miniapp_menu";
- requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=3"}}})===true,"miniapp_menu_failed");
+ requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=4"}}})===true,"miniapp_menu_failed");
  const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
- requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=3","miniapp_menu_not_verified");
+ requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=4","miniapp_menu_not_verified");
  console.log("MINIAPP_MENU_CONFIRMED");
  stage="send_inline_launch";
- const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=3"}}]]}});
+ const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=4"}}]]}});
  requireOk(Number.isInteger(launch?.message_id),"inline_launch_failed");
  console.log("INLINE_LAUNCH_SENT");
- console.log("MINIAPP_URL="+endpoint+"/app?v=3");
+ console.log("MINIAPP_URL="+endpoint+"/app?v=4");
  stage="commands";
  try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},
