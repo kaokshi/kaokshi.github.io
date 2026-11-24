@@ -19,11 +19,34 @@ export function exportIntent(job){
  if(!["manual","semi_autonomous","autonomous"].includes(mode))return null;
  return {id:job.id,plan,releaseAt,mode};
 }
+const modeFor=ops=>ops.requestedMode==="assisted"?"semi_autonomous":ops.requestedMode;
+function deliverable(job,ops,settings){
+ const intent=exportIntent(job);
+ if(!intent||ops.stopped||intent.mode!==modeFor(ops)||job.origin==="schedule"&&settings?.paused!==false)return null;
+ return intent;
+}
+// Discover confirmed intents only. Pagination scans the durable index, not the UI's 40-row view.
+export async function queueView(storage,cursor=null){
+ if(cursor!==null&&(typeof cursor!=="string"||!/^production:index:\d{15}:[-a-zA-Z0-9:]{1,120}$/.test(cursor)))return {status:400,body:{error:"invalid_cursor"}};
+ return storage.transaction(async tx=>{
+  const ops=await opsState(tx),settings=await tx.get("core:settings");
+  const base={schema:"zen-core/queue-v1",mode:"intents_only",executionEnabled:false,publicationAuthorized:false,rssEnabled:false,stopped:ops.stopped};
+  if(ops.stopped)return {status:200,body:{...base,ids:[],nextCursor:null}};
+  const rows=await tx.list({prefix:"production:index:",limit:20,...(cursor?{startAfter:cursor}:{})});
+  const ids=[];
+  for(const [,id] of rows){
+   const job=await tx.get("production:job:"+id);
+   if(deliverable(job,ops,settings)&&!job.executorReceipt)ids.push(id);
+  }
+  return {status:200,body:{...base,ids,nextCursor:rows.size===20?[...rows.keys()].at(-1):null}};
+ });
+}
 export async function intakeView(storage,id){
  if(typeof id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(id))return {status:400,body:{error:"invalid_job_id"}};
  return storage.transaction(async tx=>{
   if((await tx.get("ops:state"))?.stopped===true)return {status:409,body:{error:"emergency_paused"}};
-  const intent=exportIntent(await tx.get("production:job:"+id));
+  const ops=await opsState(tx);
+  const intent=deliverable(await tx.get("production:job:"+id),ops,await tx.get("core:settings"));
   return intent?{status:200,body:{schema:"zen-core/intake-v1",mode:"intents_only",intent,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
  });
 }
@@ -39,7 +62,7 @@ export async function controlView(storage,id,now=Date.now()){
 }
 export async function bridgeRequest(request,env){
  const path=new URL(request.url).pathname;
- if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control"].includes(path))return null;
+ if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control","/internal/zen-core/queue"].includes(path))return null;
  const receipt=path.endsWith("/receipt"),route=path.split("/").pop();
  const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"};
  if(request.method!=="POST")return Response.json({error:"method_not_allowed"},{status:405,headers});
@@ -47,5 +70,5 @@ export async function bridgeRequest(request,env){
  let d;try{const raw=await request.text();if(raw.length>(receipt?16384:512))throw Error();d=JSON.parse(raw);}catch{return Response.json({error:"invalid_request"},{status:400,headers});}
  const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName("zen-core-scheduler-v1"));
  if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
- try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt?d:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
+ try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt?d:route==="queue"?{cursor:d?.cursor??null}:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
 }
