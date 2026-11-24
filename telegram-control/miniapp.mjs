@@ -57,7 +57,7 @@ export async function miniApp(request,env,getBalance){
   if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
   try{
    const target="https://core.internal"+path.slice(4);
-   const r=await stub.fetch(target,(path==="/api/core"||path==="/api/core/agent"||path==="/api/core/jobs"||path==="/api/core/budget"||path==="/api/core/ops")?{method:"GET"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({settings:data.settings,version:data.version,text:data.text,id:data.id,consent:data.consent,confirm:data.confirm,budget:data.budget,action:data.action,enabled:data.enabled})});
+   const r=await stub.fetch(target,(path==="/api/core"||path==="/api/core/agent"||path==="/api/core/jobs"||path==="/api/core/budget"||path==="/api/core/ops")?{method:"GET"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({settings:data.settings,version:data.version,text:data.text,id:data.id,consent:data.consent,confirm:data.confirm,budget:data.budget,action:data.action,enabled:data.enabled,mode:data.mode})});
    return Response.json(await r.json(),{status:r.status,headers});
   }catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
  }
