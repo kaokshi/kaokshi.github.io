@@ -3,7 +3,7 @@
 import {readFile} from "node:fs/promises";
 import {createHmac} from "node:crypto";
 import {buildSnapshot,snapshotBindings} from "./snapshot.mjs";
-import {activeDeployment} from "./deploy-guard.mjs";
+import {activeDeployment,latestVersion} from "./deploy-guard.mjs";
 const SCRIPT="zen-editorial-control";
 const account=process.env.CLOUDFLARE_ACCOUNT_ID||"";
 const cfToken=process.env.CLOUDFLARE_API_TOKEN||"";
@@ -71,6 +71,10 @@ async function main(){
  stage="inspect_existing_deployment";
  const deploymentPath="/scripts/"+SCRIPT+"/deployments";
  const previousDeployment=activeDeployment(await cf(deploymentPath));
+ const versionPath="/scripts/"+SCRIPT+"/versions?per_page=10&page=1";
+ requireOk(latestVersion(await cf(versionPath))===previousDeployment.version,"latest_upload_differs_from_active_version");
+ const expectedVersion=process.env.ZEN_CONTROL_EXPECTED_PREVIOUS_VERSION;
+ if(expectedVersion)requireOk(expectedVersion===previousDeployment.version,"unexpected_previous_version");
  console.log("PREVIOUS_DEPLOYMENT_ID="+previousDeployment.id);
  console.log("PREVIOUS_VERSION_ID="+previousDeployment.version);
  stage="verify_existing_webhook_secret";
@@ -89,7 +93,7 @@ async function main(){
  const settings=await cf("/scripts/"+SCRIPT+"/settings");
  requireOk(Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="TELEGRAM_WEBHOOK_SECRET"&&b.type==="secret_text"),"existing_webhook_binding_required");
  const hasJournal=Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="REVIEW_JOURNAL"&&b.type==="durable_object_namespace"&&b.class_name==="ReviewJournal");
- bindings.push({type:"durable_object_namespace",name:"REVIEW_JOURNAL",class_name:"ReviewJournal"});
+ bindings.push({type:"inherit",name:"REVIEW_JOURNAL"});
  requireOk(hasJournal,"existing_journal_binding_required");
  const migrations={};
  const form=new FormData();
@@ -102,6 +106,7 @@ async function main(){
  if(inspectOnly){console.log("PREFLIGHT_READY_NO_CHANGES");return;}
  const beforeUpload=activeDeployment(await cf(deploymentPath));
  requireOk(beforeUpload.id===previousDeployment.id&&beforeUpload.version===previousDeployment.version,"deployment_changed_during_preflight");
+ requireOk(latestVersion(await cf(versionPath))===previousDeployment.version,"latest_upload_changed_during_preflight");
  stage="upload_worker";
  await cf("/scripts/"+SCRIPT+"?bindings_inherit=strict","PUT",form);
  const updatedDeployment=activeDeployment(await cf(deploymentPath));
