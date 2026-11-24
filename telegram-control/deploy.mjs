@@ -99,7 +99,7 @@ async function main(){
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"entry.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs","ops.mjs","adapter.mjs","intake.mjs","receipt.mjs","memory.mjs","notifications.mjs","diagnostics.mjs","recovery.mjs","account.mjs","release.mjs","probe.mjs"]){
+ for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs","ops.mjs","adapter.mjs","intake.mjs","receipt.mjs","memory.mjs","notifications.mjs","diagnostics.mjs","recovery.mjs","account.mjs","release.mjs","probe.mjs","stage-intent.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }
