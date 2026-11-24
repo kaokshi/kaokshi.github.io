@@ -130,6 +130,8 @@ class Spend:
                 forecast -= self.text_bound("edit", 17000, 8000)
             if report.get("resumed_visual_plan"):
                 forecast -= self.text_bound("brain", 18000, 7500)
+            if report.get("resumed_failed_cover"):
+                forecast -= self.image_price + self.text_bound("brain", 9000, 700)
         self.report["forecast_rub"] = str(forecast + self.total)
         if forecast + self.total > min(BUDGET, self.initial):
             raise UnsafeToTest("initial_run_forecast_exceeds_available_budget")
@@ -270,9 +272,12 @@ def plan_images(answer, sections):
     return visual, result
 
 
-def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next):
+def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, *, skip_cover=False):
     rows, previews = [], []
+    failed = [0] if skip_cover else []
     for slot, scene in enumerate(scenes):
+        if slot == 0 and skip_cover:
+            continue
         reserve = (reserve_next + len(scenes) - slot - 1) * spend.image_price
         prompt = (
             f"{scene['brief']}\nArticle visual continuity: {visual}. "
@@ -315,11 +320,13 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 f"Проверь пиксели редакционной иллюстрации канала {CHANNELS[channel]}. "
                 f"Статья {title}. Смысл блока {section}. Цель кадра {scene['subject']}. "
                 f"Стиль {visual}. Первая картинка — кандидат, вторая при наличии — эталон статьи. "
-                "Проверь смысл, научную точность, анатомию, артефакты, визуальную связность "
-                "и пригодность для указанной роли. При отсутствии пикселей опирайся на дефекты. "
-                f"Локальная диагностика {issues}; подпись Florence {captions}. "
+                "Проверь смысл, анатомию, артефакты, визуальную связность и пригодность "
+                "для указанной роли. При отсутствии пикселей опирайся на дефекты. "
+                + ("Для научпопа проверь предметную точность и маркировку ИИ-иллюстрации в пакете."
+                   if channel == "science" else "Сцена из художественного вымысла.")
+                + f" Локальная диагностика {issues}. Автоописание Florence-2 вне изображения: {captions}. "
                 'Верни JSON {"passed":boolean,"issues":[строки],"fix":строка}. '
-                "При дефекте сформулируй конкретное корректирующее задание для Seedream."
+                "При дефекте сформулируй конкретное корректирующее задание для Seedream. При одобрении issues: []."
             ), 700, pictures=tuple(p for p in (preview, previews[0] if previews else None) if p),
                 reserve=reserve))
             if type(verdict.get("passed")) is not bool or not isinstance(verdict.get("issues"), list):
@@ -337,10 +344,11 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
             candidate.unlink(missing_ok=True)
             candidate.with_suffix(".json").unlink(missing_ok=True)
             if attempt == 3:
-                raise UnsafeToTest("image_qa_failed_after_two_retries")
+                failed.append(slot)
+                break
             prompt = (f"{scene['brief']}\nСтиль всей статьи: {visual}. "
                       f"Исправление Qwen: {field(verdict, 'fix', 1200)}. Пейзажный формат, без надписей.")
-    return rows, previews
+    return rows, previews, failed
 
 
 def contact_sheet(previews):
@@ -373,7 +381,8 @@ def render(article, title, cover, pictures, records):
 def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior, resume):
     name = CHANNELS[channel]
     other_images = 7 if channel == "legends" else 0
-    reserve = (other_images + 7) * spend.image_price
+    skip_cover = bool(resume and resume.get("failed_cover"))
+    reserve = (other_images + 7 - skip_cover) * spend.image_price
     history_titles, history_text = prior
     report["stage"] = channel + "/plan"
     report["articles"][channel] = status = {"text_qa": "pending", "image_qa": "pending"}
@@ -483,8 +492,16 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         raise UnsafeToTest("qwen_text_or_source_qa_failed")
     visual, scenes = plan_images(audit, article["sections"])
     status["image_qa"] = "running"
-    rows, previews = illustrate(spend, save, report, channel, article, title, visual, scenes,
-                                index, path, other_images)
+    rows, previews, failed = illustrate(spend, save, report, channel, article, title, visual, scenes,
+                                        index, path, other_images, skip_cover=skip_cover)
+    status["accepted_images"] = len(rows)
+    if failed:
+        status.update(image_qa="failed", failed_slots=failed)
+        save(f"{channel}/image-qa.json", json_bytes({
+            "status": "failed", "failed_slots": failed, "accepted_images": rows,
+            "prior_cover_attempts": report.get("continued_from") if skip_cover else None,
+        }))
+        return
     report["stage"] = channel + "/article_visual_review"
     review = object_response(spend.chat(channel, "article_visual_review", "brain", (
         "Рассмотри контактный лист: порядок слева направо и сверху вниз, начиная с 0. "
@@ -499,7 +516,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     save(f"{channel}/image-qa.json", json_bytes({"status": status["image_qa"], "qwen": review,
                                                 "accepted_images": rows}))
     if not good:
-        raise UnsafeToTest("image_set_or_cover_qa_failed")
+        return
     # The complete-set visual review determines the intended cover. Feed that
     # verdict to the shared layout while retaining the original CLIP scores.
     layout_rows = [{**row, "cover_score": 1 if i == 0 else 0} for i, row in enumerate(rows)]
@@ -572,8 +589,13 @@ def evaluate(prefix, token, secret, report, resume_id=""):
             rejected_acceptance = (stage == "legends/editorial_and_image_plan"
                                    and steps == same_stage_calls
                                    and previous.get("reason") == "qwen_text_or_source_qa_failed")
-            if (not (first_edit or visual_plan or wrong_genre or rejected_acceptance)
-                    or (not (wrong_genre or rejected_acceptance) and previous.get("reason") != "routerai_incomplete_chat_response")
+            cover_rejected = (stage == "legends/image-00-attempt-3"
+                              and steps == same_stage_calls + [
+                                  f"image-00-attempt-{i}{suffix}"
+                                  for i in range(1, 4) for suffix in ("", "-qas")
+                              ] and previous.get("reason") == "image_qa_failed_after_two_retries")
+            if (not (first_edit or visual_plan or wrong_genre or rejected_acceptance or cover_rejected)
+                    or (not (wrong_genre or rejected_acceptance or cover_rejected) and previous.get("reason") != "routerai_incomplete_chat_response")
                     or previous.get("spend", {}).get("unmetered_calls") != 0
                     or abs(money(previous["balance_delta_rub"])
                            - money(previous["spend"]["metered_total_rub"])) > Decimal("0.000001")):
@@ -584,14 +606,14 @@ def evaluate(prefix, token, secret, report, resume_id=""):
             if digest(plan_file["output"]) != plan_file["sha256"] or digest(draft) != qa_file["text_sha256"]:
                 raise UnsafeToTest("private_resume_checkpoint_hash_mismatch")
             resume = {"plan": plan_file["output"], "draft": draft}
-            if visual_plan or wrong_genre or rejected_acceptance:
+            if visual_plan or wrong_genre or rejected_acceptance or cover_rejected:
                 edited = github_private(old, token, "legends/deepseek-edited.md").decode()
                 qa_file = json.loads(github_private(old, token, "legends/text-structural-qa.json"))
                 if digest(edited) != qa_file["text_sha256"] or qa_file.get("issues") != []:
                     raise UnsafeToTest("private_resume_edit_hash_mismatch")
                 resume["edited"] = edited
                 report["resumed_edited_text"] = True
-            if rejected_acceptance:
+            if rejected_acceptance or cover_rejected:
                 audit = json.loads(github_private(old, token, "legends/qwen-visual-plan.json"))
                 if audit.get("issues") != [
                     "Отсутствуют существенные проблемы, мешающие публикации в жанре художественной городской мистики."
@@ -599,6 +621,12 @@ def evaluate(prefix, token, secret, report, resume_id=""):
                     raise UnsafeToTest("private_resume_editorial_pass_unverified")
                 resume["audit"] = audit
                 report["resumed_visual_plan"] = True
+            if cover_rejected:
+                verdict = json.loads(github_private(old, token, "legends/attempts/image-00-attempt-3-qa.json"))
+                if verdict.get("status") != "rejected" or verdict.get("attempt") != 3:
+                    raise UnsafeToTest("private_resume_cover_failure_unverified")
+                resume["failed_cover"] = True
+                report["resumed_failed_cover"] = True
             github_private(old, token, "resume-receipt.json", json_bytes({"continued_at": prefix}))
             report["calls"] = calls
             report["continued_from"] = old
@@ -619,7 +647,10 @@ def evaluate(prefix, token, secret, report, resume_id=""):
             for channel in CHANNELS:
                 evaluate_channel(channel, spend, save, report, index, path, catalogue,
                                  (titles[channel], prose), resume if channel == "legends" else None)
-        report.update(status="completed", stage="complete")
+        if all(row.get("assembled") for row in report["articles"].values()):
+            report.update(status="completed", stage="complete")
+        else:
+            report.update(status="quality_check_failed", stage="complete", reason="article_visual_qa_failed")
     except (UnsafeToTest, Blocked) as exc:
         report.update(status="blocked_or_incomplete", reason=safe_reason(exc))
     except Exception as exc:
