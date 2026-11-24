@@ -108,8 +108,7 @@ async function main(){
  requireOk(updatedDeployment.id!==previousDeployment.id&&updatedDeployment.version!==previousDeployment.version,"new_deployment_unverified");
  console.log("NEW_DEPLOYMENT_ID="+updatedDeployment.id);
  console.log("NEW_VERSION_ID="+updatedDeployment.version);
- stage="enable_worker_subdomain";
- await cf("/scripts/"+SCRIPT+"/subdomain","POST",{enabled:true,previews_enabled:false});
+ // The existing working subdomain is preserved; no routing change is needed.
  stage="verify_worker_security";
  let ready=false;
  for(let i=0;i<8;i++){
@@ -134,10 +133,6 @@ async function main(){
  stage="verify_webhook";
  const info=await telegram("getWebhookInfo");
  requireOk(info.url===endpoint+"/telegram","webhook_url_mismatch");
- stage="verify_owner_reply";
- const ownerReply=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:JSON.stringify({message:{chat:{type:"private",id:Number(owner)},from:{id:Number(owner),is_bot:false},text:"/start"}}),redirect:"error",signal:AbortSignal.timeout(20000)});
- requireOk(ownerReply.ok,"owner_reply_http_"+ownerReply.status);
- console.log("OWNER_REPLY_CONFIRMED");
  stage="verify_miniapp";
  const page=await fetch(endpoint+"/app?v=11",{redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(page.ok&&(await page.text()).includes("ZEN CONTROL"),"app_page_unavailable");
@@ -252,6 +247,10 @@ async function main(){
  console.log("IMAGE_PREVIEW_CONFIGURED="+(dashboard.imagePreview===true));
  console.log("MINIAPP_AUTH_CONFIRMED");
  console.log("MINIAPP_BALANCE_AVAILABLE="+(typeof dashboard.balance==="number"));
+ stage="verify_owner_reply";
+ const ownerReply=await fetch(endpoint+"/telegram",{method:"POST",headers:{"X-Telegram-Bot-Api-Secret-Token":webhookSecret,"Content-Type":"application/json"},body:JSON.stringify({message:{chat:{type:"private",id:Number(owner)},from:{id:Number(owner),is_bot:false},text:"/start"}}),redirect:"error",signal:AbortSignal.timeout(20000)});
+ requireOk(ownerReply.ok,"owner_reply_http_"+ownerReply.status);
+ console.log("OWNER_REPLY_CONFIRMED");
  stage="miniapp_menu";
  requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=11"}}})===true,"miniapp_menu_failed");
  const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
