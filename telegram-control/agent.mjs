@@ -76,7 +76,13 @@ export class AgentHandler{
   if(!reserved)return {status:409,body:{error:"budget_or_duplicate"}};
   let verifiedReceipt=false;
   let message={id,text,at:new Date(now).toISOString(),status:"failed",cost:null,reserved:bound,reply:"Ответ не подтверждён. Запрос мог быть оплачен; повтор автоматически не выполняется.",proposal:null,version:state.version};
+  let preflight=false;
   try{
+   const fresh=await api(this.env,"/credits");
+   const available=number(fresh?.data?.credits??fresh?.data?.total_credits);
+   preflight=available!==null&&available>=bound&&!(await opsState(this.storage)).stopped&&(await opsState(this.storage)).version===ops.version;
+  }catch{}
+  if(!preflight){verifiedReceipt=true;message.cost=0;message.reply="Запрос не отправлен: баланс или состояние управления не подтверждены.";}else try{
    const response=await api(this.env,"/chat/completions",{model:MODEL,messages,max_tokens:MAX_OUTPUT,reasoning:{enabled:false}});
    const cost=number(response.usage?.cost);
    if(cost!==null)message.cost=cost;
