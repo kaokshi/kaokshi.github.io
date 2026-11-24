@@ -16,7 +16,7 @@ from .editorial_routerai_smoke import UnsafeToTest, call, credits
 from .editorial_routerai_two_articles import MODELS, ROOT, Spend, evaluate_channel, json_bytes, money, safe_reason
 from .editorial_zen_cloud import CloudCore, GitHubStore
 from .editorial_zen_core import CONFIG, STAGES, CoreBlocked
-from .editorial_zen_control import configured_guard
+from .editorial_zen_control import configured_guard, configured_account
 
 SEED_ROUTE = "/models/" + MODELS["image"] + "/endpoints"
 
@@ -91,6 +91,11 @@ class MeteredRouter(Spend):
                 verify_seed_route(self.token, self.transport)
             if self.balance(self.token) < bound + reserve:
                 raise CoreBlocked("routerai_balance_insufficient")
+            self.session.account_call("claim", operation)
+            # Recheck available credits after taking the cross-lane hold.
+            if self.session.account is not None and self.balance(self.token) < bound + reserve:
+                self.session.account_call("close", operation, "not_sent")
+                raise CoreBlocked("routerai_balance_insufficient")
             self.session.core.access(
                 lambda core: core.reserve_call(operation, self.session.article, phase, reason, bound, slot=slot,
                                                hold=reserve), change=True)
@@ -124,15 +129,18 @@ class MeteredRouter(Spend):
                 raise CoreBlocked("seedream_invalid_image_response") from None
             retain_image(raw)
         self.session.core.access(lambda core: core.settle(operation, actual), change=True)
+        # A saved response can be settled and closed again without another provider call.
+        self.session.account_call("close", operation, "settled")
         self.report["calls"].append({"operation": operation, "model": MODELS[role],
                                      "cost_rub": str(actual), "replayed": response is not None})
         return answer
 
 
 class Session:
-    def __init__(self, core, article, *, target=None, guard=None):
+    def __init__(self, core, article, *, target=None, guard=None, account=None):
         self.core, self.article, self.target = core, article, target
         self.guard = guard
+        self.account = account
         self.plan, self.next_stage = core.access(lambda c: c.article_work(article))
         self.channel = article.split("/")[1]
         self.prefix = "articles/" + digest(article) + "/"
@@ -156,6 +164,10 @@ class Session:
         if filename.endswith("/qwen-plan.json"):
             plan = json.loads(json.loads(data)["output"])
             self.core.access(lambda c: c.register_title(self.article, self.channel, plan["title"]), change=True)
+
+    def account_call(self, action, operation, outcome=None):
+        if self.account is not None:
+            return self.account(action, self.article.split("/", 1)[0], operation, outcome)
 
     def check_control(self):
         if self.guard is not None:
@@ -246,13 +258,14 @@ class Session:
         self.permit("package")
 
 
-def execute(core, article, token, *, target=None, transport=call, balance=credits, pipeline=evaluate_channel, guard=None):
+def execute(core, article, token, *, target=None, transport=call, balance=credits, pipeline=evaluate_channel, guard=None, account=None):
     if target is not None and target not in STAGES:
         raise CoreBlocked("unknown_target_stage")
     session = Session(core, article, target=target, guard=guard or configured_guard())
     session.check_control()
     if session.next_stage is None:
         return
+    session.account = account or configured_account()
     router = MeteredRouter(session, token, transport=transport, balance=balance)
     from .editorial_brain import archive
 
