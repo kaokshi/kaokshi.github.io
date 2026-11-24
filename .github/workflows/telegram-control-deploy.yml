@@ -1,4 +1,4 @@
-name: ZEN CONTROL v0.4 private review journal
+name: ZEN CONTROL v0.4 native journal verification
 on:
   push:
     branches: [feature/telegram-control-mvp]
