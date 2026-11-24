@@ -35,8 +35,10 @@ function cleanReport(d,job,now){
  if(rolling.some(k=>Object.hasOwn(b,k))){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(b.rollingStart)||![b.rollingCapRub,b.rollingRemainingRub,b.rollingMeteredRub].every(money)||Number(b.rollingCapRub)!==9000||Number(b.rollingRemainingRub)>9000||typeof b.rollingOverrun!=="boolean"||typeof b.overrun!=="boolean")return null;
  }
+ const ack=d.stageAcknowledgment;
+ if(ack!==undefined&&(!ack||ack.status!=="recorded_only"||ack.id!==job.stageIntent?.id||ack.modeRevision!==job.stageIntent?.modeRevision||ack.modeRevision!==d.modeRevision))return null;
  const budget=Object.fromEntries(["day","timezone","mainDailyRub","reserveDailyRub","mainRemainingRub","reserveRemainingRub","meteredRub","unsettledRequest",...rolling.filter(k=>Object.hasOwn(b,k))].map(k=>[k,b[k]]));
- return {schema:d.schema,jobId:d.jobId,observedAt:d.observedAt,...(d.modeRevision!==undefined?{modeRevision:d.modeRevision,effectiveMode:d.effectiveMode}:{}),articles,budget,source:"executor_report",executionEnabled:false,publicationAuthorized:false,rssEnabled:false};
+ return {schema:d.schema,jobId:d.jobId,observedAt:d.observedAt,...(d.modeRevision!==undefined?{modeRevision:d.modeRevision,effectiveMode:d.effectiveMode}:{}),articles,budget,...(ack?{stageAcknowledgment:{id:ack.id,modeRevision:ack.modeRevision,status:ack.status}}:{}),source:"executor_report",executionEnabled:false,publicationAuthorized:false,rssEnabled:false};
 }
 export async function recordReceipt(storage,d,now=Date.now()){
  if(typeof d?.jobId!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(d.jobId))return bad(400,"invalid_job_id");
@@ -52,7 +54,7 @@ export async function recordReceipt(storage,d,now=Date.now()){
   if(old&&receipt.observedAt<old.observedAt)return bad(409,"stale_receipt");
   if(old&&receipt.observedAt===old.observedAt)return JSON.stringify(old)===JSON.stringify(receipt)?{status:200,body:{accepted:true,replay:true}}:bad(409,"receipt_conflict");
   if(old&&old.articles.some((a,i)=>a.stages.some((s,j)=>s.status==="passed"&&receipt.articles[i].stages[j].status!=="passed")))return bad(409,"passed_stage_regression");
-  await tx.put(key,{...job,executorReceipt:receipt});
+  await tx.put(key,{...job,executorReceipt:receipt,...(receipt.stageAcknowledgment?{stageAcknowledgment:receipt.stageAcknowledgment}:{})});
   const latest=await tx.get("budget:executor-report");
   if(!latest||receipt.observedAt>latest.observedAt)await tx.put("budget:executor-report",{observedAt:receipt.observedAt,budget:receipt.budget});
   return {status:200,body:{accepted:true,replay:false},receipt,events:reportEvents(old,receipt)};
