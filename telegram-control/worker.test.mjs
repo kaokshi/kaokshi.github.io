@@ -215,3 +215,44 @@ test("core and RSS endpoints reject non-owner before external calls",async()=>{
   assert.equal(r.status,401);
  }
 });
+
+import {AgentHandler,estimate,parseReply,MODEL} from "./agent.mjs";
+const priceRow={id:MODEL,pricing_units:{prompt:"token",completion:"token"},pricing:{prompt:"0.00001",completion:"0.00004"}};
+test("Qwen chat refuses unknown prices and invalid proposals",()=>{
+ assert.ok(estimate(priceRow,[{content:"тест"}])>0);
+ assert.equal(estimate({...priceRow,pricing_units:{prompt:"million_tokens"}},[]),null);
+ assert.throws(()=>parseReply({choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply:"test",proposal:{publication:true}})}}]}));
+ assert.equal(parseReply({choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply:"test",proposal:null})}}]}).proposal,null);
+});
+test("Qwen chat consent, persistent receipt, duplicate protection and confirmed schedule",async()=>{
+ const store=new Map();let alarm=null;
+ const storage={get:async k=>store.get(k),put:async(k,v)=>store.set(k,v),delete:async k=>store.delete(k),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix))),transaction:async fn=>fn(storage),getAlarm:async()=>alarm,setAlarm:async n=>alarm=n,deleteAlarm:async()=>alarm=null};
+ const core=new CoreHandler({storage}),agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},core);
+ const id="9b00a000-1111-4222-8333-444444444444",msg={id,text:"Тест расписания",consent:true};
+ const original=globalThis.fetch;let paid=0;
+ globalThis.fetch=async(url,opts)=>{
+  if(url.endsWith("/models"))return Response.json({data:[priceRow]});
+  if(url.endsWith("/credits"))return Response.json({data:{credits:100}});
+  assert.ok(url.endsWith("/chat/completions"));paid++;
+  const payload=JSON.parse(opts.body);assert.equal(payload.model,MODEL);assert.equal(payload.max_tokens,700);
+  return Response.json({model:MODEL,usage:{cost:0.01},choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply:"Предлагаю расписание",proposal:plan})}}]});
+ };
+ try{
+  assert.equal((await agent.chat({...msg,consent:false})).status,400);assert.equal(paid,0);
+  const first=await agent.chat(msg);assert.equal(first.body.message.status,"complete");
+  assert.equal((await agent.chat(msg)).status,200);assert.equal(paid,1);
+  assert.equal((await core.state()).version,0);
+  assert.equal((await agent.apply({id,confirm:false})).status,400);
+  assert.equal((await agent.apply({id,confirm:true})).status,200);
+  assert.equal((await core.state()).version,1);
+  assert.equal((await agent.apply({id,confirm:true})).status,409);
+  assert.equal((await agent.view()).messages.length,1);
+  assert.equal((await core.view()).productionEnabled,false);
+ }finally{globalThis.fetch=original;}
+});
+test("Qwen endpoints reject non-owner without touching storage or paid provider",async()=>{
+ for(const path of ["/api/core/agent","/api/core/agent/chat","/api/core/agent/apply"]){
+  const r=await worker.fetch(new Request("https://example.test"+path,{method:"POST",body:JSON.stringify({initData:signed(124)})}),env);
+  assert.equal(r.status,401);
+ }
+});
