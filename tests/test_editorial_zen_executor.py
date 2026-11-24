@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from src.editorial_zen_cloud import CloudCore, Conflict, STATE, blob_sha
 from src.editorial_zen_core import CoreBlocked
-from src.editorial_zen_executor import MODELS, MeteredRouter, Session, verify_seed_route
+from src.editorial_zen_executor import MODELS, MeteredRouter, Session, seed_rights_verified, verify_seed_route
 
 
 class Store:
@@ -93,12 +93,14 @@ class ExecutorTest(unittest.TestCase):
 
     def test_seed_catalog_does_not_establish_commercial_rights(self):
         transport = lambda *_: {"data": {"endpoints": [{"tag": "seed", "country": "sg"}]}}
-        with self.assertRaisesRegex(CoreBlocked, "commercial_rights_unverified"):
-            verify_seed_route("fixture", {}, self.store, transport)
+        verify_seed_route("fixture", transport)
+        self.assertFalse(seed_rights_verified(self.store))
+        wrong_route = lambda *_: {"data": {"endpoints": [{"tag": "other", "country": "sg"}]}}
+        with self.assertRaisesRegex(CoreBlocked, "seedream_route_unverified"):
+            verify_seed_route("fixture", wrong_route)
 
-    def test_four_model_bindings_and_seedream_bytes_survive_replay(self):
+    def test_four_models_and_seedream_without_rights_document(self):
         import base64
-        from src.editorial_memory import digest
 
         self.plan(self.router())
         session = Session(self.cloud, self.article)
@@ -109,12 +111,6 @@ class ExecutorTest(unittest.TestCase):
         router.request("legends", "edit", "edit", "/chat/completions", {}, 2)
         session.pass_stage("edit")
         session.pass_stage("visual_plan")
-        evidence = b"synthetic approval document"
-        self.store.immutable("rights/seedream-commercial-evidence", evidence)
-        self.store.immutable("rights/seedream.json", json.dumps({
-            "via": "RouterAI", "model": MODELS["image"], "provider": "seed", "country": "sg",
-            "commercial_editorial_use": True, "evidence_sha256": digest(evidence)
-        }).encode())
         raw = b"synthetic paid response"
         def transport(path, token, payload=None, **kwargs):
             if path.endswith("/endpoints"):
@@ -153,7 +149,7 @@ class ExecutorTest(unittest.TestCase):
         raw = b"synthetic retained asset"
         row = {"file": "image-04.jpg", "sha256": digest(raw), "original_sha256": digest(raw),
                "perceptual_hash": "ffffffffffffffff", "match_model": "fixture",
-               "image_embedding": [1.0], "rights_status": "license_metadata_verified"}
+               "image_embedding": [1.0], "model": MODELS["image"], "rights_status": "rights_review_pending"}
         session.save("legends/images/image-04.jpg", raw)
         session.accept_image(4, row, raw)
         with tempfile.TemporaryDirectory() as directory:

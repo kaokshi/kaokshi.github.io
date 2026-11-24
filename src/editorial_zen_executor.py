@@ -39,21 +39,27 @@ def classify(step, role):
     raise CoreBlocked("unknown_routerai_operation")
 
 
-def verify_seed_route(token, attestation, store, transport=call):
+def verify_seed_route(token, transport=call):
     endpoints = transport(SEED_ROUTE, token).get("data", {}).get("endpoints", [])
     actual = {(row.get("tag"), row.get("country")) for row in endpoints}
     if actual != {("seed", "sg")} or len(endpoints) != 1:
         raise CoreBlocked("seedream_route_unverified")
-    if (attestation.get("model") != MODELS["image"] or attestation.get("provider") != "seed"
+
+
+def seed_rights_verified(store):
+    raw, _ = store.read("rights/seedream.json")
+    try:
+        attestation = json.loads(raw) if raw else {}
+    except (ValueError, UnicodeError):
+        return False
+    if (not isinstance(attestation, dict) or attestation.get("model") != MODELS["image"] or attestation.get("provider") != "seed"
             or attestation.get("country") != "sg" or attestation.get("via") != "RouterAI"
             or attestation.get("commercial_editorial_use") is not True
             or not isinstance(attestation.get("evidence_sha256"), str)
             or not re.fullmatch(r"[a-f0-9]{64}", attestation["evidence_sha256"])):
-        raise CoreBlocked("seedream_commercial_rights_unverified")
+        return False
     evidence, _ = store.read("rights/seedream-commercial-evidence")
-    if not evidence or digest(evidence) != attestation["evidence_sha256"]:
-        raise CoreBlocked("seedream_commercial_evidence_missing")
-    return attestation["evidence_sha256"]
+    return bool(evidence and digest(evidence) == attestation["evidence_sha256"])
 
 
 class MeteredRouter(Spend):
@@ -73,8 +79,6 @@ class MeteredRouter(Spend):
 
     def request(self, channel, stage, role, path, payload, bound, *, reserve=0, retain_image=None):
         phase, reason, slot = classify(stage, role)
-        if role == "image":
-            self.session.seed_rights(self.token, self.transport)
         operation = self.session.article + "/" + stage
         body = {"model": MODELS[role], **payload}
         fingerprint = digest(json_bytes({"path": path, "body": body}))
@@ -82,6 +86,8 @@ class MeteredRouter(Spend):
         response = self.session.read(name)
         if response is None:
             self.session.permit(phase)
+            if role == "image":
+                verify_seed_route(self.token, self.transport)
             if self.balance(self.token) < bound + reserve:
                 raise CoreBlocked("routerai_balance_insufficient")
             self.session.core.access(
@@ -129,7 +135,6 @@ class Session:
         self.prefix = "articles/" + digest(article) + "/"
         self.instructions = self.plan["instructions"]
         self.mode = self.plan.get("mode", "manual")
-        self.rights = None
         if self.next_stage and self.mode == "manual" and self.target != self.next_stage:
             raise CoreBlocked("manual_next_stage_required")
 
@@ -177,10 +182,6 @@ class Session:
             self.save("inputs/sources.json", json_bytes(records))
         return records
 
-    def seed_rights(self, token, transport):
-        raw = self.core.store.read("rights/seedream.json")[0]
-        self.rights = verify_seed_route(token, json.loads(raw) if raw else {}, self.core.store, transport)
-
     def image(self, slot, path):
         prior = self.read(f"accepted/{slot}.json")
         if prior is None:
@@ -191,10 +192,6 @@ class Session:
         raw = self.read(f"{self.channel}/images/{row['file']}")
         if raw is None or digest(raw) != row["sha256"]:
             raise CoreBlocked("accepted_image_integrity_failed")
-        if row.get("model") == MODELS["image"]:
-            self.seed_rights(self.token, self.transport)
-            if row.get("rights_evidence_sha256") != self.rights:
-                raise CoreBlocked("accepted_image_rights_evidence_changed")
         self.core.access(lambda c: c.register_image(self.article, slot, row), change=True)
         path.mkdir(parents=True, exist_ok=True)
         (path / row["file"]).write_bytes(raw)
@@ -204,10 +201,6 @@ class Session:
     def accept_image(self, slot, row, raw):
         if digest(raw) != row["sha256"]:
             raise CoreBlocked("accepted_image_integrity_failed")
-        if row.get("model") == MODELS["image"]:
-            if not self.rights:
-                raise CoreBlocked("seedream_commercial_rights_unverified")
-            row.update(rights_status="route_license_verified", rights_evidence_sha256=self.rights)
         self.core.access(lambda c: c.register_image(self.article, slot, row), change=True)
         self.save(f"accepted/{slot}.json", json_bytes(row))
 
@@ -222,13 +215,15 @@ class Session:
         self.save("quality/" + digest(encoded) + ".json", encoded)
         detectors_ok = (report["model_a"]["status"] == "completed"
                         and not report["model_a"]["exceeds_owner_review_threshold"])
+        seed_verified = (any(row.get("model") == MODELS["image"] for row in rows)
+                         and seed_rights_verified(self.core.store))
         checks = {"model_a": detectors_ok,
                   "language_tool": report["grammar"]["status"] == "completed",
                   "editorial": report["editorial"]["status"] == "completed" and not report["issues"],
                   "facts": report["facts"]["status"] in {"completed", "not_applicable"},
-                  "rights": all(row.get("rights_status") in {"license_metadata_verified",
-                                                            "original_programmatic_graphic",
-                                                            "route_license_verified"} for row in rows),
+                  "rights": all(seed_verified if row.get("model") == MODELS["image"] else
+                                row.get("rights_status") in {"license_metadata_verified",
+                                                             "original_programmatic_graphic"} for row in rows),
                   "image_review": True}
         statuses = {key: "passed" if ok else "blocked" for key, ok in checks.items()}
         if not all(checks.values()):
@@ -246,7 +241,6 @@ def execute(core, article, token, *, target=None, transport=call, balance=credit
     session = Session(core, article, target=target)
     if session.next_stage is None:
         return
-    session.token, session.transport = token, transport
     router = MeteredRouter(session, token, transport=transport, balance=balance)
     from .editorial_brain import archive
 
