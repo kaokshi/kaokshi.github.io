@@ -3,6 +3,7 @@
   "timezone": "Europe/Moscow",
   "main_daily_rub": "300",
   "reserve_daily_rub": "50",
+  "rolling_30_day_cap_rub": "9000",
   "max_image_retries": 2,
   "execution_enabled": false,
   "publication_enabled": false,
