@@ -110,8 +110,8 @@
   "routerai_editor": {
     "model": "anthropic/claude-sonnet-5.5",
     "enabled": false,
-    "daily_spend_cap_rub": 150,
-    "monthly_spend_cap_rub": 4500,
+    "daily_spend_cap_rub": 300,
+    "monthly_spend_cap_rub": 9000,
     "max_calls_per_article": 2,
     "max_calls_per_cycle": 4,
     "require_balance_preflight": true,

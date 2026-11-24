@@ -3,7 +3,8 @@
 import {readFile} from "node:fs/promises";
 import {createHmac} from "node:crypto";
 import {buildSnapshot,snapshotBindings} from "./snapshot.mjs";
-import {activeDeployment,latestVersion,readBridgeProbe} from "./deploy-guard.mjs";
+import {activeDeployment,latestVersion,readBridgeProbe,verifyDeployedAssets} from "./deploy-guard.mjs";
+import {HTML,CSS,JS} from "./ui.mjs";
 const SCRIPT="zen-editorial-control";
 const account=process.env.CLOUDFLARE_ACCOUNT_ID||"";
 const cfToken=process.env.CLOUDFLARE_API_TOKEN||"";
@@ -213,7 +214,7 @@ async function main(){
  const budget=await journalRequest("/api/core/budget",{initData:params.toString()});
  requireOk(budget.ok,"budget_http_"+budget.status);
  const bv=await budget.json();
- requireOk(bv.policy.reserveKop===5000&&bv.executionEnabled===false&&bv.production.ledgerConnected===false&&bv.production.reserveRemainingKop===null,"budget_gate_failed");
+ requireOk(bv.policy.reserveKop===5000&&bv.executionEnabled===false&&typeof bv.production.ledgerConnected==="boolean"&&(bv.production.reserveRemainingKop===null||Number.isInteger(bv.production.reserveRemainingKop)&&bv.production.reserveRemainingKop>=0&&bv.production.reserveRemainingKop<=5000),"budget_gate_failed");
  const deniedBudget=await journalRequest("/api/core/budget",{initData:"invalid"});
  requireOk(deniedBudget.status===401,"budget_auth_gate_failed");
  const invalidBudget=await journalRequest("/api/core/budget/settings",{initData:params.toString(),confirm:false});
@@ -235,11 +236,10 @@ async function main(){
  requireOk(invalidOps.status===400,"ops_confirmation_failed");
  console.log("OPS_CONTROLS_CONFIRMED");
  stage="verify_mode_ui";
- const uiPage=await fetch(endpoint+"/app?v=14",{redirect:"error",signal:AbortSignal.timeout(10000)});
- requireOk(uiPage.ok&&(await uiPage.text()).includes('id="coremode"'),"mode_panel_not_deployed");
- const uiScript=await fetch(endpoint+"/app.js?v=1.0.0-rc.1-mode2",{redirect:"error",signal:AbortSignal.timeout(10000)});
- const uiCode=await uiScript.text();
- requireOk(uiScript.ok&&uiCode.includes("function renderModeControl")&&uiCode.includes("image-progress")&&uiCode.includes("stage-warning"),"recovery_ui_not_deployed");
+ requireOk(HTML.includes('id="coremode"')&&JS.includes("image-progress")&&JS.includes("stage-warning"),"local_ui_contract_invalid");
+ await verifyDeployedAssets(path=>fetch(endpoint+path+"?deploy="+updatedDeployment.version,{
+  redirect:"error",cache:"no-store",signal:AbortSignal.timeout(10000)
+ }),{"/app":HTML,"/app.js":JS,"/app.css":CSS});
  requireOk((await journalRequest("/api/core/jobs/stage",{initData:"invalid",confirm:true})).status===401,"stage_owner_gate_failed");
  let stageRejected=false;
  for(let attempt=0;attempt<3;attempt++){

@@ -62,3 +62,13 @@ test("read-only bridge probes retry transient failures, but never authorization 
  calls=0;await assert.rejects(()=>readBridgeProbe(async()=>{calls++;return Response.json({executionEnabled:true});},valid,{pause}),/bridge_invalid_response/);assert.equal(calls,1);
  calls=0;await assert.rejects(()=>readBridgeProbe(async()=>{calls++;return new Response("",{status:503});},valid,{pause}),/bridge_http_503/);assert.equal(calls,4);
 });
+
+test("deployment verification waits for exact HTML, JS and CSS, never auth failures",async()=>{
+ const {verifyDeployedAssets}=await import("./deploy-guard.mjs");
+ let calls=0,waits=0;
+ const expected={"/app":"new html","/app.js":"new js","/app.css":"new css"};
+ await verifyDeployedAssets(async path=>new Response(++calls===1?"old html":expected[path]),expected,{pause:async()=>waits++});
+ assert.equal(calls,4);assert.equal(waits,1);
+ await assert.rejects(verifyDeployedAssets(async()=>new Response("",{status:401}),expected,{pause:async()=>{throw Error("retried auth");}}),/ui_asset_http_401/);
+ await assert.rejects(verifyDeployedAssets(async()=>new Response("always old"),expected,{attempts:2,pause:async()=>{}}),/ui_assets_not_converged/);
+});

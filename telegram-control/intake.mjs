@@ -55,25 +55,25 @@ export async function intakeView(storage,id){
  });
 }
 // Fresh control observation, not an execution permit.
-export async function controlView(storage,id,now=Date.now()){
+export async function controlView(storage,id,now=Date.now(),executionEnabled=false){
  if(typeof id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(id))return {status:400,body:{error:"invalid_job_id"}};
- return storage.transaction(tx=>controlSnapshot(tx,id,now));
+ return storage.transaction(tx=>controlSnapshot(tx,id,now,executionEnabled));
 }
-async function controlSnapshot(tx,id,now){
+async function controlSnapshot(tx,id,now,executionEnabled=false){
   const ops=await opsState(tx),job=await tx.get("production:job:"+id),intent=exportIntent(job);
   const mode=modeFor(ops),transition=transitionFor(ops),settings=await tx.get("core:settings");
   const effective=transition?job?.executorReceipt?.effectiveMode:intent?.mode;
   const policy=await tx.get("budget:policy");
   const mismatch=Boolean(policy&&(policy.mainKop!==30000||policy.reserveKop!==5000));
   const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":job.origin==="schedule"&&settings?.paused!==false?"schedule_paused":transition&&job.executorReceipt?.modeRevision!==transition.revision?"mode_sync_pending":effective!==mode?"mode_changed":mismatch?"budget_policy_mismatch":null;
-  return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:effective??null,modeRevision:transition?.revision??0,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
+  return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:effective??null,modeRevision:transition?.revision??0,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:executionEnabled===true,publicationAuthorized:false,rssEnabled:false}};
 }
-export async function accountView(storage,d,now=Date.now()){
- if(d?.action==="status")return storage.transaction(tx=>accountStatus(tx,now));
+export async function accountView(storage,d,now=Date.now(),executionEnabled=false){
+ if(d?.action==="status")return storage.transaction(tx=>accountStatus(tx,now,executionEnabled));
  if(!d||typeof d.id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(d.id)||!["claim","close"].includes(d.action))return {status:400,body:{error:"invalid_account_request"}};
  return storage.transaction(async tx=>{
   if(d.action==="close")return closeProduction(tx,d,now);
-  const control=(await controlSnapshot(tx,d.id,now)).body;
+  const control=(await controlSnapshot(tx,d.id,now,executionEnabled)).body;
   if(!control.controlClear||control.executionEnabled!==true)return {status:409,body:{error:"execution_disabled"}};
   return claimProduction(tx,d,now);
  });

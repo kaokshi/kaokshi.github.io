@@ -74,7 +74,7 @@ export class CoreHandler {
      if(await tx.get(key))continue;
      await tx.put(key,{...slot,recordedAt:now,status:"blocked_prelaunch",reason:slot.type==="prepare"?"production_not_connected":"rss_not_authorized"});
      batch.push(slot);
-     if(slot.type==="prepare")await saveJob(tx,"scheduled:"+slot.id,{items:[{channel:slot.channel,count:1}],day:slot.id.split(":")[1],instructions:"По сохранённому расписанию"},now,"schedule",slot.releaseAt);
+     if(slot.type==="prepare"&&slot.channel!=="cinema")await saveJob(tx,"scheduled:"+slot.id,{items:[{channel:slot.channel,count:1}],day:slot.id.split(":")[1],instructions:"По сохранённому расписанию"},now,"schedule",slot.releaseAt);
     }
    }
    await tx.put("core:cursor",now);await tx.put("core:lastTick",new Date(now).toISOString());return batch;
@@ -100,9 +100,9 @@ export class CoreHandler {
   if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/receipt"){const r=await recordReceipt(this.storage,d,now);if(r.receipt&&r.events?.length){try{await notifyReceipt(this.storage,this.env,r.receipt,r.events,now);}catch{}}return Response.json(r.body,{status:r.status});}
-  if(url.pathname==="/core/account"){const r=await accountView(this.storage,d,now);return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/account"){const r=await accountView(this.storage,d,now,this.env?.ZEN_CORE_EXECUTION_ENABLED==="true");return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/queue"){const r=await queueView(this.storage,d.cursor??null);return Response.json(r.body,{status:r.status});}
-  if(url.pathname==="/core/control"){const r=await controlView(this.storage,d.id,now);return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/control"){const r=await controlView(this.storage,d.id,now,this.env?.ZEN_CORE_EXECUTION_ENABLED==="true");return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/intake"){const r=await intakeView(this.storage,d.id);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/stage"){const r=await requestStage(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/preview"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const r=await previewJob(this.storage,d.id,now,validateJob,STAGES);return Response.json(r.body,{status:r.status});}
