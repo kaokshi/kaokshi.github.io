@@ -481,3 +481,10 @@ test("confirmed jobs in assisted or autonomous mode automatically get intake pre
  await s.put("ops:state",{requestedMode:"manual"});
  assert.equal((await saveJob(s,"agent:manual-intake",p,Date.now(),"agent")).preview,undefined);
 });
+
+test("owner chat is blocked by production charge hold before network access",async()=>{
+ const map=new Map([["account:production-hold",{id:"fixture",operation:"fixture/science/1/plan",startedAt:1}]]),storage={get:async k=>map.get(k),list:async()=>new Map()};
+ const core=new CoreHandler({storage}),agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},core);
+ const orig=globalThis.fetch;globalThis.fetch=async()=>{throw Error("must not contact provider");};
+ try{assert.equal((await agent.chat({id:"9b00a000-1111-4222-8333-444444444444",text:"fixture",consent:true})).body.error,"account_charge_hold");assert.equal((await agent.view()).enabled,false);}finally{globalThis.fetch=orig;}
+});
