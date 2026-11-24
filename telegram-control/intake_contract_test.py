@@ -38,6 +38,33 @@ class IntakeContract(unittest.TestCase):
         self.assertNotIn("instructions", json.dumps(receipt))
         envelope_path.with_suffix(".receipt.json").write_text(json.dumps(receipt))
 
+    def test_queue_retries_lost_receipt_without_duplicate_cloud_job(self):
+        envelope = json.loads(envelope_path.read_text())
+        job_id = envelope["intent"]["id"]
+        store = Store()
+        cloud = CloudCore(store)
+        received = []
+        def page(endpoint, secret, cursor):
+            return ([job_id], None)
+        def fetch(endpoint, secret, expected):
+            self.assertEqual(expected, job_id)
+            return envelope
+        def receipt(endpoint, secret, data):
+            if not received:
+                received.append(data)
+                raise OSError("synthetic lost receipt")
+            received.append(data)
+        with self.assertRaises(OSError):
+            client.drain(cloud, "fixture", "fixture", fetch_page=page, fetch_intent=fetch, send_receipt=receipt)
+        result = client.drain(CloudCore(store), "fixture", "fixture", fetch_page=page, fetch_intent=fetch, send_receipt=receipt)
+        self.assertEqual(result["delivered"], 1)
+        snapshot = cloud.access(lambda c: c.snapshot())
+        self.assertEqual(len(snapshot["jobs"]), 1)
+        self.assertEqual(len(snapshot["jobs"][0]["articles"]), 3)
+        self.assertEqual(snapshot["budget"]["meteredRub"], "0")
+        self.assertFalse(snapshot["executionEnabled"])
+        self.assertEqual(received[0]["articles"], received[1]["articles"])
+
     def test_worker_payload_to_real_core(self):
         envelope = json.loads(envelope_path.read_text())
         with tempfile.TemporaryDirectory() as temp:
