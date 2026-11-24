@@ -1,3 +1,4 @@
+import {opsState,opsView,updateOps,notifyTimer} from "./ops.mjs";
 import {readBudget,writeBudget} from "./budget.mjs";
 import {saveJob,jobsView,cancelJob,productionReadiness} from "./production.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
@@ -33,42 +34,47 @@ export function slots(settings,now){
 }
 export function nextSlots(settings,now){return slots(settings,now).filter(x=>x.at>now).slice(0,60);}
 export class CoreHandler {
- constructor(ctx){this.storage=ctx.storage;}
+ constructor(ctx,env={}){this.storage=ctx.storage;this.env=env;}
  async state(){return await this.storage.get("core:settings")||initial();}
  async view(now=Date.now()){
   const settings=await this.state(),events=await this.storage.list({prefix:"core:event:",reverse:true,limit:60}),orders=await this.storage.list({prefix:"core:order:",reverse:true,limit:30});
   return {settings,mode:"dry_run",productionEnabled:false,rssEnabled:false,next:nextSlots(settings,now),events:[...events.values()],orders:[...orders.values()],lastTick:await this.storage.get("core:lastTick")||null,alarmAt:await this.storage.getAlarm()};
  }
  async scheduleAlarm(now){
-  const next=nextSlots(await this.state(),now)[0];
+  const next=(await opsState(this.storage)).stopped?null:nextSlots(await this.state(),now)[0];
   if(next)await this.storage.setAlarm(next.at);else await this.storage.deleteAlarm();
  }
  async alarm(now=Date.now()){
-  await this.storage.transaction(async tx=>{
+  const batch=await this.storage.transaction(async tx=>{
+   const batch=[];
    const settings=await tx.get("core:settings")||initial();
    const last=await tx.get("core:cursor");
-   if(!settings.paused&&typeof last==="number"){
+   if(!(await opsState(tx)).stopped&&!settings.paused&&typeof last==="number"){
     const start=Math.max(last,now-2*DAY);
     for(const slot of slots(settings,now).filter(x=>x.at>start&&x.at<=now)){
      const key="core:event:"+String(slot.at).padStart(15,"0")+":"+slot.id;
      if(await tx.get(key))continue;
      await tx.put(key,{...slot,recordedAt:now,status:"blocked_prelaunch",reason:slot.type==="prepare"?"production_not_connected":"rss_not_authorized"});
+     batch.push(slot);
      if(slot.type==="prepare")await saveJob(tx,"scheduled:"+slot.id,{items:[{channel:slot.channel,count:1}],day:slot.id.split(":")[1],instructions:"По сохранённому расписанию"},now,"schedule",slot.releaseAt);
     }
    }
-   await tx.put("core:cursor",now);await tx.put("core:lastTick",new Date(now).toISOString());
+   await tx.put("core:cursor",now);await tx.put("core:lastTick",new Date(now).toISOString());return batch;
   });
   const old=await this.storage.list({prefix:"core:event:",limit:1000});
   for(const [key,event] of old)if(event.at<now-30*DAY)await this.storage.delete(key);
   await this.scheduleAlarm(now);
+  await notifyTimer(this.storage,this.env,batch,now);
  }
  async fetch(request){
   const url=new URL(request.url),now=Date.now();
   if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
+  if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
   if(request.method==="GET"&&url.pathname==="/core/jobs")return Response.json({...await jobsView(this.storage),readiness:await productionReadiness()});
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/cancel"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const job=await cancelJob(this.storage,d.id);return Response.json(job?{job}:{error:"job_missing"},{status:job?200:404});}
   if(url.pathname==="/core/schedule"){
@@ -76,7 +82,7 @@ export class CoreHandler {
    if(!schedule||!Number.isInteger(d.version))return Response.json({error:"invalid_schedule"},{status:400});
    const result=await this.storage.transaction(async tx=>{
     const previous=await tx.get("core:settings")||initial();
-    if(previous.version!==d.version)return null;
+    if(previous.version!==d.version||(!schedule.paused&&(await opsState(tx)).stopped))return null;
     const saved={...schedule,version:previous.version+1,updatedAt:new Date(now).toISOString()};
     await tx.put("core:settings",saved);await tx.put("core:cursor",now);return saved;
    });
@@ -87,6 +93,7 @@ export class CoreHandler {
   if(url.pathname==="/core/order"){
    if(typeof d.text!=="string"||!d.text.trim()||d.text.length>2000||!/^[a-f0-9-]{36}$/.test(d.id||""))return Response.json({error:"invalid_order"},{status:400});
    const order=await this.storage.transaction(async tx=>{
+    if((await opsState(tx)).stopped)return null;
     const key="core:orderid:"+d.id,old=await tx.get(key);
     if(old)return old.text===d.text.trim()?old:null;
     const entry={id:d.id,text:d.text.trim(),at:new Date(now).toISOString(),status:"queued_for_future_agent",executed:false};
