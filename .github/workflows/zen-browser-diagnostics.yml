@@ -1,0 +1,110 @@
+name: ZEN Browser Run Dzen diagnostics
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/zen-browser-diagnostics.yml'
+permissions:
+  contents: read
+concurrency:
+  group: zen-browser-diagnostics
+  cancel-in-progress: false
+jobs:
+  smoke:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install CDP client
+        working-directory: ${{ runner.temp }}
+        run: npm install --no-audit --no-fund --ignore-scripts --save-exact playwright-core@1.56.1
+      - name: Diagnose public Dzen routes without credentials
+        working-directory: ${{ runner.temp }}
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_BROWSER_TOKEN }}
+        run: |
+          node <<'JS'
+          const { chromium } = require('playwright-core');
+          (async () => {
+            const id = process.env.CF_ACCOUNT_ID;
+            const token = process.env.CF_API_TOKEN;
+            if (!id || !token) {
+              console.error('BROWSER_CONFIG_MISSING');
+              process.exitCode = 1;
+              return;
+            }
+            if (!/^[a-f0-9]{32}$/i.test(id)) {
+              console.error('BROWSER_ACCOUNT_ID_INVALID');
+              process.exitCode = 1;
+              return;
+            }
+            let browser;
+            let stage = 'CONNECT';
+            try {
+              browser = await chromium.connectOverCDP(
+                'wss://api.cloudflare.com/client/v4/accounts/' + id + '/browser-run/devtools/browser',
+                { headers: { Authorization: 'Bearer ' + token }, timeout: 15000 }
+              );
+              console.log('BROWSER_CONNECTED');
+              stage = 'NAVIGATE';
+              const context = browser.contexts()[0];
+              const page = context.pages()[0] || await context.newPage();
+              const fs = require('node:fs');
+              const path = require('node:path');
+              const dir = path.join(process.env.RUNNER_TEMP, 'dzen-diagnostics');
+              fs.mkdirSync(dir, {recursive:true});
+              let found = false;
+              for (const [label,url] of [['studio','https://dzen.ru/editor'],['home','https://dzen.ru/'],['profile','https://dzen.ru/profile/editor']]) {
+                let errors=0, failed=0, scripts=0;
+                const onError=()=>errors++;
+                const onFailed=()=>failed++;
+                const onResponse=r=>{if(r.request().resourceType()==='script' && r.status()>=400) scripts++;};
+                page.on('pageerror',onError); page.on('requestfailed',onFailed); page.on('response',onResponse);
+                try {
+                  const response=await page.goto(url,{waitUntil:'domcontentloaded',timeout:12000});
+                  await page.waitForTimeout(2500);
+                  const body=(await page.locator('body').innerText({timeout:2000}).catch(()=> '')).slice(0,30000);
+                  const host=new URL(page.url()).hostname;
+                  const challenge=/капча|подтвердите, что вы не робот|captcha|access denied|verify you are human/i.test(body);
+                  const login=/войти|авторизац|вход в аккаунт/i.test(body)||await page.locator('input[type=password], input[autocomplete=username]').count()>0;
+                  const known=/(^|\.)(dzen\.ru|yandex\.ru|yandex\.com|vk\.com|vk\.ru)$/.test(host);
+                  const result={route:label,status:response?.status()||0,knownHost:known,bodyLength:body.length,challenge,login,errors,failed,scriptErrors:scripts,shortPageCategory:body.length<300?(/недоступ|огранич|запрещ|регион|unavailable|blocked/i.test(body)?'restriction_hint':/ошиб|error|попробуйте/i.test(body)?'error_hint':'other'):'not_short'};
+                  console.log('DZEN_DIAGNOSTIC='+JSON.stringify(result));
+                  if(known && !challenge) await page.screenshot({path:path.join(dir,label+'.png'),timeout:5000,mask:[page.locator('input, [data-testid*=account]')]}).catch(()=>console.log('SCREENSHOT_FAILED'));
+                  if(challenge){console.log('DZEN_CHALLENGE_STOP');break;}
+                  if(known && login && result.status<400){found=true;break;}
+                } catch {console.log('DZEN_ROUTE_FAILED='+label);}
+                finally {page.off('pageerror',onError);page.off('requestfailed',onFailed);page.off('response',onResponse);}
+              }
+              console.log('DZEN_LOGIN_DISCOVERED='+found);
+              if(!found) process.exitCode=1;
+            } catch (error) {
+              const match = String(error?.message || '').match(/\b(401|403|404|429|500|502|503)\b/);
+              console.error('BROWSER_' + stage + '_FAILED' + (match ? '_HTTP_' + match[1] : ''));
+              process.exitCode = 1;
+            } finally {
+              if (browser) {
+                try {
+                  await browser.close();
+                  console.log('BROWSER_CLOSED');
+                } catch {
+                  console.error('BROWSER_CLOSE_FAILED');
+                  process.exitCode = 1;
+                }
+              }
+            }
+          })().catch(() => { console.error('BROWSER_SMOKE_FAILED'); process.exitCode = 1; });
+          JS
+      - name: Save unauthenticated diagnostic screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dzen-public-diagnostics
+          path: ${{ runner.temp }}/dzen-diagnostics/*.png
+          retention-days: 1
+          if-no-files-found: warn
