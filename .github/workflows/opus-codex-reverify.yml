@@ -1,0 +1,40 @@
+name: Opus candidate complete offline revalidation
+on:
+  push:
+    branches: [development/opus-codex-handover-20261125]
+    paths: ['.github/workflows/opus-codex-reverify.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-codex-handover
+          run-id: 45696136266
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements-editorial.txt Pillow ImageHash cryptography python-docx
+      - name: Apply original candidate, check syntax and record files
+        run: |
+          if test -s "$RUNNER_TEMP/candidate/tracked.patch"; then git apply --check "$RUNNER_TEMP/candidate/tracked.patch"; git apply "$RUNNER_TEMP/candidate/tracked.patch"; fi
+          if test -s "$RUNNER_TEMP/candidate/new-files.patch"; then git apply --check "$RUNNER_TEMP/candidate/new-files.patch"; git apply "$RUNNER_TEMP/candidate/new-files.patch"; fi
+          git diff --stat
+          git status --short
+      - name: Python full offline regression
+        run: python -m unittest discover -s tests -v
+      - name: Node full offline regression
+        if: always()
+        run: node --test telegram-control/*.test.mjs
