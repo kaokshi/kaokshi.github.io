@@ -17,7 +17,7 @@ jobs:
           import json, os
           from urllib.request import Request, urlopen
           url = "https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/queue"
-          headers = {"Authorization": "Bearer " + os.environ["ZEN_CORE_INTAKE_SECRET"], "Content-Type": "application/json"}
+          headers = {"Authorization": "Bearer " + os.environ["ZEN_CORE_INTAKE_SECRET"], "Content-Type": "application/json", "User-Agent": "ZEN-Control-Executor/1.0"}
           cursor = None
           for _ in range(10):
               response = Request(url, data=json.dumps({"cursor": cursor}).encode(), headers=headers)
