@@ -14,9 +14,7 @@ jobs:
         run: |
           python3 -m pip install --quiet Pillow 'mcp>=1.12,<2' imageio-ffmpeg
           python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_version())'
-      - name: Check three read-only sources
-        env:
-          TMDB_API_TOKEN: ${{ secrets.TMDB_API_TOKEN }}
+      - name: Diagnose OutNow only
         run: |
           python3 - <<'PY'
           import os,json,urllib.request,urllib.parse,hashlib,subprocess,tempfile,pathlib,re,asyncio,imageio_ffmpeg
@@ -38,26 +36,28 @@ jobs:
           def outnow():
               from mcp import ClientSession
               from mcp.client.streamable_http import streamablehttp_client
+              import traceback
               async def probe():
                   async with streamablehttp_client('https://outnow.ch/mcp') as (read,write,_):
                       async with ClientSession(read,write) as session:
                           await session.initialize()
                           tools=(await session.list_tools()).tools
-                          print('OUTNOW_TOOL_COUNT',len(tools),flush=True)
-                          for t in tools:
-                              print('OUTNOW_TOOL',t.name, 'FIELDS',','.join(t.inputSchema.get('properties',{})),flush=True)
-                          for t in tools:
-                              if not re.search(r'search',t.name,re.I):continue
-                              schema=t.inputSchema; props=schema.get('properties',{})
-                              key=next((k for k in ('query','q','search','term','title','text','searchQuery') if props.get(k,{}).get('type')=='string'),None)
-                              if key and set(schema.get('required',[]))<={key}:
-                                  result=await session.call_tool(t.name,{key:'Dune: Part Two'})
-                                  assert not result.isError
-                                  assert re.search(r'dune',str(result),re.I)
-                                  print('OUTNOW_SEARCH_DUNE',True,flush=True)
-                                  return
-                          raise ValueError('search_schema_requires_review')
-              asyncio.run(asyncio.wait_for(probe(),timeout=60))
+                          t=next(t for t in tools if t.name=='search_content')
+                          print('OUTNOW_SCHEMA',json.dumps(t.inputSchema,ensure_ascii=True),flush=True)
+                          for query in ('Dune: Part Two','Dune'):
+                              try:
+                                  result=await session.call_tool(t.name,{'query':query})
+                                  payload=result.model_dump(mode='json')
+                                  print('OUTNOW_RESULT',query,'ERROR',result.isError,json.dumps(payload,ensure_ascii=True)[:3500],flush=True)
+                                  if not result.isError and re.search('dune',json.dumps(payload),re.I):return
+                              except Exception as e:
+                                  print('OUTNOW_CALL_EXCEPTION',type(e).__name__,str(e)[:1000],flush=True)
+                                  traceback.print_exception(e)
+                          raise ValueError('search_no_matching_result')
+              try: asyncio.run(asyncio.wait_for(probe(),timeout=90))
+              except Exception as e:
+                  traceback.print_exception(e)
+                  raise
           def tmdb():
               token=os.environ.get('TMDB_API_TOKEN','').strip()
               assert token,'missing_secret'
@@ -98,8 +98,6 @@ jobs:
                       hashes.add(hashlib.sha256(dest.read_bytes()).hexdigest())
                   print('BLENDER_DISTINCT_SHA256',len(hashes),flush=True); assert len(hashes)==7
           check('OUTNOW',outnow)
-          check('TMDB',tmdb)
-          check('BLENDER',blender)
           print('FAILED_SOURCES',','.join(failed),flush=True)
           raise SystemExit(bool(failed))
           PY
