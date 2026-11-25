@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import sys
+from time import monotonic
 from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -113,6 +114,34 @@ def dispatch_cycle(core, endpoint, secret, token, *, guard, account, job_scope=N
     return {"attempted": attempted, "receipts": receipts}
 
 
+def dispatch_passes(core, endpoint, secret, token, *, guard, account, job_scope, count, deliver):
+    """Run bounded passes for one explicit pilot, with the same per-stage controls."""
+    totals = {"attempted": 0, "receipts": 0}
+    deadline = monotonic() + 25 * 60
+    for number in range(count):
+        started = monotonic()
+        result = dispatch_cycle(core, endpoint, secret, token, guard=guard,
+                                account=account, job_scope=job_scope)
+        for field in totals:
+            totals[field] += result[field]
+        if count > 1:
+            print(json.dumps({"pass": number + 1, "elapsedSeconds": round(monotonic() - started, 1),
+                              **result}), flush=True)
+        snapshot = core.access(lambda c: c.snapshot())
+        deliver(snapshot)
+        if count == 1 or not result["attempted"] or monotonic() >= deadline:
+            break
+        budget = snapshot["budget"]
+        if budget["unsettledRequest"] or budget["overrun"] or budget["rollingOverrun"]:
+            break
+        job = next(job for job in snapshot["jobs"] if job["id"] == job_scope)
+        if job["mode"] != "autonomous" or not any(
+                next((stage["status"] for stage in article["stages"] if stage["status"] != "passed"), None)
+                in ("not_started", "released") for article in job["articles"]):
+            break
+    return totals
+
+
 def main():
     endpoint = os.getenv("ZEN_CORE_INTAKE_ENDPOINT")
     secret = os.getenv("ZEN_CORE_INTAKE_SECRET", "")
@@ -136,15 +165,25 @@ def main():
         if job is None or {row["channel"]: row["count"] for row in job["items"]} != {
                 "cinema": 2, "legends": 2, "science": 2}:
             raise CoreBlocked("confirmed_six_article_pilot_required")
-    steps = dispatch_cycle(core, endpoint, secret, os.environ["ROUTERAI_API_KEY"],
-                           guard=configured_guard(), account=configured_account(), job_scope=pilot) if production else {}
+    count = os.getenv("ZEN_CORE_PILOT_PASSES", "1")
+    if not re.fullmatch(r"[1-8]", count) or (count != "1" and not pilot):
+        raise CoreBlocked("invalid_production_pilot_passes")
     delivery_job = pilot or os.getenv("ZEN_CORE_TELEGRAM_DOCX_JOB", "")
-    if production and delivery_job:
-        jobs = core.access(lambda c: c.snapshot())["jobs"]
-        job = next((job for job in jobs if job["id"] == delivery_job), None)
+    documents = {"sent": 0, "unconfirmed": 0}
+
+    def deliver(snapshot):
+        job = next((job for job in snapshot["jobs"] if job["id"] == delivery_job), None)
         if job:
-            steps["telegramDocuments"] = deliver_documents(core.store, job["articles"], delivery_job,
-                os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_OWNER_ID"))
+            result = deliver_documents(core.store, job["articles"], delivery_job,
+                                       os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_OWNER_ID"))
+            documents["sent"] += result["sent"]
+            documents["unconfirmed"] = result["unconfirmed"]
+
+    steps = dispatch_passes(core, endpoint, secret, os.environ["ROUTERAI_API_KEY"],
+                            guard=configured_guard(), account=configured_account(), job_scope=pilot,
+                            count=int(count), deliver=deliver) if production else {}
+    if production and delivery_job:
+        steps["telegramDocuments"] = documents
     print(json.dumps({"intakeDelivered": intake["delivered"], **steps,
                       "executionEnabled": production, "publicationAuthorized": False, "rssEnabled": False}))
 
