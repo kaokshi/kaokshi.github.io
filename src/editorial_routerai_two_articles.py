@@ -380,15 +380,16 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
         unused_stills = ([row for row in still_candidates(scene, film, film_registry)
                           if row["sha256"] not in {image["original_sha256"] for image in rows}]
                          if film else [])
-        if film and any(row["source_type"] == "commons_film" for row in unused_stills):
+        if film and any(row["source_type"] in {"commons_film", "internet_archive_film"} for row in unused_stills):
             ranked = []
             for option in unused_stills:
                 try:
                     raw, meta = fetch_still(option, film, private_read=checkpoints.shared_asset)
-                    scores, _ = compare_pixels("siglip", decode_candidate(raw)[0], [scene["subject"]])
-                    ranked.append((scores[0], raw, meta))
-                except (ProviderError, ValueError, OSError):
+                    candidate_image, _ = decode_candidate(raw)
+                except (Blocked, ValueError, OSError):
                     continue
+                scores, _ = compare_pixels("siglip", candidate_image, [scene["subject"]])
+                ranked.append((scores[0], raw, meta))
             film_candidates = [(raw, meta) for _, raw, meta in sorted(ranked, key=lambda row: -row[0])]
         else:
             film_candidates = None
@@ -474,6 +475,7 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 f"Общий стиль: {visual}. Смена места или времени допустима по тексту. "
                 "Для обложки отдельно проверь, что её обещание поддерживает содержание статьи. "
                 "Проверь первый кадр по этому разделу. Другие объекты статьи не обязательны. "
+                "Для кино текстовая карточка, титры или постер не заменяют кадр сцены. "
                 "Проверь видимые дефекты, физику, анатомию, артефакты и соответствие разделу. "
                 "Для каждого замечания укажи наблюдаемую область и связь с текстом. "
                 "Маркировка ИИ добавляется программно. Отсутствие водяного знака не дефект. "
