@@ -4,6 +4,9 @@ on:
     branches: [diagnostics/cinema-comparison-20261125]
 permissions:
   contents: read
+concurrency:
+  group: cinema-comparison-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   compare:
     runs-on: ubuntu-latest
