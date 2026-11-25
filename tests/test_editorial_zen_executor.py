@@ -106,6 +106,19 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual(session.cinema_correction_options(already_used, []), [alternative])
         self.assertEqual(classify("film-plan-correction", "brain"), ("plan", "required_correction", None))
 
+    def test_image_attempt_replays_verified_source_bytes(self):
+        from src.editorial_memory import digest
+
+        session = Session(self.cloud, self.article)
+        metadata = {"source": "Synthetic fixture"}
+        name = "legends/attempts/image-00-attempt-1"
+        self.assertIsNone(session.read_attempt_asset(name + ".source", name + ".json"))
+        session.save(name + ".json", json.dumps({"asset": metadata, "original_sha256": digest(b"fixture")}).encode())
+        with self.assertRaisesRegex(CoreBlocked, "image_attempt_artifact_integrity_failed"):
+            session.read_attempt_asset(name + ".source", name + ".json")
+        session.save(name + ".source", b"fixture")
+        self.assertEqual(session.read_attempt_asset(name + ".source", name + ".json"), (b"fixture", metadata))
+
     def test_image_plan_correction_is_a_metered_visual_check(self):
         self.assertEqual(classify("image-plan-correction", "brain"), ("visual_plan", "required_check", None))
 
