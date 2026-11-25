@@ -160,3 +160,20 @@ class TwoArticleTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CinemaPlanFixtureTest(unittest.TestCase):
+    def test_common_schema_reuses_exact_catalogue_identity_without_spoilers(self):
+        from src.editorial_routerai_two_articles import resolve_cinema_plan, UnsafeToTest
+
+        film = {"title": "Synthetic title", "original_title": "Synthetic original", "year": 2025, "qid": "Q1"}
+        original = {"source_topic": film["title"], "title": "Synthetic fixture", "assignment": "Synthetic"}
+        resolved = resolve_cinema_plan(original, [film])
+        self.assertEqual(resolved["qid"], "Q1")
+        self.assertEqual(resolved["format"], "review")
+        self.assertFalse(resolved["spoilers"])
+        self.assertNotIn("qid", original)
+        with self.assertRaisesRegex(UnsafeToTest, "cinema_film_outside_approved_catalogue"):
+            resolve_cinema_plan(original, [film, {**film, "qid": "Q2"}])
+        with self.assertRaisesRegex(UnsafeToTest, "cinema_film_outside_approved_catalogue"):
+            resolve_cinema_plan({**original, "qid": "Q2"}, [film])
