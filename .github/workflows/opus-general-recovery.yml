@@ -1,0 +1,95 @@
+name: Opus generalized editorial recovery
+on:
+  push:
+    branches: [development/opus-codex-handover-20261125]
+    paths: ['.github/workflows/opus-general-recovery.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: opus-developer
+  cancel-in-progress: false
+jobs:
+  develop:
+    if: github.run_attempt == 1 && github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-codex-handover
+          run-id: 45696136266
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/previous
+      - name: Restore independently verified candidate
+        run: |
+          if test -s "$RUNNER_TEMP/previous/tracked.patch"; then git apply "$RUNNER_TEMP/previous/tracked.patch"; fi
+          if test -s "$RUNNER_TEMP/previous/new-files.patch"; then git apply "$RUNNER_TEMP/previous/new-files.patch"; fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Claude Code
+        run: npm install --global @anthropic-ai/claude-code@2.1.316
+      - name: First bounded development session
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPUS_ROUTERAI_API_KEY }}
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_BASE_URL: https://routerai.ru/api
+          ANTHROPIC_DEFAULT_OPUS_MODEL: anthropic/claude-opus-5.5
+          ANTHROPIC_DEFAULT_SONNET_MODEL: anthropic/claude-opus-5.5
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: anthropic/claude-opus-5.5
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+          DISABLE_TELEMETRY: '1'
+          DISABLE_AUTOUPDATER: '1'
+          CLAUDE_CODE_EFFORT_LEVEL: medium
+        run: |
+          test -n "$ANTHROPIC_AUTH_TOKEN" || { echo "::error::developer_key_missing"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/opus-report"
+          claude --version
+          claude -p "Read AGENTS.md, docs/OPUS_CODEX_HANDOVER.md and previous findings. Prior candidate is restored exactly; independent run 45698533399 passed 263 Python and 102 Node tests. Next task: implement generalized recovery of rejected illustrations, source-grounded replacements for scientific diagrams and equivalent shared semantic-validation contracts for all future articles. Prioritize one or two reproducible root causes, not hardcoded topics, films, job IDs or bypasses. Existing six articles are only diagnostic examples. Add tests for unrelated new themes, negative cases, persistence and no repeat charges. Preserve all existing quality, budget and publication guards. Review exact code, save incremental findings early, write docs/OPUS_GENERAL_RECOVERY.md with verified observations and remaining work. No production data, secrets, provider calls, workflow edits, publishing or RSS. Use Read Glob Grep Edit Write only. Independent regression follows. Do not claim live completion." --model anthropic/claude-opus-5.5 --effort medium --max-turns 30 --max-budget-usd 2 --allowedTools "Read,Glob,Grep,Edit,Write" --disallowedTools "Bash,WebFetch,WebSearch,Task,Agent" --output-format json > "$RUNNER_TEMP/opus-report/session.json"
+      - name: Preserve changes even on failure
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/opus-report"
+          git diff --binary HEAD > "$RUNNER_TEMP/opus-report/tracked.patch"
+          git ls-files --others --exclude-standard -z | while IFS= read -r -d '' f; do
+            case "$f" in src/*|tests/*|docs/*) git diff --no-index --binary /dev/null "$f" >> "$RUNNER_TEMP/opus-report/new-files.patch" || test "$?" = 1 ;; esac
+          done
+          git status --short > "$RUNNER_TEMP/opus-report/status.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opus-general-recovery
+          path: ${{ runner.temp }}/opus-report/
+          retention-days: 7
+  verify:
+    needs: develop
+    if: always() && needs.develop.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-general-recovery
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements-editorial.txt Pillow ImageHash cryptography python-docx
+      - name: Apply candidate and run Python regression
+        run: |
+          if test -s "$RUNNER_TEMP/candidate/tracked.patch"; then git apply "$RUNNER_TEMP/candidate/tracked.patch"; fi
+          if test -s "$RUNNER_TEMP/candidate/new-files.patch"; then git apply "$RUNNER_TEMP/candidate/new-files.patch"; fi
+          python -m unittest discover -s tests -q
+      - name: Node offline regression
+        if: always()
+        run: node --test telegram-control/*.test.mjs
