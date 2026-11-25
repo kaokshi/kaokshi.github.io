@@ -1,4 +1,4 @@
-name: ZEN Analytics collector validation
+name: ZEN Analytics final storage validation
 on:
   push:
     branches: [assistant/zen-control-statistics-20261124]
