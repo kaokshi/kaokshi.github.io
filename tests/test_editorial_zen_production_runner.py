@@ -74,5 +74,44 @@ class TestCycle(unittest.TestCase):
             core.article_work("agent:later/legends/1")
 
 
+class DocumentDeliveryTest(unittest.TestCase):
+    def setUp(self):
+        from src.editorial_zen_core import STAGES
+
+        self.store = Store()
+        self.job = "agent:10000000-0000-0000-0000-000000000000"
+        self.article = {"id": self.job + "/cinema/1",
+                        "stages": [{"id": stage, "status": "passed"} for stage in STAGES]}
+        self.prefix = "articles/" + digest(self.article["id"]) + "/delivery/"
+        self.token = "123:fixture"
+        self.owner = "456"
+        self.store.immutable(self.prefix + "article.docx", b"synthetic delivery payload")
+        self.store.immutable(self.prefix + "manifest.json", json.dumps({
+            "article": self.article["id"], "sha256": digest(b"synthetic delivery payload"),
+            "images": 7, "publication_authorized": False}).encode())
+
+    def test_send_is_scoped_and_already_delivered_documents_are_not_resent(self):
+        calls = []
+        def send(*args):
+            calls.append(args)
+            return 100
+        blocked = {**self.article, "id": self.job + "/cinema/2", "stages": []}
+        articles = [self.article, blocked, {**self.article, "id": "agent:other/cinema/1"}]
+        self.assertEqual(runner.deliver_documents(self.store, articles, self.job, self.token,
+                                                 self.owner, send=send), {"sent": 1, "unconfirmed": 0})
+        self.assertEqual(calls, [(self.token, self.owner, "cinema-1.docx", b"synthetic delivery payload")])
+        runner.deliver_documents(self.store, articles, self.job, self.token, self.owner, send=send)
+        self.assertEqual(len(calls), 1)
+
+    def test_unknown_delivery_outcome_is_not_resent(self):
+        from unittest.mock import Mock
+
+        send = Mock(side_effect=TimeoutError)
+        for _ in range(2):
+            self.assertEqual(runner.deliver_documents(self.store, [self.article], self.job, self.token,
+                                                     self.owner, send=send), {"sent": 0, "unconfirmed": 1})
+        send.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

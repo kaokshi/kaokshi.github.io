@@ -61,7 +61,7 @@ export async function productionReadiness(){
    verified:true,
    publicationEnabled:site.publication_enabled===true,
    projectLaunched:policy.future_rss_delivery?.project_launched===true,
-   activeChannels:(site.auto_release_active_channels||[]).filter(x=>channels.includes(x)),
+   activeChannels:(Array.isArray(core?.production_channels)?core.production_channels:[]).filter(x=>channels.includes(x)),
    configuredDailyRub:core?Number(core.main_daily_rub):null,
    configuredMonthlyRub:core?Number(core.rolling_30_day_cap_rub):null,
    adapterConnected:core?.version===1,

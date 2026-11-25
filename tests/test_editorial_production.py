@@ -31,7 +31,7 @@ def draft(channel):
 
 
 class ProductionTests(unittest.TestCase):
-    def test_existing_truman_show_evidence_and_rights_fail_closed(self):
+    def test_existing_truman_show_evidence_and_still_provenance_fail_closed(self):
         repo = Path(__file__).resolve().parents[1]
         existing = read_json(repo / "content/articles/cinema-01-truman-show-real-photos.json")
         ref = read_json(repo / "config/movie_reference_index.json")[existing["slug"]]
@@ -57,7 +57,7 @@ class ProductionTests(unittest.TestCase):
         class Index:
             class memory:
                 time_left = staticmethod(lambda: 1000)
-        with self.assertRaisesRegex(Blocked, "rights_review_pending"):
+        with self.assertRaisesRegex(Blocked, "no_verified_official_still_for_scene"):
             editorial_cinema.stills({"subject": "Truman in Seahaven"}, "Truman Show", None,
                                     Index(), details["film"], {})
 

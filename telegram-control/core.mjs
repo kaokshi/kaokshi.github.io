@@ -74,7 +74,7 @@ export class CoreHandler {
      if(await tx.get(key))continue;
      await tx.put(key,{...slot,recordedAt:now,status:"blocked_prelaunch",reason:slot.type==="prepare"?"production_not_connected":"rss_not_authorized"});
      batch.push(slot);
-     if(slot.type==="prepare"&&slot.channel!=="cinema")await saveJob(tx,"scheduled:"+slot.id,{items:[{channel:slot.channel,count:1}],day:slot.id.split(":")[1],instructions:"По сохранённому расписанию"},now,"schedule",slot.releaseAt);
+     if(slot.type==="prepare")await saveJob(tx,"scheduled:"+slot.id,{items:[{channel:slot.channel,count:1}],day:slot.id.split(":")[1],instructions:"По сохранённому расписанию"},now,"schedule",slot.releaseAt);
     }
    }
    await tx.put("core:cursor",now);await tx.put("core:lastTick",new Date(now).toISOString());return batch;

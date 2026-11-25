@@ -15,7 +15,7 @@ class TwoArticleTest(unittest.TestCase):
             "edit": "deepseek/deepseek-v4-pro-0813",
             "image": "bytedance-seed/seedream-5-0-flash",
         })
-        self.assertEqual(set(two.CHANNELS), {"legends", "science"})
+        self.assertEqual(set(two.PILOT_CHANNELS), {"legends", "science"})
         self.assertEqual((two.BUDGET, two.DAILY, two.MONTHLY), (70, 300, 9000))
 
     def test_private_storage_failure_prevents_spend(self):

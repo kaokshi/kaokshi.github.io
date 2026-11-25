@@ -1,4 +1,4 @@
-"""Film identity, source sufficiency and authorized stills for the paused channel."""
+"""Film identity, source sufficiency and source provenance for stills for the cinema channel."""
 from datetime import date, timedelta
 import json
 import re
@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 
 from .editorial_memory import digest, read_json
 from .editorial_no_repeat import normalize
-from .editorial_http import Blocked, ProviderError, request
+from .editorial_http import Blocked, ProviderError, check_url, request
 from .editorial_review import sources
 from .movie_autonomous_research import movie_sources
 
@@ -96,27 +96,41 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
             "detailed_plot_evidence": permitted_detail, "records": result}
 
 
+def registered_stills(film, registry):
+    return [row for row in registry.get(film["qid"], {}).get("stills", [])
+            if isinstance(row, dict)
+            and row.get("year") == film["year"] and row.get("original_title") == film["original_title"]
+            and re.fullmatch(r"[a-f0-9]{64}", str(row.get("sha256", "")))
+            and all(isinstance(row.get(k), str) and row[k].strip()
+                    for k in ("source_page", "asset_url", "scene"))
+            and row.get("source_type") in {"official_press", "rights_holder"}]
+
+
+def still_candidates(scene, film, registry):
+    query = set(normalize(scene["subject"]).split())
+    return sorted(registered_stills(film, registry), key=lambda row: -len(
+        query & set(normalize(row["scene"]).split())))
+
+
+def fetch_still(row, film, downloader=request):
+    check_url(row["source_page"], STUDIO_DOMAINS)
+    check_url(row["asset_url"], STUDIO_DOMAINS)
+    raw = downloader(row["asset_url"], STUDIO_DOMAINS, timeout=10)
+    if digest(raw) != row["sha256"]:
+        raise Blocked("film_still_sha_mismatch")
+    metadata = {"kind": "photo", "film_id": film["qid"], "source": row["source_type"],
+                "source_page": row["source_page"], "asset_url": row["asset_url"],
+                "label": "Кадр из фильма", "ai_generated": False, "rights_status": "not_checked"}
+    return raw, metadata
+
+
 def stills(scene, subject, path, index, film, rights_registry, downloader=request):
-    record = rights_registry.get(film["qid"], {})
-    stills = record.get("stills", [])
-    for row in sorted(stills, key=lambda x: -len(
-            set(normalize(scene["subject"]).split()) & set(normalize(x.get("scene", "")).split()))):
+    for row in still_candidates(scene, film, rights_registry):
         if index.memory.time_left() < 75:
             raise Blocked("production_deadline")
-        if (row.get("rights_status") != "permission_verified" or row.get("year") != film["year"]
-                or row.get("original_title") != film["original_title"]
-                or not all(row.get(k) for k in ("sha256", "source_page", "rights_holder", "asset_url",
-                                                "rights_basis", "restrictions", "permission_ref"))
-                or row.get("source_type") not in {"official_press", "rights_holder"}):
-            continue
         try:
-            raw = downloader(row["asset_url"], STUDIO_DOMAINS, timeout=10)
-            if digest(raw) != row["sha256"]:
-                continue
-            metadata = {**row, "kind": "photo", "film_id": film["qid"], "source": row["source_type"],
-                        "creator": row["rights_holder"]}
-            metadata.pop("sha256")
+            raw, metadata = fetch_still(row, film, downloader)
             return index.save(raw, metadata, scene, subject, path)
-        except (ValueError, OSError, ProviderError):
+        except (ValueError, OSError, Blocked):
             continue
-    raise Blocked("rights_review_pending: no_verified_official_still_for_scene")
+    raise Blocked("no_verified_official_still_for_scene")

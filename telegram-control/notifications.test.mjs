@@ -11,7 +11,7 @@ test("notify only changed stage statuses and budget threshold transitions",()=>{
 });
 test("executor notifications require owner opt-in, survive pause for alerts, deduplicate concurrent delivery",async()=>{
  const s=storage(),env={TELEGRAM_BOT_TOKEN:"fixture",TELEGRAM_OWNER_ID:"123"};let sends=0;const old=globalThis.fetch;
- globalThis.fetch=async(url,opts)=>{sends++;assert.match(url,/api\.telegram\.org/);const body=JSON.parse(opts.body);assert.equal(body.chat_id,"123");assert.match(body.text,/несверенное списание/);assert.match(body.text,/Публикация и платное исполнение не разрешены/);return Response.json({ok:true});};
+ globalThis.fetch=async(url,opts)=>{sends++;assert.match(url,/api\.telegram\.org/);const body=JSON.parse(opts.body);assert.equal(body.chat_id,"123");assert.match(body.text,/несверенное списание/);assert.match(body.text,/Публикация и RSS выключены/);return Response.json({ok:true});};
  try{
   await notifyReceipt(s,env,changed,reportEvents(base,changed),now);assert.equal(sends,0);
   await s.put("ops:state",{notifications:true,stopped:true});
