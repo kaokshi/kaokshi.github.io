@@ -1,0 +1,96 @@
+name: ZEN Browser Run exact statistics route
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: zen-browser-statistics-probe
+  cancel-in-progress: false
+jobs:
+  smoke:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install CDP client
+        working-directory: ${{ runner.temp }}
+        run: npm install --no-audit --no-fund --ignore-scripts --save-exact playwright-core@1.56.1
+      - name: Inspect rendered login controls without credentials
+        working-directory: ${{ runner.temp }}
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DZEN_STATS_URL: ${{ secrets.DZEN_SCIENCE_STATS_URL }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_BROWSER_TOKEN }}
+        run: |
+          node <<'JS'
+          const { chromium } = require('playwright-core');
+          (async () => {
+            const id = process.env.CF_ACCOUNT_ID;
+            const token = process.env.CF_API_TOKEN;
+            if (!id || !token || !process.env.DZEN_STATS_URL) {
+              console.error('BROWSER_CONFIG_MISSING');
+              process.exitCode = 1;
+              return;
+            }
+            if (!/^[a-f0-9]{32}$/i.test(id)) {
+              console.error('BROWSER_ACCOUNT_ID_INVALID');
+              process.exitCode = 1;
+              return;
+            }
+            let browser;
+            let stage = 'CONNECT';
+            try {
+              browser = await chromium.connectOverCDP(
+                'wss://api.cloudflare.com/client/v4/accounts/' + id + '/browser-run/devtools/browser',
+                { headers: { Authorization: 'Bearer ' + token }, timeout: 15000 }
+              );
+              console.log('BROWSER_CONNECTED');
+              stage = 'NAVIGATE';
+              const context = browser.contexts()[0];
+              const page = context.pages()[0] || await context.newPage();
+              const target = new URL(process.env.DZEN_STATS_URL);
+              if (target.origin !== 'https://dzen.ru' || !/^\/profile\/editor\/id\/[a-f0-9]+\/publications-stat$/.test(target.pathname)) throw new Error('Invalid configured route');
+              const response = await page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: 15000 });
+              stage = 'ASSERT';
+              const deadline = Date.now() + 10000;
+              let login = false, challenge = false, studio = false, host = '', bodyLength = 0;
+              do {
+                host = new URL(page.url()).hostname;
+                const body = (await page.locator('body').innerText({timeout: 1500}).catch(() => '')).slice(0, 30000);
+                bodyLength = body.length;
+                challenge = /капча|подтвердите, что вы не робот|captcha|access denied|verify you are human/i.test(body);
+                login = /(?:^|\.)passport\.yandex\.(?:ru|com)$/.test(host) || /войти|авторизац|вход в аккаунт|вход в дзен/i.test(body) || await page.locator('input[type=password], input[autocomplete=username]').count() > 0;
+                studio = /статистика|монетизация|публикации/i.test(body);
+                if (challenge || login) break;
+                await new Promise(r => setTimeout(r, 500));
+              } while (Date.now() < deadline);
+              const knownHost = /(?:^|\.)(?:dzen\.ru|yandex\.ru|yandex\.com|ya\.ru|vk\.com|vk\.ru)$/.test(host);
+              console.log('DZEN_HTTP_STATUS=' + (response?.status() || 0));
+              console.log('DZEN_KNOWN_HOST=' + knownHost);
+              console.log('DZEN_HOST_CATEGORY=' + (knownHost ? host : 'OTHER'));
+              console.log('DZEN_RENDERED_TEXT_LENGTH=' + bodyLength);
+              console.log('DZEN_CHALLENGE=' + challenge);
+              console.log('DZEN_LOGIN_HINT=' + login);
+              console.log('DZEN_STUDIO_HINT=' + studio);
+              if (!knownHost || challenge || !login) throw new Error('Login interface not confirmed');
+              console.log('DZEN_LOGIN_INTERFACE_CONFIRMED');
+            } catch (error) {
+              const match = String(error?.message || '').match(/\b(401|403|404|429|500|502|503)\b/);
+              console.error('BROWSER_' + stage + '_FAILED' + (match ? '_HTTP_' + match[1] : ''));
+              process.exitCode = 1;
+            } finally {
+              if (browser) {
+                try {
+                  await browser.close();
+                  console.log('BROWSER_CLOSED');
+                } catch {
+                  console.error('BROWSER_CLOSE_FAILED');
+                  process.exitCode = 1;
+                }
+              }
+            }
+          })().catch(() => { console.error('BROWSER_SMOKE_FAILED'); process.exitCode = 1; });
+          JS
