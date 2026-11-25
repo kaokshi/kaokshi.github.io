@@ -1,4 +1,5 @@
 """Bounded integration cycle. Intake can run without inference permissions."""
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -64,7 +65,7 @@ def recover_recorded_response(core, account):
 
 
 def dispatch_cycle(core, endpoint, secret, token, *, guard, account, job_scope=None,
-                   advance=dispatch_one, deliver=push_receipt):
+                   advance=dispatch_one, deliver=push_receipt, executor=execute):
     recover_recorded_response(core, account)
     jobs = core.access(lambda c: c.snapshot())["jobs"]
     candidates = sorted(a["id"] for j in jobs if not job_scope or j["id"] == job_scope for a in j["articles"]
@@ -81,7 +82,7 @@ def dispatch_cycle(core, endpoint, secret, token, *, guard, account, job_scope=N
         job_id = article.split("/", 1)[0]
         started = monotonic()
         try:
-            result = advance(core, article, token, guard=guard, execute=execute)
+            result = advance(core, article, token, guard=guard, execute=executor)
             reason = result.get("reason")
             worked = result.get("status") == "attempt_finished"
             attempted += worked
@@ -126,11 +127,12 @@ def dispatch_cycle(core, endpoint, secret, token, *, guard, account, job_scope=N
 def dispatch_passes(core, endpoint, secret, token, *, guard, account, job_scope, count, deliver):
     """Run bounded passes for one explicit pilot, with the same per-stage controls."""
     totals = {"attempted": 0, "receipts": 0}
-    deadline = monotonic() + 25 * 60
+    cutoff = monotonic() + 25 * 60
+    executor = partial(execute, paid_call_cutoff=cutoff) if count > 1 else execute
     for number in range(count):
         started = monotonic()
         result = dispatch_cycle(core, endpoint, secret, token, guard=guard,
-                                account=account, job_scope=job_scope)
+                                account=account, job_scope=job_scope, executor=executor)
         for field in totals:
             totals[field] += result[field]
         if count > 1:
@@ -138,7 +140,7 @@ def dispatch_passes(core, endpoint, secret, token, *, guard, account, job_scope,
                               **result}), flush=True)
         snapshot = core.access(lambda c: c.snapshot())
         deliver(snapshot)
-        if count == 1 or not result["attempted"] or monotonic() >= deadline:
+        if count == 1 or not result["attempted"] or monotonic() >= cutoff:
             break
         budget = snapshot["budget"]
         if budget["unsettledRequest"] or budget["overrun"] or budget["rollingOverrun"]:

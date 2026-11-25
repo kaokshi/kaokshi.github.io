@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from src.editorial_zen_cloud import CloudCore, Conflict, STATE, blob_sha
 from src.editorial_zen_core import CoreBlocked
-from src.editorial_zen_executor import MODELS, MeteredRouter, Session, seed_rights_verified, verify_seed_route
+from src.editorial_zen_executor import MODELS, MeteredRouter, Pause, Session, seed_rights_verified, verify_seed_route
 
 
 class Store:
@@ -89,6 +89,18 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual(self.cloud.access(lambda c: c.snapshot())["budget"]["meteredRub"], "1.25")
         with self.assertRaisesRegex(CoreBlocked, "input_changed"):
             self.plan(self.router(), "changed")
+
+    def test_deadline_blocks_new_charge_but_replays_saved_response(self):
+        router = self.router()
+        router.session.paid_call_cutoff = 0
+        with self.assertRaisesRegex(Pause, "pilot_paid_call_deadline"):
+            self.plan(router)
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.cloud.access(lambda c: c.snapshot())["budget"]["unsettledRequest"])
+
+        saved = self.plan(self.router())
+        self.assertEqual(self.plan(router), saved)
+        self.assertEqual(len(self.calls), 1)
 
     def test_unknown_response_never_calls_provider_again(self):
         self.fail = True

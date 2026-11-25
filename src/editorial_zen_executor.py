@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+from time import monotonic
 from threading import Lock
 from types import SimpleNamespace
 
@@ -96,6 +97,8 @@ class MeteredRouter(Spend):
         name = f"requests/{stage}.json"
         response = self.session.read(name)
         if response is None:
+            if self.session.paid_call_cutoff is not None and monotonic() >= self.session.paid_call_cutoff:
+                raise Pause("pilot_paid_call_deadline")
             self.session.permit(phase)
             if role == "image":
                 verify_seed_route(self.token, self.transport)
@@ -154,6 +157,7 @@ class Session:
     def __init__(self, core, article, *, target=None, guard=None, account=None):
         self.core, self.article, self.target = core, article, target
         self._assets = {}
+        self.paid_call_cutoff = None
         self.guard = guard
         self.account = account
         self.plan, self.next_stage = core.access(lambda c: c.article_work(article))
@@ -365,10 +369,11 @@ class Session:
         self.permit("package")
 
 
-def execute(core, article, token, *, target=None, transport=call, balance=credits, pipeline=evaluate_channel, guard=None, account=None):
+def execute(core, article, token, *, target=None, transport=call, balance=credits, pipeline=evaluate_channel, guard=None, account=None, paid_call_cutoff=None):
     if target is not None and target not in STAGES:
         raise CoreBlocked("unknown_target_stage")
     session = Session(core, article, target=target, guard=guard or configured_guard())
+    session.paid_call_cutoff = paid_call_cutoff
     session.check_control()
     if session.next_stage is None:
         return
