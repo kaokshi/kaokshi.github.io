@@ -19,6 +19,8 @@ WIKI = ("wikimedia.org",)
 STUDIO_DOMAINS = ("paramount.com", "universalpictures.com", "warnerbros.com", "sonypictures.com",
                   "disney.com", "a24films.com", "focusfeatures.com", "lionsgate.com", "bfi.org.uk",
                   "rogerebert.com", "rottentomatoes.com", "bbc.com", "independent.co.uk", "theguardian.com")
+DISNEY_PRESS = "press.disney.co.uk"
+DISNEY_IMAGE_CDN = "lumiere-a.akamaihd.net"
 COMMONS_DOMAINS = ("commons.wikimedia.org", "upload.wikimedia.org")
 ARCHIVE_DOMAINS = ("archive.org",)
 WIFI = "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/ru.wikipedia/all-access/"
@@ -179,7 +181,9 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
     trusted = [row for row in approved.get("plot_sources", []) if row.get("reviewed") is True
                and row.get("version_year") == year and row.get("kind") == "complete_plot"]
     deep_urls = [row["url"] for row in trusted]
-    fetched = fetch(list(dict.fromkeys([*deep_urls, *public_urls])), STUDIO_DOMAINS)
+    press_urls = [row["source_page"] for row in registered_stills({**identity, "year": year}, rights_registry)
+                  if urlsplit(row["source_page"]).hostname == DISNEY_PRESS]
+    fetched = fetch(list(dict.fromkeys([*deep_urls, *public_urls, *press_urls])), (*STUDIO_DOMAINS, DISNEY_PRESS))
     sources_ok = [row for row in fetched if row["status"] == "accessible"
                   and any(normalize(name) in normalize(row["text"])
                           for name in (identity["title"], identity["original_title"]) if len(normalize(name)) > 3)]
@@ -256,15 +260,24 @@ def fetch_still(row, film, downloader=request, *, private_read=None):
             raise Blocked("film_still_private_path_invalid")
         raw = private_read(path)
     else:
-        check_url(row["source_page"], STUDIO_DOMAINS)
-        check_url(row["asset_url"], STUDIO_DOMAINS)
-        raw = downloader(row["asset_url"], STUDIO_DOMAINS, timeout=10)
+        source = urlsplit(row["source_page"])
+        if row["source_type"] == "official_press" and source.hostname == DISNEY_PRESS:
+            check_url(row["source_page"], (DISNEY_PRESS,))
+            asset = urlsplit(row["asset_url"])
+            if not source.path.startswith("/gallery/") or asset.hostname != DISNEY_IMAGE_CDN or not asset.path.startswith("/v1/images/"):
+                raise Blocked("film_press_asset_outside_gallery")
+            domains = (DISNEY_IMAGE_CDN,)
+        else:
+            check_url(row["source_page"], STUDIO_DOMAINS)
+            domains = STUDIO_DOMAINS
+        check_url(row["asset_url"], domains)
+        raw = downloader(row["asset_url"], domains, timeout=10)
     if raw is None or digest(raw) != row["sha256"]:
         raise Blocked("film_still_sha_mismatch")
     metadata = {"kind": "photo", "film_id": film["qid"], "source": row["source_type"],
                 "source_page": row["source_page"], "asset_url": row["asset_url"],
                 "label": "Кадр из фильма", "ai_generated": False, "rights_status": "not_checked"}
-    metadata.update({key: row[key] for key in ("license", "license_url", "timestamp_seconds") if key in row})
+    metadata.update({key: row[key] for key in ("license", "license_url", "attribution", "timestamp_seconds") if key in row})
     return raw, metadata
 
 

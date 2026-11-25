@@ -85,3 +85,21 @@ class CinemaReleaseTests(unittest.TestCase):
             fetch_still(still, film, downloader=lambda *_, **__: b"wrong")
         with self.assertRaisesRegex(Blocked, "url_outside_allowed_sources"):
             fetch_still({**still, "source_page": "https://other.example/fixture"}, film)
+
+
+    def test_disney_press_gallery_pairs_with_the_expected_image_origin(self):
+        from src.editorial_cinema import fetch_still
+        from src.editorial_memory import digest
+
+        film = {"qid": "Q1", "year": 2025}
+        row = {"source_type": "official_press",
+               "source_page": "https://press.disney.co.uk/gallery/fixture",
+               "asset_url": "https://lumiere-a.akamaihd.net/v1/images/fixture.jpeg",
+               "sha256": digest(b"synthetic"), "attribution": "Fixture"}
+        content, metadata = fetch_still(row, film, downloader=lambda *_, **__: b"synthetic")
+        self.assertEqual(content, b"synthetic")
+        self.assertEqual(metadata["attribution"], "Fixture")
+        self.assertEqual(metadata["rights_status"], "not_checked")
+        for asset in ("https://lumiere-a.akamaihd.net/unrelated.jpg", "https://paramount.com/image.jpg"):
+            with self.assertRaisesRegex(Blocked, "film_press_asset_outside_gallery"):
+                fetch_still({**row, "asset_url": asset}, film)

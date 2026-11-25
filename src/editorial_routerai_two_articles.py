@@ -423,7 +423,7 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                           if row["sha256"] not in {image["original_sha256"] for image in rows}]
                          if film else [])
         unused_stills = unique_stills(unused_stills) if film else []
-        if film and any(row["source_type"] in {"commons_film", "internet_archive_film"} for row in unused_stills):
+        if film and unused_stills:
             film_candidates = ranked_film_stills(
                 still_cache, film, unused_stills, scene["subject"],
                 checkpoints.shared_asset if checkpoints else None)
@@ -610,7 +610,11 @@ def render(article, title, cover, pictures, records, *, private_preview=False):
         if row.get("kind") == "diagram" and row.get("source"):
             label += f" · [научный источник]({row['source']})"
         if row.get("source_page"):
-            label += f" · {row['attribution']} · [{row['license']}]({row['license_url']}) · [источник]({row['source_page']})"
+            label += f" · [источник]({row['source_page']})"
+            if row.get('attribution'):
+                label += f" · {row['attribution']}"
+            if row.get('license') and row.get('license_url'):
+                label += f" · [{row['license']}]({row['license_url']})"
         return [f"![{row.get('label', 'ИИ-иллюстрация')}](images/{row['file']})", "", label, ""]
 
     if private_preview:
