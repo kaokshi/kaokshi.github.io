@@ -106,6 +106,9 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual(session.cinema_correction_options(already_used, []), [alternative])
         self.assertEqual(classify("film-plan-correction", "brain"), ("plan", "required_correction", None))
 
+    def test_image_plan_correction_is_a_metered_visual_check(self):
+        self.assertEqual(classify("image-plan-correction", "brain"), ("visual_plan", "required_check", None))
+
     def test_deadline_blocks_new_charge_but_replays_saved_response(self):
         router = self.router()
         router.session.paid_call_cutoff = 0

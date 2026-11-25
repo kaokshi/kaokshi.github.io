@@ -894,8 +894,28 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     save(f"{channel}/qwen-visual-plan.json", json_bytes(audit))
     if status["text_qa"] != "passed":
         raise UnsafeToTest("qwen_text_or_source_qa_failed")
-    visual, scenes = plan_images(audit, article["sections"], science=channel == "science", cinema=bool(film),
-                                legacy=bool(resume and "audit" in resume), licensed_photos=licensed_photos)
+    visual_options = {"science": channel == "science", "cinema": bool(film),
+                      "legacy": bool(resume and "audit" in resume), "licensed_photos": licensed_photos}
+    try:
+        visual, scenes = plan_images(audit, article["sections"], **visual_options)
+    except UnsafeToTest as exc:
+        if not checkpoints or str(exc) not in {"image_plan_anchor_outside_section", "image_plan_count",
+                                               "image_plan_duplicate_brief", "science_visual_mix_required"}:
+            raise
+        failed_rule = str(exc)
+        replacement = object_response(spend.chat(channel, "image-plan-correction", "brain", (
+            f"Канал «{name}». Исправь только визуальный план. Статью не переписывай. "
+            "Верни JSON с полями style и images. Для обложки скопируй anchor дословно из "
+            "вступления. В каждом следующем слоте возьми короткую непрерывную цитату anchor "
+            "из текста соответствующего раздела, без заголовка, без кавычек и многоточий. "
+            "Сохрани порядок: обложка, затем разделы 1–6. Сохрани типы изображений и источники, "
+            "кроме изменений, необходимых для исправления ошибки. Не повторяй brief. "
+            f"Ошибка проверки: {failed_rule}. "
+            f"План: {json.dumps({'style': audit.get('style'), 'images': audit.get('images')}, ensure_ascii=False)}"
+            f"\nТекст статьи:\n{canonical(article)}"
+        ), 5000, reserve=reserve))
+        save(f"{channel}/qwen-visual-plan-correction.json", json_bytes(replacement))
+        visual, scenes = plan_images(replacement, article["sections"], **visual_options)
     if checkpoints:
         checkpoints.approve_visual_plan(canonical(article))
     if checkpoints:

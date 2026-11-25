@@ -39,7 +39,7 @@ def classify(step, role):
         return "edit", "required_correction", None
     if re.fullmatch(r"audit-correction-[2-5]", step) and role == "edit":
         return "visual_plan", "required_correction", None
-    if (step == "editorial_and_image_plan" or re.fullmatch(r"audit-correction-[2-5]-qa", step)) and role == "brain":
+    if (step in {"editorial_and_image_plan", "image-plan-correction"} or re.fullmatch(r"audit-correction-[2-5]-qa", step)) and role == "brain":
         return "visual_plan", "required_check", None
     if step == "article_visual_review" and role == "brain":
         return "qa", "required_check", None
