@@ -1,58 +1,31 @@
 name: ZEN CORE cloud queue and private executor
 on:
-  push:
-    branches: [integration/zen-core-routerai-20261124]
-    paths: ['.github/workflows/zen-core-intake-runner.yml']
   workflow_dispatch:
-    inputs:
-      pilot_job:
-        description: Confirmed Telegram agent job ID, with two articles per channel. Empty runs intake only.
-        type: string
-        default: ''
-  schedule:
-    # Scheduled workflows only run from the default branch after integration.
-    - cron: '7,22,37,52 * * * *'
 permissions:
   contents: read
-concurrency:
-  group: zen-core-intake-runner
-  cancel-in-progress: false
 jobs:
-  intake:
-    if: (github.ref == 'refs/heads/integration/zen-core-routerai-20261124' && github.event_name != 'schedule') || (github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.ZEN_CORE_INTAKE_SCHEDULE_ENABLED == 'true'))
+  queue-observation:
+    if: github.ref == 'refs/heads/codex/zen-queue-observation'
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Check safety and cursor contract
-        run: python -m unittest tests.test_editorial_zen_intake_runner tests.test_editorial_zen_control -q
-      - name: Install production checks only for an explicitly enabled private executor
-        if: github.ref == 'refs/heads/main' && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true'))
-        run: |
-          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0' 'torchvision==0.26.0'
-          python -m pip install -r requirements-production.txt 'sentencepiece==0.2.1' ruts
-      - name: Refresh the private cinema catalogue for production
-        if: github.ref == 'refs/heads/main' && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true'))
+      - name: Observe queue eligibility without exposing identifiers
         env:
-          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
-        run: python -m src.editorial_cinema_catalogue
-      - name: Poll confirmed intents and return progress
-        env:
-          ZEN_CORE_INTAKE_ENDPOINT: 'https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/intake'
           ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
-          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
-          ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
-          ZEN_CORE_CONTROL_ENDPOINT: 'https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/control'
-          ZEN_CORE_PRODUCTION_ENABLED: ${{ github.ref == 'refs/heads/main' && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true')) }}
-          ZEN_CORE_PILOT_JOB: ${{ github.ref == 'refs/heads/main' && inputs.pilot_job || '' }}
-          OMP_NUM_THREADS: '2'
-          ZEN_CORE_TELEGRAM_DOCX_JOB: ${{ github.ref == 'refs/heads/main' && vars.ZEN_CORE_TELEGRAM_DOCX_JOB || '' }}
-          TELEGRAM_BOT_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.TELEGRAM_BOT_TOKEN || '' }}
-          TELEGRAM_OWNER_ID: ${{ github.ref == 'refs/heads/main' && secrets.TELEGRAM_OWNER_ID || '' }}
-          HF_HUB_DISABLE_XET: '1'
-        run: python -u telegram-control/production_runner.py
+        run: |
+          python - <<'PYCODE'
+          import json, os
+          from urllib.request import Request, urlopen
+          url = "https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/queue"
+          headers = {"Authorization": "Bearer " + os.environ["ZEN_CORE_INTAKE_SECRET"], "Content-Type": "application/json"}
+          cursor = None
+          for _ in range(10):
+              response = Request(url, data=json.dumps({"cursor": cursor}).encode(), headers=headers)
+              with urlopen(response, timeout=15) as reply:
+                  page = json.load(reply)
+              print(json.dumps({"emergencyPaused": page["stopped"], "eligibleCount": len(page["ids"]),
+                                "morePages": page["nextCursor"] is not None}))
+              cursor = page["nextCursor"]
+              if cursor is None:
+                  break
+          PYCODE
