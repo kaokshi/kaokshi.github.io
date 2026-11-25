@@ -21,7 +21,10 @@ def main():
         try:
             result=fn();report[name]={'status':'ok','seconds':round(time.monotonic()-start,2),'peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss};save();return result
         except Exception as e:
-            report[name]={'status':'error','error_type':type(e).__name__,'seconds':round(time.monotonic()-start,2)};save();print('STAGE_FAILED',name,type(e).__name__,flush=True);return None
+            report[name]={'status':'error','error_type':type(e).__name__,'seconds':round(time.monotonic()-start,2)};save();print('STAGE_FAILED',name,type(e).__name__,flush=True)
+            import traceback
+            if name!='candidate_fetch':traceback.print_exception(e)
+            return None
     def clean():
         load_model.cache_clear();gc.collect()
     with tempfile.TemporaryDirectory() as d:
@@ -92,18 +95,19 @@ def main():
             return scores
         q=stage('qwen_inference',qwen)
         def smol():
-            from transformers import AutoProcessor,AutoModelForImageTextToText
-            name='HuggingFaceTB/SmolVLM2-2.2B-Instruct'
-            processor=AutoProcessor.from_pretrained(name)
-            model=AutoModelForImageTextToText.from_pretrained(name,dtype=torch.bfloat16).eval()
-            for r in rows:
-                im=r['image'].copy();im.thumbnail((448,448))
-                messages=[{'role':'user','content':[{'type':'image'},{'type':'text','text':'Describe only visible objects, actions, setting and characters in this movie frame in one concise sentence. Do not guess names or plot.'}]}]
-                text=processor.apply_chat_template(messages,add_generation_prompt=True)
-                inputs=processor(text=text,images=[im],return_tensors='pt')
-                with torch.inference_mode():ids=model.generate(**inputs,max_new_tokens=40,do_sample=False)
-                r['smol']=processor.decode(ids[0,inputs['input_ids'].shape[1]:],skip_special_tokens=True)
-            del model,processor;gc.collect();return True
+            paths=[]
+            for i,r in enumerate(rows):
+                p=tmp/f'smol-{i}.jpg'
+                im=r['image'].copy();im.thumbnail((448,448));im.save(p)
+                paths.append(str(p))
+            manifest=tmp/'smol-input.json'
+            manifest.write_text(json.dumps(paths))
+            output=tmp/'smol-output.json'
+            subprocess.run(['.smol-venv/bin/python','src/cinema_smol_worker.py',str(manifest),str(output)],check=True,timeout=3600)
+            captions=json.loads(output.read_text())
+            assert len(captions)==len(rows) and all(isinstance(c,str) and c.strip() for c in captions)
+            for r,caption in zip(rows,captions):r['smol']=caption
+            return True
         s=stage('smol_inference',smol)
         def assign(name,score,n_candidates):
             # same caption-based acceptance criterion for B/C; not calibrated accuracy.
