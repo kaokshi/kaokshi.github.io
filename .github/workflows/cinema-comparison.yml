@@ -1,0 +1,35 @@
+name: Cinema A B C comparison
+on:
+  push:
+    branches: [diagnostics/cinema-comparison-20261125]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        film: [dune, wild_robot, wing_it]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'transformers==5.24.0' sentence-transformers Pillow ImageHash python-docx imageio-ffmpeg scipy 'scenedetect[opencv-headless]' sentencepiece accelerate
+      - name: Compare real images
+        env:
+          TMDB_API_TOKEN: ${{ secrets.TMDB_API_TOKEN }}
+          OMP_NUM_THREADS: '2'
+          MKL_NUM_THREADS: '2'
+        run: python -m src.cinema_comparison ${{ matrix.film }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cinema-comparison-${{ matrix.film }}
+          path: comparison-output/
+          retention-days: 7
+          if-no-files-found: warn
