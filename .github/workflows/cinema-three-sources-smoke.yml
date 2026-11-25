@@ -8,16 +8,18 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Install image verifier
-        run: python3 -m pip install --quiet Pillow
+        run: |
+          python3 -m pip install --quiet Pillow 'mcp>=1.12,<2' imageio-ffmpeg
+          python3 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_version())'
       - name: Check three read-only sources
         env:
           TMDB_API_TOKEN: ${{ secrets.TMDB_API_TOKEN }}
         run: |
           python3 - <<'PY'
-          import os,json,urllib.request,urllib.parse,hashlib,subprocess,tempfile,pathlib,re
+          import os,json,urllib.request,urllib.parse,hashlib,subprocess,tempfile,pathlib,re,asyncio,imageio_ffmpeg
           from PIL import Image
           from io import BytesIO
           def get(url, headers=None, data=None, cap=2_000_000):
@@ -34,47 +36,43 @@ jobs:
               except Exception as e:
                   print(name+'_FAIL',type(e).__name__,getattr(e,'code',''),flush=True); failed.append(name)
           def outnow():
-              url='https://outnow.ch/mcp'
-              headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream'}
-              def rpc(method,params,id=None):
-                  msg={'jsonrpc':'2.0','method':method,'params':params}
-                  if id is not None: msg['id']=id
-                  b,h=get(url,headers,json.dumps(msg).encode())
-                  if h.get('Mcp-Session-Id'): headers['Mcp-Session-Id']=h['Mcp-Session-Id']
-                  if not b: return {}
-                  s=b.decode()
-                  if s.lstrip().startswith('{'): return json.loads(s)
-                  for line in s.splitlines():
-                      if line.startswith('data:'):
-                          v=json.loads(line[5:].strip())
-                          if v.get('id')==id:return v
-                  raise ValueError('rpc_response')
-              init=rpc('initialize',{'protocolVersion':'2025-03-26','capabilities':{},'clientInfo':{'name':'zen-source-test','version':'1'}},1)
-              headers['MCP-Protocol-Version']=init['result']['protocolVersion']
-              rpc('notifications/initialized',{})
-              tools=rpc('tools/list',{},2)['result']['tools']
-              print('OUTNOW_TOOL_COUNT',len(tools),flush=True)
-              assert tools
-              # Only invoke a documented read-only search when its schema is unambiguous.
-              for t in tools:
-                  if not re.search(r'search',t['name'],re.I): continue
-                  schema=t.get('inputSchema',{}); props=schema.get('properties',{})
-                  key=next((k for k in ('query','q','search','term') if props.get(k,{}).get('type')=='string'),None)
-                  if key and set(schema.get('required',[]))<={key}:
-                      result=rpc('tools/call',{'name':t['name'],'arguments':{key:'Dune: Part Two'}},3)['result']
-                      assert not result.get('isError')
-                      print('OUTNOW_SEARCH_DUNE',bool(re.search(r'dune',json.dumps(result),re.I)),flush=True)
-                      return
-              print('OUTNOW_SEARCH_SCHEMA_REQUIRES_REVIEW',flush=True)
+              from mcp import ClientSession
+              from mcp.client.streamable_http import streamablehttp_client
+              async def probe():
+                  async with streamablehttp_client('https://outnow.ch/mcp') as (read,write,_):
+                      async with ClientSession(read,write) as session:
+                          await session.initialize()
+                          tools=(await session.list_tools()).tools
+                          print('OUTNOW_TOOL_COUNT',len(tools),flush=True)
+                          for t in tools:
+                              print('OUTNOW_TOOL',t.name, 'FIELDS',','.join(t.inputSchema.get('properties',{})),flush=True)
+                          for t in tools:
+                              if not re.search(r'search',t.name,re.I):continue
+                              schema=t.inputSchema; props=schema.get('properties',{})
+                              key=next((k for k in ('query','q','search','term','title','text','searchQuery') if props.get(k,{}).get('type')=='string'),None)
+                              if key and set(schema.get('required',[]))<={key}:
+                                  result=await session.call_tool(t.name,{key:'Dune: Part Two'})
+                                  assert not result.isError
+                                  assert re.search(r'dune',str(result),re.I)
+                                  print('OUTNOW_SEARCH_DUNE',True,flush=True)
+                                  return
+                          raise ValueError('search_schema_requires_review')
+              asyncio.run(asyncio.wait_for(probe(),timeout=60))
           def tmdb():
-              token=os.environ.get('TMDB_API_TOKEN','')
+              token=os.environ.get('TMDB_API_TOKEN','').strip()
               assert token,'missing_secret'
-              h={'Authorization':'Bearer '+token,'Accept':'application/json'}
+              h={'Accept':'application/json'}
+              short=bool(re.fullmatch(r'[a-fA-F0-9]{32}',token))
+              if not short: h['Authorization']='Bearer '+token
+              print('TMDB_AUTH_MODE','api_key' if short else 'bearer',flush=True)
               base='https://api.themoviedb.org/3'
-              q=urllib.parse.urlencode({'query':'Dune: Part Two','year':2024})
-              results=jget(base+'/search/movie?'+q,h)['results']
+              def api(endpoint,params=None):
+                  q=dict(params or {})
+                  if short:q['api_key']=token
+                  return jget(base+endpoint+('?' + urllib.parse.urlencode(q) if q else ''),h)
+              results=api('/search/movie',{'query':'Dune: Part Two','year':2024})['results']
               movie=next(x for x in results if x['original_title']=='Dune: Part Two' and x['release_date'].startswith('2024'))
-              imgs=jget(base+'/movie/'+str(movie['id'])+'/images',h)
+              imgs=api('/movie/'+str(movie['id'])+'/images')
               candidates=[x for x in imgs['backdrops'] if x.get('iso_639_1') is None and x['width']>=1280]
               print('TMDB_MATCH',movie['id'],'BACKDROPS',len(imgs['backdrops']),'CANDIDATES',len(candidates),flush=True)
               assert len(candidates)>=7
@@ -95,7 +93,7 @@ jobs:
                   hashes=set()
                   for t in (15,40,65,90,115,140,165):
                       dest=d/f'{t}.jpg'
-                      subprocess.run(['ffmpeg','-v','error','-ss',str(t),'-i',str(video),'-frames:v','1','-vf','scale=1280:-1','-y',str(dest)],check=True,timeout=20)
+                      subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-ss',str(t),'-i',str(video),'-frames:v','1','-vf','scale=1280:-1','-y',str(dest)],check=True,timeout=20)
                       with Image.open(dest) as im: im.verify()
                       hashes.add(hashlib.sha256(dest.read_bytes()).hexdigest())
                   print('BLENDER_DISTINCT_SHA256',len(hashes),flush=True); assert len(hashes)==7
