@@ -42,10 +42,42 @@ jobs:
             }
             let browser;
             let sessionId;
+            let runtimeWatchdog;
             const root = 'https://api.cloudflare.com/client/v4/accounts/' + id + '/browser-run/devtools/browser';
             const headers = { Authorization: 'Bearer ' + token };
             let stage = 'CONNECT';
             try {
+              stage = 'BUDGET';
+              const midnight = new Date();
+              midnight.setUTCHours(0,0,0,0);
+              const now=Date.now(), dayStart=midnight.getTime();
+              const seen=new Set();
+              let used=0, complete=false;
+              for(let offset=0;offset<10000;offset+=100){
+                const response=await fetch(root.replace(/\/browser$/,'/session')+'?limit=100&offset='+offset,{headers,redirect:'error',signal:AbortSignal.timeout(10000)});
+                if(!response.ok) throw new Error('HTTP '+response.status);
+                const data=await response.json();
+                const rows=Array.isArray(data)?data:data.result;
+                if(!Array.isArray(rows))throw new Error('INVALID_HISTORY');
+                for(const row of rows){
+                  if(typeof row.sessionId!=='string'||seen.has(row.sessionId))throw new Error('HISTORY_DUPLICATE');
+                  seen.add(row.sessionId);
+                  const start=row.startTime, end=row.endTime;
+                  if(!Number.isFinite(start)||start<1e12||start>now)throw new Error('INVALID_START');
+                  if(end==null||end===0)throw new Error('ACTIVE_SESSION_EXISTS');
+                  if(!Number.isFinite(end)||end<start||end>now+5000)throw new Error('INVALID_END');
+                  used+=Math.max(0,Math.min(now,end)-Math.max(start,dayStart));
+                }
+                if(rows.length<100){complete=true;break;}
+              }
+              if(!complete)throw new Error('HISTORY_INCOMPLETE');
+              const allowance=90000;
+              console.log('BROWSER_SESSION_USAGE_MS='+used);
+              console.log('BROWSER_WORKING_BUDGET_MS=480000');
+              if(used+allowance>480000 || now+allowance>=dayStart+86400000){
+                console.log('BROWSER_BUDGET_STOP');
+                return;
+              }
               stage = 'ACQUIRE';
               const acquired = await fetch(root + '?keep_alive=10000', {method:'POST', headers, redirect:'error', signal:AbortSignal.timeout(15000)});
               if (!acquired.ok) throw new Error('HTTP ' + acquired.status);
@@ -54,6 +86,13 @@ jobs:
               if (!/^[a-f0-9-]{36}$/i.test(result.sessionId || '')) throw new Error('SESSION_ID_MISSING');
               sessionId = result.sessionId;
               console.log('BROWSER_SESSION_ACQUIRED');
+              const watchdog=setTimeout(async()=>{
+                try { await fetch(root+'/'+sessionId,{method:'DELETE',headers,redirect:'error',signal:AbortSignal.timeout(5000)}); } catch {}
+                console.error('BROWSER_RUNTIME_LIMIT');
+                process.exit(1);
+              },60000);
+              watchdog.unref();
+              runtimeWatchdog=watchdog;
               stage = 'CONNECT';
               browser = await chromium.connectOverCDP(
                 root.replace('https:', 'wss:') + '/' + sessionId,
@@ -121,6 +160,7 @@ jobs:
               console.error('BROWSER_' + stage + '_FAILED' + (match ? '_HTTP_' + match[1] : ''));
               process.exitCode = 1;
             } finally {
+              if (runtimeWatchdog) clearTimeout(runtimeWatchdog);
               if (sessionId) {
                 try {
                   let closed = false;
