@@ -1,0 +1,25 @@
+name: Opus development readiness
+on:
+  push:
+    branches: [development/opus-5-5]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check isolated credential binding without API calls
+        env:
+          OPUS_ROUTERAI_API_KEY: ${{ secrets.OPUS_ROUTERAI_API_KEY }}
+        run: |
+          test -s docs/OPUS_TASK.md
+          test -s docs/OPUS_HANDOVER.md
+          if [ -z "$OPUS_ROUTERAI_API_KEY" ]; then
+            echo "::notice::Dedicated developer key not configured; no paid calls made"
+          else
+            echo "::notice::Dedicated developer key configured; no paid calls made"
+          fi
