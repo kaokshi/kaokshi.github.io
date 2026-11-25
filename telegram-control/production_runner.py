@@ -79,10 +79,12 @@ def dispatch_cycle(core, endpoint, secret, token, *, guard, account, job_scope=N
     attempted = receipts = 0
     for article in ordered[:18]:
         job_id = article.split("/", 1)[0]
+        started = monotonic()
         try:
             result = advance(core, article, token, guard=guard, execute=execute)
             reason = result.get("reason")
-            attempted += result.get("status") == "attempt_finished"
+            worked = result.get("status") == "attempt_finished"
+            attempted += worked
         except (CoreBlocked, UnsafeToTest, Blocked) as exc:
             if str(exc) == "scheduled_job_not_due":
                 continue
@@ -98,6 +100,13 @@ def dispatch_cycle(core, endpoint, secret, token, *, guard, account, job_scope=N
                                                        "checks": previous.get("checks", {})})
                 core.access(mark, change=True)
             attempted += 1
+            worked = True
+            result = {}
+        if job_scope and worked:
+            _, channel, ordinal = article.split("/")
+            print(json.dumps({"channel": channel, "ordinal": int(ordinal),
+                              "stage": result.get("stage"), "elapsedSeconds": round(monotonic() - started, 1)}),
+                  flush=True)
         receipt = core.access(lambda c: build_receipt(c, job_id, production=True))
         if isinstance(reason, str) and re.fullmatch(r"[a-z0-9_]{1,120}", reason):
             receipt["dispatchReason"] = reason
