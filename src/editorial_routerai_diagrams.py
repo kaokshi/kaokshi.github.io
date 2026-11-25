@@ -1,4 +1,5 @@
 """Deterministic, source-bound templates for the private science evaluation."""
+from dataclasses import dataclass
 from functools import lru_cache
 import io
 from math import log10
@@ -19,43 +20,149 @@ WATER_STORAGE = (
 )
 
 
-def cave_diagram_replacement(scene):
-    if scene.get("template") != "cave-formations":
+@dataclass(frozen=True)
+class DiagramTemplate:
+    """One renderable schematic plus the evidence that must exist before drawing.
+
+    This is the single catalogue behind planning, substitution and rendering. New
+    topics are added as data here; no topic names belong in the recovery logic.
+    """
+    id: str
+    family: str
+    source: str
+    terms: tuple = ()
+    title: str = ""
+    aliases: tuple = ()
+    eligible_from: tuple = ("*",)
+    brief: str = ""
+    external_evidence: bool = False
+    renderer: str = ""
+    labels: tuple = ()
+
+
+TEMPLATES = {row.id: row for row in (
+    DiagramTemplate("comet-tails", "comet", COMET_SOURCE,
+                    ("ion (gas) tail", "dust tail", "away from the sun"), renderer="comet-tails"),
+    DiagramTemplate("comet-cold-storage", "comet", ESA_SOURCE,
+                    ("volatile", "formed at large distances", "low temperatures"), renderer="panels"),
+    DiagramTemplate("comet-asteroid-relationship", "comet", ESA_SOURCE,
+                    ("main-belt comet", "short-period comets", "depletion"), renderer="relationship"),
+    DiagramTemplate("comet-observation-inference", "comet", ISON_SOURCE,
+                    ("nucleus is unresolved", "symmetric and smooth"), renderer="inference"),
+    DiagramTemplate("cave-formations", "cave", CAVE_SOURCE,
+                    ("stalactites", "stalagmites", "columns"), renderer="chain",
+                    eligible_from=("cave",),
+                    labels=("Ceiling: stalactites", "Floor: stalagmites", "Joined: a column")),
+    DiagramTemplate("cave-groundwater-zones", "cave", CAVE_SOURCE,
+                    ("water table", "zone of saturation", "zone of aeration"),
+                    aliases=("hydrology", "water table", "saturation"), eligible_from=("cave",),
+                    renderer="cave-cross-section"),
+    DiagramTemplate("groundwater-scale", "water", WATER_STORAGE_SOURCE, (),
+                    aliases=("aquifer scale", "groundwater volume"), eligible_from=("cave",),
+                    brief=("Compare global volumes of groundwater and surface waters using "
+                           "USGS estimates. A logarithmic chart with labelled units is appropriate."),
+                    external_evidence=True, renderer="water-storage-chart"),
+    DiagramTemplate("cave-dripstone-growth", "cave", CAVE_SOURCE,
+                    ("stalactites", "stalagmites", "columns"),
+                    aliases=("time-lapse", "dripstone growth"), eligible_from=("cave",),
+                    renderer="dripstone-growth"),
+    DiagramTemplate("cave-speleothem-types", "cave", CAVE_SOURCE,
+                    ("stalactites", "stalagmites", "columns"),
+                    aliases=("classification", "morphology"), eligible_from=("cave",),
+                    renderer="speleothem-types"),
+    DiagramTemplate("asteroid-observations", "asteroid", ASTEROID_SOURCE,
+                    ("asteroid", "close approaches", "predict"), renderer="chain",
+                    labels=("Observe positions", "Fit a possible orbit", "Estimate future position")),
+    DiagramTemplate("asteroid-tracking-network", "asteroid", ASTEROID_SOURCE,
+                    ("near-earth objects", "predict", "close approaches"),
+                    title="Tracking near-Earth objects", aliases=("planetary defense schematic",),
+                    brief=("Use a clearly labelled conceptual schematic of this subject. "
+                           "Do not imply real coordinates or measured probabilities."),
+                    renderer="asteroid"),
+    DiagramTemplate("asteroid-orbit-data", "asteroid", ASTEROID_SOURCE,
+                    ("neo coordination centre", "risk list", "close approaches"),
+                    title="From measurements to a risk list", aliases=("neo database",),
+                    brief=("Use a clearly labelled conceptual schematic of this subject. "
+                           "Do not imply real coordinates or measured probabilities."),
+                    renderer="asteroid"),
+    DiagramTemplate("asteroid-kinetic-deflection", "asteroid", ASTEROID_SOURCE,
+                    ("dart", "dimorphos", "deflect"),
+                    title="Kinetic deflection · before and after", aliases=("kinetic deflection",),
+                    brief=("Use a clearly labelled conceptual schematic of this subject. "
+                           "Do not imply real coordinates or measured probabilities."),
+                    renderer="asteroid"),
+    DiagramTemplate("asteroid-orbit-risk", "asteroid", ASTEROID_SOURCE,
+                    ("risk list", "close approaches", "predict"),
+                    title="Why orbit forecasts have uncertainty", aliases=("risk probability",),
+                    brief=("Use a clearly labelled conceptual schematic of this subject. "
+                           "Do not imply real coordinates or measured probabilities."),
+                    renderer="asteroid"),
+)}
+
+ASTEROID_DIAGRAMS = {name: (TEMPLATES[name].title, TEMPLATES[name].terms) for name in (
+    "asteroid-tracking-network", "asteroid-orbit-data", "asteroid-kinetic-deflection",
+    "asteroid-orbit-risk")}
+
+# Cave-context substitutes are declared by eligibility, not by a topical family label:
+# ``groundwater-scale`` is a water-family template that a cave article may legally use.
+CAVE_TEMPLATES = frozenset(name for name, row in TEMPLATES.items()
+                           if row.family == "cave" or "cave" in row.eligible_from)
+
+
+def template_ids():
+    """Every template the renderer actually supports; planning must stay inside it."""
+    return tuple(TEMPLATES)
+
+
+def template_contract(template):
+    return TEMPLATES.get(template) if isinstance(template, str) else None
+
+
+def evidence_terms(entry):
+    """Required source terms. The water chart derives them from its published table."""
+    if entry.external_evidence:
+        return tuple(f"{quantity:,} cubic kilometers" for _, quantity in WATER_STORAGE)
+    return entry.terms
+
+
+def evidence_available(entry, records):
+    terms = evidence_terms(entry)
+    return any(row["url"].rstrip("/") == entry.source.rstrip("/") and row["status"] == "accessible"
+               and all(term in row["text"].casefold() for term in terms) for row in records or [])
+
+
+def _eligible(entry, family):
+    return "*" in entry.eligible_from or (family is not None and family in entry.eligible_from)
+
+
+def scene_diagram_replacement(scene, records=None):
+    """Deterministic, evidence-aware substitute for a rejected or unrenderable schematic.
+
+    Candidates come from the catalogue, so a new theme needs data, not code. When
+    ``records`` is supplied only templates whose verified source text is present can
+    be chosen, which keeps the replacement grounded in the article's own sources.
+    """
+    if not isinstance(scene, dict):
         return None
-    subject = scene["subject"].casefold()
-    if any(word in subject for word in ("hydrology", "water table", "saturation")):
-        return "cave-groundwater-zones"
-    if any(word in subject for word in ("aquifer scale", "groundwater volume")):
-        return "groundwater-scale"
-    if any(word in subject for word in ("time-lapse", "dripstone growth")):
-        return "cave-dripstone-growth"
-    if any(word in subject for word in ("classification", "morphology")):
-        return "cave-speleothem-types"
-    return None
+    planned = scene.get("template")
+    family = TEMPLATES[planned].family if planned in TEMPLATES else None
+    subject = str(scene.get("subject") or "").casefold()
+    ranked = []
+    for order, entry in enumerate(TEMPLATES.values()):
+        if entry.id == planned or not entry.aliases or not _eligible(entry, family):
+            continue
+        hits = sum(alias in subject for alias in entry.aliases)
+        if not hits or (records is not None and not evidence_available(entry, records)):
+            continue
+        ranked.append((-hits, 0 if entry.family == family else 1, order, entry.id))
+    return min(ranked)[3] if ranked else None
 
 
-ASTEROID_DIAGRAMS = {
-    "asteroid-tracking-network": ("Tracking near-Earth objects", ("near-earth objects", "predict", "close approaches")),
-    "asteroid-orbit-data": ("From measurements to a risk list", ("neo coordination centre", "risk list", "close approaches")),
-    "asteroid-kinetic-deflection": ("Kinetic deflection · before and after", ("dart", "dimorphos", "deflect")),
-    "asteroid-orbit-risk": ("Why orbit forecasts have uncertainty", ("risk list", "close approaches", "predict")),
-}
-
-
-def scene_diagram_replacement(scene):
-    cave = cave_diagram_replacement(scene)
-    if cave:
-        return cave
-    subject = scene["subject"].casefold()
-    for clue, template in (
-        ("planetary defense schematic", "asteroid-tracking-network"),
-        ("neo database", "asteroid-orbit-data"),
-        ("kinetic deflection", "asteroid-kinetic-deflection"),
-        ("risk probability", "asteroid-orbit-risk"),
-    ):
-        if clue in subject:
-            return template
-    return None
+def cave_diagram_replacement(scene):
+    if not isinstance(scene, dict) or scene.get("template") != "cave-formations":
+        return None
+    replacement = scene_diagram_replacement(scene)
+    return replacement if replacement in CAVE_TEMPLATES else None
 
 
 @lru_cache(maxsize=1)
@@ -181,30 +288,11 @@ def asteroid_diagram(draw, font, template):
 def render_diagram(template, records):
     from PIL import Image, ImageDraw, ImageFont
 
-    if template == "comet-tails":
-        url, terms = COMET_SOURCE, ("ion (gas) tail", "dust tail", "away from the sun")
-    elif template == "comet-cold-storage":
-        url, terms = ESA_SOURCE, ("volatile", "formed at large distances", "low temperatures")
-    elif template == "comet-asteroid-relationship":
-        url, terms = ESA_SOURCE, ("main-belt comet", "short-period comets", "depletion")
-    elif template == "comet-observation-inference":
-        url, terms = ISON_SOURCE, ("nucleus is unresolved", "symmetric and smooth")
-    elif template == "cave-groundwater-zones":
-        url, terms = CAVE_SOURCE, ("water table", "zone of saturation", "zone of aeration")
-    elif template == "groundwater-scale":
-        url = WATER_STORAGE_SOURCE
-        terms = tuple(f"{quantity:,} cubic kilometers" for _, quantity in WATER_STORAGE)
-        records = [*records, *water_storage_evidence()]
-    elif template in {"cave-dripstone-growth", "cave-speleothem-types", "cave-formations"}:
-        url, terms = CAVE_SOURCE, ("stalactites", "stalagmites", "columns")
-    elif template in ASTEROID_DIAGRAMS:
-        url, terms = ASTEROID_SOURCE, ASTEROID_DIAGRAMS[template][1]
-    elif template == "asteroid-observations":
-        url, terms = ASTEROID_SOURCE, ("asteroid", "close approaches", "predict")
-    else:
+    entry = template_contract(template)
+    if entry is None:
         raise UnsafeToTest("diagram_template_or_evidence_unavailable")
-    if not any(row["url"].rstrip("/") == url.rstrip("/") and row["status"] == "accessible"
-               and all(term in row["text"].casefold() for term in terms) for row in records):
+    records = [*records, *water_storage_evidence()] if entry.external_evidence else records
+    if not evidence_available(entry, records):
         raise UnsafeToTest("diagram_template_or_evidence_unavailable")
 
     image = Image.new("RGB", (1200, 800), "#102033")
@@ -276,7 +364,7 @@ def render_diagram(template, records):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue(), {
-        "kind": "diagram", "source": url, "label": "Программная схема · не в масштабе",
+        "kind": "diagram", "source": entry.source, "label": "Программная схема · не в масштабе",
         "ai_generated": False, "rights_status": "original_programmatic_graphic",
         "template": template,
     }
