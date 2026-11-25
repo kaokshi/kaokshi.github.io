@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+from time import monotonic
 from threading import Lock
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ from .editorial_images import ImageIndex
 from .editorial_memory import digest
 from .editorial_http import Blocked
 from .editorial_review import qa, sources
+from .editorial_no_repeat import topic_duplicate_reason
 from .editorial_routerai import UnsafeToTest, call, credits
 from .editorial_routerai_two_articles import MODELS, ROOT, Spend, cinema_key, evaluate_channel, json_bytes, money, safe_reason
 from .editorial_zen_cloud import CloudCore, GitHubStore
@@ -31,6 +33,8 @@ class Pause(CoreBlocked):
 def classify(step, role):
     if {"plan": "brain", "draft": "draft", "edit": "edit"}.get(step) == role:
         return step, "new_article" if step != "edit" else "required_correction", None
+    if step == "film-plan-correction" and role == "brain":
+        return "plan", "required_correction", None
     if re.fullmatch(r"edit-correction-[2-5]", step) and role == "edit":
         return "edit", "required_correction", None
     if re.fullmatch(r"audit-correction-[2-5]", step) and role == "edit":
@@ -96,6 +100,8 @@ class MeteredRouter(Spend):
         name = f"requests/{stage}.json"
         response = self.session.read(name)
         if response is None:
+            if self.session.paid_call_cutoff is not None and monotonic() >= self.session.paid_call_cutoff:
+                raise Pause("pilot_paid_call_deadline")
             self.session.permit(phase)
             if role == "image":
                 verify_seed_route(self.token, self.transport)
@@ -154,6 +160,7 @@ class Session:
     def __init__(self, core, article, *, target=None, guard=None, account=None):
         self.core, self.article, self.target = core, article, target
         self._assets = {}
+        self.paid_call_cutoff = None
         self.guard = guard
         self.account = account
         self.plan, self.next_stage = core.access(lambda c: c.article_work(article))
@@ -261,6 +268,20 @@ class Session:
             self.save("inputs/cinema-sources.json", json_bytes(registry))
         return registry
 
+    def cinema_correction_options(self, film, options):
+        key = "inputs/cinema-correction-options.json"
+        prior = self.read(key)
+        if prior is not None:
+            return json.loads(prior)
+        used = self.core.access(lambda c: c.title_history(self.article, "cinema"))
+        if not topic_duplicate_reason("cinema", cinema_key(film), used):
+            return None
+        available = [row for row in options if not topic_duplicate_reason("cinema", cinema_key(row), used)]
+        if not available:
+            raise CoreBlocked("cinema_no_distinct_replacement")
+        self.save(key, json_bytes(available))
+        return available
+
     def cinema_evidence(self, plan, registry, verify):
         name = "inputs/cinema-evidence.json"
         raw = self.read(name)
@@ -365,10 +386,11 @@ class Session:
         self.permit("package")
 
 
-def execute(core, article, token, *, target=None, transport=call, balance=credits, pipeline=evaluate_channel, guard=None, account=None):
+def execute(core, article, token, *, target=None, transport=call, balance=credits, pipeline=evaluate_channel, guard=None, account=None, paid_call_cutoff=None):
     if target is not None and target not in STAGES:
         raise CoreBlocked("unknown_target_stage")
     session = Session(core, article, target=target, guard=guard or configured_guard())
+    session.paid_call_cutoff = paid_call_cutoff
     session.check_control()
     if session.next_stage is None:
         return
@@ -397,9 +419,15 @@ def execute(core, article, token, *, target=None, transport=call, balance=credit
                               "prose": [(name, sorted(terms)) for name, terms in prose]})
             session.save("inputs/history.json", raw)
         history = json.loads(raw)
-        if session.channel == "cinema" and session.read("requests/plan.json") is None:
-            current = core.access(lambda c: c.title_history(article, session.channel))
-            history["titles"] = list(dict.fromkeys([*history["titles"], *current]))
+        if session.channel == "cinema":
+            name = "inputs/cinema-plan-titles.json"
+            frozen = session.read(name)
+            if frozen is None and session.read("requests/plan.json") is None:
+                current = core.access(lambda c: c.title_history(article, session.channel))
+                frozen = json_bytes(list(dict.fromkeys([*history["titles"], *current])))
+                session.save(name, frozen)
+            if frozen is not None:
+                history["titles"] = json.loads(frozen)
         index = ImageIndex(SimpleNamespace(root=path, lock=Lock(), save=lambda: None), photos)
         catalogue = json.loads((ROOT / "config/editorial_science_sources.json").read_text())
         try:

@@ -634,6 +634,24 @@ def cinema_key(film):
     return f"{film['original_title']} ({film['year']})"
 
 
+def resolve_cinema_plan(plan, options):
+    identity_fields = ("film_title", "original_title", "year", "qid")
+    if not any(key in plan for key in identity_fields):
+        # A paid response can follow the common channel schema instead of the
+        # cinema-specific fields. Only an exact, unambiguous catalogue match
+        # supplies identity. A synopsis supports a spoiler-free review.
+        matches = [row for row in options if plan.get("source_topic") in
+                   (row["title"], row["original_title"])]
+        if len(matches) == 1:
+            row = matches[0]
+            plan = {**plan, "film_title": row["title"], "original_title": row["original_title"],
+                    "year": row["year"], "qid": row["qid"], "format": "review", "spoilers": False}
+    if not any(tuple(plan.get(key) for key in identity_fields) ==
+               (row["title"], row["original_title"], row["year"], row["qid"]) for row in options):
+        raise UnsafeToTest("cinema_film_outside_approved_catalogue")
+    return plan
+
+
 def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior, resume, *, checkpoints=None):
     name = CHANNELS[channel]
     film = None
@@ -689,15 +707,28 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     ), 1200, reserve=reserve)
     save(f"{channel}/qwen-plan.json", json_bytes({"output": raw_plan, "sha256": digest(raw_plan)}))
     plan = object_response(raw_plan)
+    if channel == "cinema":
+        plan = resolve_cinema_plan(plan, film_options)
+        existing_film = {"original_title": plan["original_title"], "year": plan["year"]}
+        replacements = checkpoints.cinema_correction_options(existing_film, film_options)
+        if replacements is not None:
+            alternatives = json.dumps(replacements, ensure_ascii=False)
+            replacement = spend.chat(channel, "film-plan-correction", "brain", (
+                f"Канал «{name}». Исходный фильм уже занят другой статьёй заказа. "
+                "Выбери один фильм из оставшегося каталога. Верни JSON с title, assignment "
+                "и source_topic, где source_topic точно совпадает с названием из каталога. "
+                "Подготовь задание автору на обзор без спойлеров: вступление и шесть разделов. "
+                f"Каталог {alternatives}. Указания владельца: {checkpoints.instructions}"
+            ), 1200, reserve=reserve)
+            save(f"{channel}/qwen-plan-correction.json", json_bytes({"output": replacement,
+                                                                     "sha256": digest(replacement)}))
+            plan = resolve_cinema_plan(object_response(replacement), replacements)
     title = field(plan, "title", 180)
     assignment = field(plan, "assignment", 2200)
     if topic_duplicate_reason(channel, title, history_titles):
         raise UnsafeToTest("duplicate_topic")
     records = []
     if channel == "cinema":
-        if not any((plan.get("film_title"), plan.get("original_title"), plan.get("year"), plan.get("qid")) ==
-                   (row["title"], row["original_title"], row["year"], row["qid"]) for row in film_options):
-            raise UnsafeToTest("cinema_film_outside_approved_catalogue")
         verified = checkpoints.cinema_evidence(plan, film_registry, film_evidence)
         film, records = verified["film"], verified["records"]
         mode = (f"Фильм {film['original_title']} ({film['year']}). Формат {verified['format']}. "

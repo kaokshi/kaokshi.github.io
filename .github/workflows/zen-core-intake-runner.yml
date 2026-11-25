@@ -9,6 +9,10 @@ on:
         description: Confirmed Telegram agent job ID, with two articles per channel. Empty runs intake only.
         type: string
         default: ''
+      pilot_passes:
+        description: Consecutive bounded passes for this pilot, 1 to 8.
+        type: string
+        default: '1'
   schedule:
     # Scheduled workflows only run from the default branch after integration.
     - cron: '7,22,37,52 * * * *'
@@ -50,6 +54,7 @@ jobs:
           ZEN_CORE_CONTROL_ENDPOINT: 'https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/control'
           ZEN_CORE_PRODUCTION_ENABLED: ${{ github.ref == 'refs/heads/main' && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true')) }}
           ZEN_CORE_PILOT_JOB: ${{ github.ref == 'refs/heads/main' && inputs.pilot_job || '' }}
+          ZEN_CORE_PILOT_PASSES: ${{ inputs.pilot_passes || '1' }}
           OMP_NUM_THREADS: '2'
           ZEN_CORE_TELEGRAM_DOCX_JOB: ${{ github.ref == 'refs/heads/main' && vars.ZEN_CORE_TELEGRAM_DOCX_JOB || '' }}
           TELEGRAM_BOT_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.TELEGRAM_BOT_TOKEN || '' }}

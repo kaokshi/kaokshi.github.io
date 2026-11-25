@@ -63,6 +63,26 @@ class TestCycle(unittest.TestCase):
         self.assertFalse(receipts[0]["publicationAuthorized"])
         self.assertFalse(receipts[0]["rssEnabled"])
 
+    def test_pilot_passes_stop_on_unsettled_spend_and_attempt_delivery_before_exit(self):
+        from unittest.mock import Mock, patch
+
+        self.cloud.access(lambda c: c.apply_mode(self.job, "autonomous", 1), change=True)
+        seen = []
+        def run(*args, **kwargs):
+            self.assertEqual(kwargs["job_scope"], self.job)
+            self.cloud.access(lambda c: c.reserve_call(
+                self.article + "/plan", self.article, "plan", "new_article", 2), change=True)
+            return {"attempted": 1, "receipts": 1}
+
+        cycle = Mock(side_effect=run)
+        with patch.object(runner, "dispatch_cycle", cycle):
+            result = runner.dispatch_passes(
+                self.cloud, "fixture", "fixture", "fixture", guard=None, account=None,
+                job_scope=self.job, count=3, deliver=lambda snapshot: seen.append(snapshot["budget"]))
+        cycle.assert_called_once()
+        self.assertEqual(result, {"attempted": 1, "receipts": 1})
+        self.assertTrue(seen[0]["unsettledRequest"])
+
     def test_midnight_preparation_is_only_for_scheduled_jobs(self):
         core = Core(":memory:", clock=lambda: datetime(2026, 11, 24, 20, tzinfo=timezone.utc))
         self.addCleanup(core.db.close)
