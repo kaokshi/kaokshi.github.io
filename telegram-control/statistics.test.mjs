@@ -11,3 +11,17 @@ test("matched complete periods and overwrite without double counting",async()=>{
 test("statistics interface compiles and no automatic platform access",()=>{assert.match(HTML,/data-tab="statistics"/);assert.match(HTML,/id="statsfile"/);assert.match(JS,/\/api\/core\/statistics\/import/);assert.doesNotThrow(()=>new Function(JS));});
 
 test("all opens alone do not establish feed CTR",async()=>{const s=memory();const rows=Array.from({length:7},(_,i)=>({...row("2026-11-"+(17+i)),feed_opens:null}));assert.equal((await importStats(s,{confirm:true,version:0,rows},now)).status,200);assert.equal((await statsView(s,7,now)).reports[2].current.ctr,null);});
+
+test("one year of three channels fits bounded monthly records",async()=>{
+ const m=new Map(),s={get:async k=>m.get(k),put:async(k,v)=>{assert.ok(Buffer.byteLength(JSON.stringify(v))<100000);m.set(k,v);},delete:async k=>m.delete(k),transaction:async f=>f(s)};
+ const rows=Array.from({length:366},(_,i)=>new Date(now-(365-i)*86400000).toISOString().slice(0,10)).flatMap(date=>["cinema","science","legends"].map(channel=>({...row(date),channel,reading_seconds:10000,revenue_kopecks:100})));
+ let version=0;for(let i=0;i<rows.length;i+=90){const x=await importStats(s,{confirm:true,version,rows:rows.slice(i,i+90)},now);assert.equal(x.status,200);version=x.body.version;}
+ const view=await statsView(s,90,now);assert.equal(view.version,version);for(const r of view.reports)assert.equal(r.current.metrics.opens,9000);
+ assert.equal(m.has("stats:dzen:v1"),false);assert.ok(m.size<=40);
+});
+test("legacy data migrates without losing rows or version",async()=>{
+ const m=new Map([["stats:dzen:v1",{version:3,updatedAt:new Date(now).toISOString(),rows:[row("2026-11-22")]}]]);
+ const s={get:async k=>m.get(k),put:async(k,v)=>m.set(k,v),delete:async k=>m.delete(k),transaction:async f=>f(s)};
+ assert.equal((await importStats(s,{confirm:true,version:3,rows:[row("2026-11-23")]},now)).status,200);
+ const r=await statsView(s,7,now);assert.equal(r.version,4);assert.equal(r.reports[2].current.coverage.opens,2);assert.equal(m.has("stats:dzen:v1"),false);
+});
