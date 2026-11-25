@@ -1,7 +1,14 @@
 // Private, owner-confirmed aggregate Dzen Studio imports. No scraping or paid calls.
 const channels=["cinema","legends","science"],DAY=86400000;
 const fields=["impressions","feed_opens","opens","reads","subscribers_delta","reading_seconds","revenue_kopecks"];
-const key="stats:dzen:v1";
+const key="stats:dzen:v1",metaKey="stats:dzen:v2:meta";
+const rowKey=(channel,month)=>"stats:dzen:v2:"+channel+":"+month;
+async function readState(tx){
+ const meta=await tx.get(metaKey);
+ if(!meta)return await tx.get(key)||empty();
+ const rows=[];for(const k of meta.keys){const part=await tx.get(k);if(!Array.isArray(part))throw Error("stats_partition_missing");rows.push(...part);}
+ return {...meta,rows};
+}
 const dayAt=now=>new Date(now+10800000).toISOString().slice(0,10);
 const dateOK=s=>typeof s==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s;
 const empty=()=>({version:0,updatedAt:null,rows:[]});
@@ -21,12 +28,16 @@ export async function importStats(storage,d,now=Date.now()){
  const rows=clean(d?.rows,now);
  if(d?.confirm!==true||!Number.isSafeInteger(d.version)||!rows)return {status:400,body:{error:"invalid_stats_import"}};
  return storage.transaction(async tx=>{
-  const old=await tx.get(key)||empty();
+  const old=await readState(tx);
   if(old.version!==d.version)return {status:409,body:{error:"stale_stats"}};
   const map=new Map(old.rows.filter(r=>r.date>=dayAt(now-365*DAY)).map(r=>[r.date+":"+r.channel,r]));
   for(const r of rows)map.set(r.date+":"+r.channel,r);
   const next={version:old.version+1,updatedAt:new Date(now).toISOString(),rows:[...map.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.channel.localeCompare(b.channel))};
-  await tx.put(key,next);return {status:200,body:{version:next.version,imported:rows.length}};
+  const partitions=new Map();for(const row of next.rows){const k=rowKey(row.channel,row.date.slice(0,7));if(!partitions.has(k))partitions.set(k,[]);partitions.get(k).push(row);}
+  for(const [k,part] of partitions){if(new TextEncoder().encode(JSON.stringify(part)).length>100000)throw Error("stats_partition_too_large");await tx.put(k,part);}
+  await tx.put(metaKey,{version:next.version,updatedAt:next.updatedAt,keys:[...partitions.keys()]});
+  if(typeof tx.delete==="function"){for(const k of old.keys||[])if(!partitions.has(k))await tx.delete(k);await tx.delete(key);}
+  return {status:200,body:{version:next.version,imported:rows.length}};
  });
 }
 function aggregate(rows,days){
@@ -45,7 +56,7 @@ function advice(current,previous){
 }
 export async function statsView(storage,period=7,now=Date.now()){
  if(![7,30,90].includes(period))period=7;
- const s=await storage.get(key)||empty(),end=dayAt(now-DAY),start=dayAt(now-period*DAY),prevStart=dayAt(now-period*2*DAY),prevEnd=dayAt(now-(period+1)*DAY);
+ const s=await storage.transaction(tx=>readState(tx)),end=dayAt(now-DAY),start=dayAt(now-period*DAY),prevStart=dayAt(now-period*2*DAY),prevEnd=dayAt(now-(period+1)*DAY);
  const reports=channels.map(channel=>{
   const rows=s.rows.filter(r=>r.channel===channel);
   const currentRows=rows.filter(r=>r.date>=start&&r.date<=end),previousRows=rows.filter(r=>r.date>=prevStart&&r.date<=prevEnd);
