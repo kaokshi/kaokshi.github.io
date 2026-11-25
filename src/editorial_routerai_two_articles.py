@@ -456,10 +456,13 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 checkpoints.shared_asset if checkpoints else None)
         else:
             film_candidates = None
-        diagram_alternative = cave_diagram_replacement(scene) if scene["kind"] == "diagram" else None
+        diagram_alternative = scene_diagram_replacement(scene) if scene["kind"] == "diagram" else None
         for attempt in range(first_attempt, 4):
             if diagram_alternative and attempt == 2:
                 scene = {**scene, "template": diagram_alternative}
+                if diagram_alternative.startswith("asteroid-"):
+                    scene["brief"] = ("Use a clearly labelled conceptual schematic of this subject. "
+                                      "Do not imply real coordinates or measured probabilities.")
                 if diagram_alternative == "groundwater-scale":
                     scene["brief"] = ("Compare global volumes of groundwater and surface waters using "
                                       "USGS estimates. A logarithmic chart with labelled units is appropriate.")
@@ -505,7 +508,7 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                         save(f"{channel}/attempts/{stage}-qa.json", json_bytes({
                             "slot": slot, "attempt": attempt, "status": "rejected", "reason": str(exc),
                         }))
-                        if attempt == 3 or scene["kind"] == "diagram":
+                        if attempt == 3 or (scene["kind"] == "diagram" and (not diagram_alternative or attempt == 2)):
                             failed.append(slot)
                             break
                         continue

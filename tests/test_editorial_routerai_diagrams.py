@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 from src.editorial_routerai import UnsafeToTest
 from src.editorial_routerai_diagrams import (
-    CAVE_SOURCE, WATER_STORAGE, WATER_STORAGE_SOURCE, cave_diagram_replacement, render_diagram,
+    ASTEROID_DIAGRAMS, ASTEROID_SOURCE, CAVE_SOURCE, WATER_STORAGE, WATER_STORAGE_SOURCE,
+    cave_diagram_replacement, render_diagram, scene_diagram_replacement,
 )
 
 
@@ -44,3 +45,20 @@ class DiagramTest(unittest.TestCase):
         with patch("src.editorial_routerai_diagrams.water_storage_evidence", return_value=records):
             _, meta = render_diagram("groundwater-scale", [])
         self.assertEqual(meta["source"], WATER_STORAGE_SOURCE)
+
+
+    def test_asteroid_templates_reject_unrelated_sources_and_draw_distinct_outputs(self):
+        captions = ("Planetary defense schematic", "NEO database architecture",
+                    "Kinetic deflection concept", "Risk probability overlay")
+        results = []
+        for subject in captions:
+            template = scene_diagram_replacement({"subject": subject, "template": "comet-tails"})
+            self.assertIn(template, ASTEROID_DIAGRAMS)
+            _, terms = ASTEROID_DIAGRAMS[template]
+            with self.assertRaisesRegex(UnsafeToTest, "diagram_template_or_evidence_unavailable"):
+                render_diagram(template, [{"url": CAVE_SOURCE, "status": "accessible", "text": " ".join(terms)}])
+            data, meta = render_diagram(template, [{"url": ASTEROID_SOURCE,
+                                                    "status": "accessible", "text": " ".join(terms)}])
+            self.assertEqual(meta["source"], ASTEROID_SOURCE)
+            results.append(data)
+        self.assertEqual(len(set(results)), len(captions))
