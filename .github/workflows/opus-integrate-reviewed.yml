@@ -1,0 +1,34 @@
+name: Integrate reviewed Opus candidate
+on:
+  push:
+    branches: [integration/opus-general-20261125]
+    paths: ['.github/workflows/opus-integrate-reviewed.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  integrate:
+    if: github.run_attempt == 1 && github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-general-repair
+          run-id: 45702217210
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/candidate
+      - name: Apply only reviewed paths
+        run: |
+          git apply --check "$RUNNER_TEMP/candidate/tracked.patch" "$RUNNER_TEMP/candidate/new-files.patch"
+          git apply "$RUNNER_TEMP/candidate/tracked.patch" "$RUNNER_TEMP/candidate/new-files.patch"
+          git add -- src/editorial_routerai_diagrams.py src/editorial_routerai_two_articles.py src/editorial_zen_executor.py tests/test_editorial_visual_recovery.py tests/test_editorial_zen_plan_checkpoint.py docs/OPUS_CODEX_FINDINGS.md docs/OPUS_GENERAL_RECOVERY.md docs/OPUS_GENERAL_REPAIR.md
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 8
+          test -z "$(git diff --name-only)"
+          test -z "$(git ls-files --others --exclude-standard)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Integrate independently verified generalized Opus recovery candidate'
+          git push origin HEAD:refs/heads/integration/opus-general-20261125
