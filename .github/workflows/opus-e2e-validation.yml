@@ -1,0 +1,119 @@
+name: Opus E2E validation and repair
+on:
+  push:
+    branches: [development/opus-5-5]
+    paths: ['.github/workflows/opus-e2e-validation.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: opus-developer
+  cancel-in-progress: false
+jobs:
+  baseline:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-e2e-readiness
+          run-id: 45670710420
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/previous
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install Pillow ImageHash
+      - name: Apply exact previous patch and test offline
+        run: |
+          mkdir -p "$RUNNER_TEMP/results"
+          git apply --check "$RUNNER_TEMP/previous/tracked.patch" "$RUNNER_TEMP/previous/new-files.patch"
+          git apply "$RUNNER_TEMP/previous/tracked.patch" "$RUNNER_TEMP/previous/new-files.patch"
+          set +e
+          python -m unittest tests.test_editorial_zen_recovery tests.test_editorial_zen_dispatch tests.test_editorial_zen_core tests.test_editorial_zen_executor tests.test_editorial_zen_production_runner -v > "$RUNNER_TEMP/results/baseline.log" 2>&1
+          rc=$?
+          echo "$rc" > "$RUNNER_TEMP/results/exit-code.txt"
+          cat "$RUNNER_TEMP/results/baseline.log"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opus-baseline-results
+          path: ${{ runner.temp }}/results
+  develop:
+    needs: baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-e2e-readiness
+          run-id: 45670710420
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/previous
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-baseline-results
+          path: .opus-validation
+      - run: |
+          git apply "$RUNNER_TEMP/previous/tracked.patch" "$RUNNER_TEMP/previous/new-files.patch"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --global @anthropic-ai/claude-code@2.1.316
+      - name: Opus reviews real offline tests and fixes defects
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPUS_ROUTERAI_API_KEY }}
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_BASE_URL: https://routerai.ru/api
+          ANTHROPIC_DEFAULT_OPUS_MODEL: anthropic/claude-opus-5.5
+          ANTHROPIC_DEFAULT_SONNET_MODEL: anthropic/claude-opus-5.5
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: anthropic/claude-opus-5.5
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+          DISABLE_TELEMETRY: '1'
+          DISABLE_AUTOUPDATER: '1'
+          CLAUDE_CODE_EFFORT_LEVEL: medium
+        run: |
+          test -n "$ANTHROPIC_AUTH_TOKEN"
+          mkdir -p "$RUNNER_TEMP/opus-report"
+          claude -p "Read docs/OPUS_TASK.md, docs/OPUS_E2E_READINESS.md, docs/OPUS_HANDOVER.md and .opus-validation/baseline.log and exit-code.txt. Session 7: exact previous patch is applied and actual offline tests are supplied by a secret-free job. Review failures, fix minimal reproducible bugs, improve safety of recovery and prepare remaining trusted operator steps for resuming EXISTING six-article order. No fake live results, no production keys, no private data, no publishing, no RSS, no model replacements, no workflow edits. Write docs/OPUS_VALIDATION.md and update handover. Final independent test job will test your changes with no provider secrets. Use Read Glob Grep Edit Write only. Save checkpoint early. Return concise Russian report." --model anthropic/claude-opus-5.5 --effort medium --max-turns 30 --max-budget-usd 2 --allowedTools "Read,Glob,Grep,Edit,Write" --disallowedTools "Bash,WebFetch,WebSearch,Task,Agent" --output-format json > "$RUNNER_TEMP/opus-report/session.json"
+      - name: Save candidate
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/opus-report"
+          git diff --binary HEAD -- src tests docs > "$RUNNER_TEMP/opus-report/tracked.patch"
+          git ls-files --others --exclude-standard -z -- src tests docs | while IFS= read -r -d '' f; do
+            git diff --no-index --binary /dev/null "$f" >> "$RUNNER_TEMP/opus-report/new-files.patch" || test "$?" = 1
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opus-validation-candidate
+          path: ${{ runner.temp }}/opus-report
+  verify:
+    needs: develop
+    if: always() && needs.develop.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-validation-candidate
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install Pillow ImageHash
+      - name: Verify candidate without provider secrets
+        run: |
+          git apply "$RUNNER_TEMP/candidate/tracked.patch"
+          if test -s "$RUNNER_TEMP/candidate/new-files.patch"; then git apply "$RUNNER_TEMP/candidate/new-files.patch"; fi
+          python -m unittest tests.test_editorial_zen_recovery tests.test_editorial_zen_dispatch tests.test_editorial_zen_core tests.test_editorial_zen_executor tests.test_editorial_zen_production_runner -v
