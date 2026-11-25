@@ -19,7 +19,7 @@ def capture(page, destination):
         if page.get_by_text("Статистика канала",exact=True).count()!=1:
             raise RuntimeError("studio_statistics_not_confirmed")
         for text in ("Войти", "Подтвердите, что вы не робот", "Введите код"):
-            if page.get_by_text(text,exact=True).count():
+            if any(locator.is_visible() for locator in page.get_by_text(text,exact=True).all()):
                 raise RuntimeError("owner_action_required")
     guard()
     buttons=page.get_by_role("button",name="Отчёт",exact=True)
