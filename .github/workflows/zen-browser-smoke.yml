@@ -1,14 +1,10 @@
 name: ZEN Browser Run isolated smoke
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/zen-browser-smoke.yml'
 permissions:
   contents: read
 concurrency:
-  group: zen-browser-smoke
+  group: zen-browser-account-exclusive
   cancel-in-progress: false
 jobs:
   smoke:
@@ -44,11 +40,23 @@ jobs:
               return;
             }
             let browser;
+            let sessionId;
+            const root = 'https://api.cloudflare.com/client/v4/accounts/' + id + '/browser-run/devtools/browser';
+            const headers = { Authorization: 'Bearer ' + token };
             let stage = 'CONNECT';
             try {
+              stage = 'ACQUIRE';
+              const acquired = await fetch(root + '?keep_alive=10000', {method:'POST', headers, redirect:'error', signal:AbortSignal.timeout(15000)});
+              if (!acquired.ok) throw new Error('HTTP ' + acquired.status);
+              const payload = await acquired.json();
+              const result = payload.result || payload;
+              if (!/^[a-f0-9-]{36}$/i.test(result.sessionId || '')) throw new Error('SESSION_ID_MISSING');
+              sessionId = result.sessionId;
+              console.log('BROWSER_SESSION_ACQUIRED');
+              stage = 'CONNECT';
               browser = await chromium.connectOverCDP(
-                'wss://api.cloudflare.com/client/v4/accounts/' + id + '/browser-run/devtools/browser',
-                { headers: { Authorization: 'Bearer ' + token }, timeout: 15000 }
+                root.replace('https:', 'wss:') + '/' + sessionId,
+                { headers, timeout: 15000 }
               );
               console.log('BROWSER_CONNECTED');
               stage = 'NAVIGATE';
@@ -63,15 +71,27 @@ jobs:
               console.error('BROWSER_' + stage + '_FAILED' + (match ? '_HTTP_' + match[1] : ''));
               process.exitCode = 1;
             } finally {
-              if (browser) {
+              if (sessionId) {
                 try {
-                  await browser.close();
-                  console.log('BROWSER_CLOSED');
+                  let closed = false;
+                  for (let attempt=0; attempt<3; attempt++) {
+                    const response = await fetch(root + '/' + sessionId, {method:'DELETE', headers, redirect:'error', signal:AbortSignal.timeout(5000)});
+                    if (response.status === 404 && attempt > 0) {closed=true;break;}
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    const payload = await response.json();
+                    const state = (payload.result || payload).status;
+                    if (state === 'closed') {closed=true;break;}
+                    if (state !== 'closing') throw new Error('UNKNOWN_CLOSE_STATE');
+                    await new Promise(r=>setTimeout(r,1000));
+                  }
+                  if (!closed) throw new Error('CLOSE_UNCONFIRMED');
+                  console.log('BROWSER_SESSION_CLOSE_CONFIRMED');
                 } catch {
-                  console.error('BROWSER_CLOSE_FAILED');
+                  console.error('BROWSER_SESSION_CLOSE_UNCONFIRMED');
                   process.exitCode = 1;
                 }
               }
+              if (browser) await browser.close().catch(()=>{});
             }
           })().catch(() => { console.error('BROWSER_SMOKE_FAILED'); process.exitCode = 1; });
           JS
