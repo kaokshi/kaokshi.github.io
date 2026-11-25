@@ -1,0 +1,48 @@
+name: Cinema INT8 microbenchmark
+on:
+  push:
+    branches: [diagnostics/cinema-int8-20261125]
+permissions:
+  contents: read
+concurrency:
+  group: cinema-comparison-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [bf16, int8]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'transformers==5.24.0' sentence-transformers Pillow ImageHash python-docx imageio-ffmpeg scipy 'scenedetect[opencv-headless]' sentencepiece accelerate
+      - name: Install isolated SmolVLM2 environment
+        run: |
+          python -m venv --system-site-packages .smol-venv
+          .smol-venv/bin/python -m pip install 'transformers==4.52.2' 'tokenizers>=0.21,<0.22' 'huggingface-hub>=0.30,<1.0' 'num2words' 'sentencepiece'
+          .smol-venv/bin/python -c 'from transformers import AutoProcessor, AutoModelForImageTextToText; import transformers; print(transformers.__version__)'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub
+          key: cinema-adaptive-hf-v1-${{ matrix.mode }}
+          restore-keys: cinema-adaptive-hf-v1-
+      - name: Compare real images
+        env:
+          TMDB_API_TOKEN: ${{ secrets.TMDB_API_TOKEN }}
+          OMP_NUM_THREADS: '2'
+          MKL_NUM_THREADS: '2'
+        run: python -m src.cinema_int8 ${{ matrix.mode }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cinema-int8-${{ matrix.mode }}
+          path: int8-output/
+          retention-days: 7
+          if-no-files-found: warn

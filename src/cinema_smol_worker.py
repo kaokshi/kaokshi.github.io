@@ -7,7 +7,14 @@ from transformers import AutoProcessor,AutoModelForImageTextToText
 def main():
     model_id=os.environ.get('SMOL_MODEL_ID','HuggingFaceTB/SmolVLM2-2.2B-Instruct')
     processor=AutoProcessor.from_pretrained(model_id)
-    model=AutoModelForImageTextToText.from_pretrained(model_id,torch_dtype=torch.bfloat16,_attn_implementation='eager').eval()
+    model=AutoModelForImageTextToText.from_pretrained(model_id,torch_dtype=torch.float32 if os.environ.get('SMOL_INT8')=='1' else torch.bfloat16,_attn_implementation='eager').eval()
+    if os.environ.get('SMOL_INT8')=='1':
+        # Dynamic CPU quantization of linear layers; convolution remains FP32.
+        torch.backends.quantized.engine='x86' if 'x86' in torch.backends.quantized.supported_engines else 'fbgemm'
+        model=torch.ao.quantization.quantize_dynamic(model.float(),{torch.nn.Linear},dtype=torch.qint8,inplace=True)
+        count=sum(isinstance(m,torch.ao.nn.quantized.dynamic.Linear) for m in model.modules())
+        if not count:raise RuntimeError('no_quantized_linear_layers')
+        print('INT8_LINEAR_COUNT',count,flush=True)
     paths=json.loads(Path(sys.argv[1]).read_text())
     captions=[]
     for n,path in enumerate(paths):
