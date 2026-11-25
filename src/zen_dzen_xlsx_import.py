@@ -61,8 +61,8 @@ def parse_report(path, channel):
             seen.add(canonical)
             articles.append({"publication_at":stamp.isoformat(),"kind":kind,"title":name,"url":canonical,"metrics":metrics(row)})
         sums={k:sum(a["metrics"][k] for a in articles) for k in FIELDS}
-        if sums!=totals:
+        if any(sums[k]!=totals[k] for k in FIELDS if k!="subscriptions") or sums["subscriptions"]>totals["subscriptions"]:
             raise ValueError("total_mismatch")
-        return {"schema":"zen-dzen-publication-snapshot/v1","source":"owner_export_dzen_studio","channel":channel,"period_start":start.isoformat(),"period_end":end.isoformat(),"scope":"event_time_all_platforms","file_sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"totals":totals,"articles":articles,"ctr":None,"daily":None,"automatic_sync":False,"publication_authorized":False}
+        return {"schema":"zen-dzen-publication-snapshot/v1","source":"owner_export_dzen_studio","channel":channel,"period_start":start.isoformat(),"period_end":end.isoformat(),"scope":"event_time_all_platforms","file_sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"totals":totals,"unattributed_subscriptions":totals["subscriptions"]-sums["subscriptions"],"articles":articles,"ctr":None,"daily":None,"automatic_sync":False,"publication_authorized":False}
     finally:
         wb.close()
