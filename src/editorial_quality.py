@@ -189,7 +189,8 @@ def image_hash_audit(paths):
         from PIL import Image
         import imagehash
     except ImportError:
-        return {"sha256_duplicates": duplicates, "near_duplicate_status": "unavailable (Pillow/imagehash not installed)"}
+        return {"duplicates": duplicates, "sha256_duplicates": duplicates,
+                "near_duplicate_status": "unavailable (Pillow/imagehash not installed)"}
     hashes = []
     for slug, name, path in records:
         try:
@@ -197,13 +198,15 @@ def image_hash_audit(paths):
                 hashes.append((slug, name, imagehash.phash(img)))
         except (OSError, ValueError):
             continue
+    perceptual = []
     for i, (slug, name, h) in enumerate(hashes):
         for slug2, name2, h2 in hashes[i + 1:]:
             dist = h - h2
             if name != name2 and dist <= 5:
-                duplicates.append({"method": "perceptual_hash", "distance": dist,
+                perceptual.append({"method": "perceptual_hash", "distance": dist,
                                    "articles": [slug, slug2], "images": [name, name2]})
-    return {"duplicates": duplicates, "near_duplicate_status": "completed", "scanned_images": len(hashes)}
+    return {"duplicates": duplicates + perceptual, "sha256_duplicates": duplicates,
+            "near_duplicate_status": "completed", "scanned_images": len(hashes)}
 
 
 def main():

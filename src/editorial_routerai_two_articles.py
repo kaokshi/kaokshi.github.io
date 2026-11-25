@@ -361,9 +361,50 @@ def visual_passes(verdict, hard_issues, *, has_pixels):
             and bool(verdict["evidence"].strip()))
 
 
+def unique_stills(rows):
+    seen, result = set(), []
+    for row in rows:
+        if row["sha256"] not in seen:
+            seen.add(row["sha256"])
+            result.append(row)
+    return result
+
+
+def cached_still(cache, film, row, private_read):
+    key = ("still", film["qid"], film["year"], row["sha256"])
+    if key not in cache:
+        try:
+            cache[key] = fetch_still(row, film, private_read=private_read)
+        except (Blocked, ValueError, OSError):
+            cache[key] = None
+    return cache[key]
+
+
+def ranked_film_stills(cache, film, rows, subject, private_read):
+    ranked = []
+    for row in unique_stills(rows):
+        fetched = cached_still(cache, film, row, private_read)
+        if fetched is None:
+            continue
+        raw, meta = fetched
+        key = ("score", film["qid"], film["year"], row["sha256"], subject)
+        image_key = ("decoded", film["qid"], film["year"], row["sha256"])
+        if key not in cache:
+            try:
+                if image_key not in cache:
+                    cache[image_key] = decode_candidate(raw)[0]
+                scores, _ = compare_pixels("siglip", cache[image_key], [subject])
+                cache[key] = scores[0]
+            except (Blocked, ValueError, OSError):
+                continue
+        ranked.append((cache[key], raw, meta))
+    return [(raw, meta) for _, raw, meta in sorted(ranked, key=lambda row: -row[0])]
+
+
 def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, records, *, skip_cover=False, prior_section_attempt=False, checkpoints=None, film=None, film_registry=None):
     rows, previews = [], []
     failed = [0] if skip_cover else []
+    still_cache = {}
     for slot, scene in enumerate(scenes):
         if slot == 0 and skip_cover:
             continue
@@ -381,22 +422,17 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
         unused_stills = ([row for row in still_candidates(scene, film, film_registry)
                           if row["sha256"] not in {image["original_sha256"] for image in rows}]
                          if film else [])
-        if film and any(row["source_type"] in {"commons_film", "internet_archive_film"} for row in unused_stills):
-            ranked = []
-            for option in unused_stills:
-                try:
-                    raw, meta = fetch_still(option, film, private_read=checkpoints.shared_asset)
-                    candidate_image, _ = decode_candidate(raw)
-                except (Blocked, ValueError, OSError):
-                    continue
-                scores, _ = compare_pixels("siglip", candidate_image, [scene["subject"]])
-                ranked.append((scores[0], raw, meta))
-            film_candidates = [(raw, meta) for _, raw, meta in sorted(ranked, key=lambda row: -row[0])]
+        unused_stills = unique_stills(unused_stills) if film else []
+        if film and unused_stills:
+            film_candidates = ranked_film_stills(
+                still_cache, film, unused_stills, scene["subject"],
+                checkpoints.shared_asset if checkpoints else None)
         else:
             film_candidates = None
         for attempt in range(first_attempt, 4):
             stage = f"image-{slot:02d}-attempt-{attempt}"
             report["stage"] = f"{channel}/{stage}"
+            issues, pixels, captions, preview, row = [], {}, "", None, None
             extension = {"illustration": "jpeg", "photo": "source", "diagram": "png"}[scene["kind"]]
             filename = f"{channel}/attempts/{stage}.{extension}"
             if scene["kind"] == "illustration":
@@ -415,9 +451,14 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                         failed.append(slot)
                         break
                     try:
-                        raw, metadata = (film_candidates[attempt - 1] if film_candidates is not None else
-                                         fetch_still(unused_stills[attempt - 1], film,
-                                                     private_read=checkpoints.shared_asset))
+                        if film_candidates is not None:
+                            raw, metadata = film_candidates[attempt - 1]
+                        else:
+                            cached = cached_still(still_cache, film, unused_stills[attempt - 1],
+                                                  checkpoints.shared_asset if checkpoints else None)
+                            if cached is None:
+                                raise Blocked("film_still_unavailable")
+                            raw, metadata = cached
                     except Blocked as exc:
                         save(f"{channel}/attempts/{stage}-qa.json", json_bytes({"status": "rejected", "reason": str(exc)}))
                         if attempt == 3:
@@ -505,7 +546,7 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
             record.update(status="passed" if accepted else "rejected", local_checks=pixels,
                           local_issues=issues, qwen=verdict)
             save(f"{channel}/attempts/{stage}-qa.json", json_bytes(record))
-            if accepted:
+            if accepted and row is not None:
                 save(f"{channel}/images/{row['file']}", candidate.read_bytes())
                 save(f"{channel}/images/image-{slot:02d}.json", json_bytes(row))
                 if checkpoints:
@@ -569,7 +610,11 @@ def render(article, title, cover, pictures, records, *, private_preview=False):
         if row.get("kind") == "diagram" and row.get("source"):
             label += f" · [научный источник]({row['source']})"
         if row.get("source_page"):
-            label += f" · {row['attribution']} · [{row['license']}]({row['license_url']}) · [источник]({row['source_page']})"
+            label += f" · [источник]({row['source_page']})"
+            if row.get('attribution'):
+                label += f" · {row['attribution']}"
+            if row.get('license') and row.get('license_url'):
+                label += f" · [{row['license']}]({row['license_url']})"
         return [f"![{row.get('label', 'ИИ-иллюстрация')}](images/{row['file']})", "", label, ""]
 
     if private_preview:

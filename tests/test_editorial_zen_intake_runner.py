@@ -10,6 +10,7 @@ from tests.test_editorial_zen_executor import Store
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / "telegram-control"))
 import intake_runner as runner
+from intake_client import build_receipt
 
 
 class RunnerTest(unittest.TestCase):
@@ -29,6 +30,23 @@ class RunnerTest(unittest.TestCase):
             return {"delivered": 0, "skipped": 0, "nextCursor": None}
         self.assertFalse(runner.cycle(self.store, "fixture", "fixture", consume=next_cycle)["morePages"])
         self.assertIsNone(runner.validate_checkpoint(self.store.read(runner.CHECKPOINT)[0]))
+
+    def test_released_stage_is_pending_in_telegram_receipt(self):
+        def exercise(core):
+            core.submit({"id": "fixture", "plan": {
+                "items": [{"channel": "cinema", "count": 1}], "day": None, "instructions": ""}})
+            article = "fixture/cinema/1"
+            for stage in ("plan", "draft", "edit", "visual_plan"):
+                core.stage_result(article, stage, {"status": "passed"})
+            core.stage_result(article, "images", {
+                "status": "blocked", "reason": "daily_budget_exhausted",
+                "checks": {"slot_0": "passed"}})
+            core.clear_blocked_stage(article, "images", "daily_budget_exhausted")
+            receipt = build_receipt(core, "fixture")
+            stage = next(row for row in receipt["articles"][0]["stages"] if row["id"] == "images")
+            self.assertEqual(stage, {"id": "images", "status": "not_started"})
+
+        CloudCore(self.store).access(exercise)
 
     def test_no_checkpoint_write_on_empty_queue(self):
         raw = self.store.read(STATE)

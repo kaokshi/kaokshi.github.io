@@ -79,7 +79,8 @@ def build_receipt(core, job_id, observed_at=None, command_id=None, *, production
             "modeRevision": jobs[0]["modeRevision"], "effectiveMode": jobs[0]["mode"],
             "articles": [{"id": a["id"], "meteredRub": format(Decimal(a["meteredRub"]), "f"),
                           "acceptedImageSlots": a["acceptedImageSlots"],
-                          "stages": [{"id": s["id"], "status": s["status"],
+                          "stages": [{"id": s["id"],
+                                      "status": "not_started" if s["status"] == "released" else s["status"],
                                       **({"reason": s["reason"]} if s.get("reason") else {})} for s in a["stages"]]}
                          for a in jobs[0]["articles"]],
             "budget": {k: (format(Decimal(snapshot["budget"][k]), "f") if k.endswith("Rub")

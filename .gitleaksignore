@@ -1,0 +1,4 @@
+# Historical Actions cache restoration prefixes, not credentials.
+82dff07cc68d5ddf5d5687702d360d2de7614afb:.github/workflows/cinema-int8.yml:generic-api-key:35
+c1f4d0293e572f4e6986c284639dd04d79e709b6:.github/workflows/cinema-adaptive.yml:generic-api-key:35
+65a2310c71509e9b6bdea9d75e0934070f26b27f:.github/workflows/cinema-index120.yml:generic-api-key:35

@@ -433,6 +433,43 @@ class Core:
             self.db.execute("UPDATE spend SET main=?, reserve=?, actual=? WHERE id=?",
                             (str(main), str(actual - main), str(actual), request_id))
 
+    def clear_blocked_stage(self, article, stage, expected_reason):
+        """Remove one blocked/failed stage record so the same stage may run again.
+
+        Trusted-operator action only: it never marks a stage passed, never sends a
+        call and never touches spend, images, approvals, titles, prose or any
+        immutable artifact. Passed per-slot checks survive as a 'released' record
+        so paid image slots cannot be regenerated. The removed record is returned
+        as evidence.
+        """
+        if stage not in STAGES:
+            raise CoreBlocked("unknown_article_or_stage")
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            budget = self.budget(self.day())
+            if budget["unsettledRequest"] or budget["overrun"] or budget["rollingOverrun"]:
+                raise CoreBlocked("financial_reconciliation_required")
+            rows = self.check_stage(article, stage)
+            previous = json.loads(rows.get(stage, "{}"))
+            if previous.get("status") not in ("failed", "blocked"):
+                raise CoreBlocked("stage_not_blocked")
+            if previous.get("reason") != expected_reason:
+                raise CoreBlocked("released_reason_mismatch")
+            # Passed per-slot checks guard against paid regeneration of accepted
+            # images (reserve_call, stage_result). They must survive the release.
+            kept = {key: value for key, value in previous.get("checks", {}).items()
+                    if value == "passed" and key.startswith("slot_")}
+            if kept:
+                now = int(self.clock().timestamp() * 1000)
+                self.db.execute("INSERT OR REPLACE INTO stages VALUES (?, ?, ?)", (article, stage, json.dumps(
+                    {"status": "released", "reason": None, "releasedReason": expected_reason, "checks": kept,
+                     "firstRecordedAt": previous.get("firstRecordedAt", now), "recordedAt": now},
+                    sort_keys=True)))
+            else:
+                self.db.execute("DELETE FROM stages WHERE article=? AND stage=?", (article, stage))
+        return {"article": article, "stage": stage, "releasedReason": expected_reason,
+                "previousStatus": previous["status"]}
+
     def reconcile(self, request_id, actual, evidence_sha):
         """Book a provider-confirmed charge without reopening its operation key."""
         if not isinstance(evidence_sha, str) or not re.fullmatch(r"[a-f0-9]{64}", evidence_sha):

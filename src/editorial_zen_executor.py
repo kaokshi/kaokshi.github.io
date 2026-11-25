@@ -18,6 +18,7 @@ from .editorial_routerai import UnsafeToTest, call, credits
 from .editorial_routerai_two_articles import MODELS, ROOT, Spend, cinema_key, evaluate_channel, json_bytes, money, safe_reason
 from .editorial_zen_cloud import CloudCore, GitHubStore
 from .editorial_zen_core import CONFIG, STAGES, CoreBlocked
+from .editorial_zen_recovery import release_blocked_stage
 from .editorial_zen_control import configured_guard, configured_account
 
 SEED_ROUTE = "/models/" + MODELS["image"] + "/endpoints"
@@ -396,6 +397,9 @@ def execute(core, article, token, *, target=None, transport=call, balance=credit
                               "prose": [(name, sorted(terms)) for name, terms in prose]})
             session.save("inputs/history.json", raw)
         history = json.loads(raw)
+        if session.channel == "cinema" and session.read("requests/plan.json") is None:
+            current = core.access(lambda c: c.title_history(article, session.channel))
+            history["titles"] = list(dict.fromkeys([*history["titles"], *current]))
         index = ImageIndex(SimpleNamespace(root=path, lock=Lock(), save=lambda: None), photos)
         catalogue = json.loads((ROOT / "config/editorial_science_sources.json").read_text())
         try:
@@ -422,9 +426,12 @@ def execute(core, article, token, *, target=None, transport=call, balance=credit
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("command", choices=("init", "submit", "snapshot", "approve", "advance", "reconcile"))
+    p.add_argument("command", choices=("init", "submit", "snapshot", "approve", "advance", "reconcile",
+                                       "release"))
     p.add_argument("value", nargs="?")
     p.add_argument("--stage", choices=STAGES)
+    p.add_argument("--reason")
+    p.add_argument("--confirm", action="store_true")
     args = p.parse_args()
     core = CloudCore(GitHubStore(os.getenv("EDITORIAL_PRIVATE_TOKEN")))
     try:
@@ -441,14 +448,27 @@ def main():
             sha = digest(evidence)
             core.store.immutable("billing-evidence/" + sha + ".json", evidence)
             core.access(lambda c: c.reconcile(row["requestId"], row["actualRub"], sha), change=True)
+        elif args.command == "release":
+            # Bookkeeping only: no provider call, no charge, no stage marked passed.
+            if not args.stage or not args.reason:
+                raise CoreBlocked("release_arguments_required")
+            result = core.access(lambda c: release_blocked_stage(
+                c, args.value, args.stage, args.reason, confirm=args.confirm), change=True)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
         elif args.command == "advance":
             if json.loads(CONFIG.read_text()).get("execution_enabled") is not True:
                 raise CoreBlocked("zen_execution_disabled")
             execute(core, args.value, os.getenv("ROUTERAI_API_KEY"), target=args.stage)
         print(json.dumps(core.access(lambda c: c.snapshot()), ensure_ascii=False))
     except (Blocked, CoreBlocked, UnsafeToTest) as exc:
-        print(json.dumps({"status": "blocked", "reason": safe_reason(exc),
-                          "publicationAuthorized": False}))
+        answer = {"status": "blocked", "reason": safe_reason(exc), "publicationAuthorized": False}
+        try:
+            # Operators need current stage/charge state to pick the next safe step.
+            answer["snapshot"] = core.access(lambda c: c.snapshot())
+        except Exception:
+            answer["snapshot"] = "unavailable"
+        print(json.dumps(answer, ensure_ascii=False))
         return 2
     return 0
 

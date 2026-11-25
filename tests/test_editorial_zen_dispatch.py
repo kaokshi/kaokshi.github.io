@@ -1,6 +1,7 @@
 import unittest
 from src.editorial_zen_core import Core, CoreBlocked
 from src.editorial_zen_dispatch import select_stage, dispatch_one
+from src.editorial_zen_recovery import release_blocked_stage
 from src.editorial_zen_cloud import CloudCore
 from tests.test_editorial_zen_executor import Store
 
@@ -30,6 +31,16 @@ class DispatchTest(unittest.TestCase):
         self.command("draft")
         self.c.stage_result(self.article,"draft",{"status":"blocked","reason":"uncertain"})
         self.assertEqual(select_stage(self.c,self.article)["reason"],"recovery_review_required")
+    def test_released_budget_block_returns_the_same_stage(self):
+        self.c.policy["execution_enabled"]=True
+        self.command("plan")
+        self.c.stage_result(self.article,"plan",{"status":"passed"})
+        self.command("draft")
+        self.c.stage_result(self.article,"draft",{"status":"blocked","reason":"daily_budget_exhausted"})
+        self.assertEqual(select_stage(self.c,self.article)["reason"],"recovery_review_required")
+        release_blocked_stage(self.c,self.article,"draft","daily_budget_exhausted",confirm=True)
+        self.assertEqual(select_stage(self.c,self.article)["stage"],"draft")
+        self.assertEqual(select_stage(self.c,self.article)["modeRevision"],0)
     def test_mode_transition_requires_new_boundary_command(self):
         self.c.policy["execution_enabled"]=True
         self.command("plan")

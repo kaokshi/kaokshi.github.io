@@ -1,5 +1,8 @@
 """Conservative recovery decisions for the existing durable executor. No paid transport."""
 import json
+from datetime import datetime, timezone
+from decimal import Decimal
+from zoneinfo import ZoneInfo
 from .editorial_zen_core import CoreBlocked
 
 AUTO_RETRY = {"cloud_ledger_busy", "cloud_storage_unavailable", "control_unavailable"}
@@ -53,6 +56,50 @@ def retry_window(core, article, stage, reason, now):
     previous = core.db.execute("SELECT result FROM stages WHERE article=? AND stage=?", (article, stage)).fetchone()
     blocked_at = json.loads(previous[0]).get("blockedAt") if previous else None
     return blocked_at is None or now - blocked_at >= COOLDOWN_MS
+
+# Reasons that stop the lane but have neither an automatic nor a claimable path.
+# They require an explicit owner release after the blocker is verifiably gone.
+OWNER_RELEASE = TRANSIENT - AUTO_RETRY
+
+def release_blocked_stage(core, article, stage, reason, *, confirm=False):
+    """Explicit owner release of a transient blocker that nothing else can clear.
+
+    No provider call, no charge and no pass: the stage becomes unattempted again
+    while every checkpoint, charge and accepted artifact is preserved.
+    """
+    if confirm is not True:
+        raise CoreBlocked("explicit_release_confirmation_required")
+    if reason not in OWNER_RELEASE:
+        raise CoreBlocked("recovery_reason_not_releasable")
+    state = recovery_status(core, article)
+    if (state.get("status") != "recheck_required" or state.get("stage") != stage
+            or state.get("reason") != reason):
+        raise CoreBlocked("recovery_state_changed")
+    advisories = _budget_advisories(core, article, stage, reason)
+    released = core.clear_blocked_stage(article, stage, reason)
+    return {**released, "advisories": advisories}
+
+def _budget_advisories(core, article, stage, reason):
+    """Local evidence the blocker may still be present. Reported, never guessed away.
+
+    A release stays permitted for every OWNER_RELEASE reason: budget, balance and
+    control state can only be proven by the provider or the current day, and the
+    executor rechecks balance, budget and control before any reservation or call.
+    These codes tell the operator what to verify first.
+    """
+    found = []
+    row = core.db.execute("SELECT result FROM stages WHERE article=? AND stage=?", (article, stage)).fetchone()
+    blocked_at = json.loads(row[0]).get("blockedAt") if row else None
+    zone = ZoneInfo(core.policy["timezone"])
+    if reason == "daily_budget_exhausted":
+        if type(blocked_at) is not int:
+            found.append("release_evidence_missing")
+        elif datetime.fromtimestamp(blocked_at / 1000, timezone.utc).astimezone(zone).date().isoformat() >= core.day():
+            found.append("daily_budget_not_reset")
+    elif reason == "rolling_budget_exhausted":
+        if Decimal(core.budget(core.day())["rollingRemainingRub"]) <= 0:
+            found.append("rolling_budget_not_available")
+    return found
 
 def claim_retry(core, article, stage, revision, reason, now):
     confirmed_retry(core, article, stage, revision, reason)
