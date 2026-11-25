@@ -70,27 +70,42 @@ def water_storage_chart(draw, font):
         draw.text((76, y + 38), f"{value:,} km³", fill="#bcefff", font=font)
 
 
-def dripstone_shapes(draw, font, template):
-    growth = template == "cave-dripstone-growth"
-    title = "Dripstone develops in stages" if growth else "Speleothem forms and positions"
-    draw.text((76, 80), title, fill="white", font=font)
-    labels = ("Ceiling deposit", "Drip and floor deposit", "Joined column") if growth else (
-        "Stalactite · ceiling", "Stalagmite · floor", "Column · joined")
-    for i, label in enumerate(labels):
+def dripstone_growth(draw, font):
+    draw.text((76, 80), "Dripstone develops in stages", fill="white", font=font)
+    for i, label in enumerate(("Ceiling deposit", "Drip and floor deposit", "Joined column")):
         x = 56 + i * 374
         draw.rectangle((x, 215, x + 335, 585), fill="#202c3b", outline="#59758c", width=3)
         draw.rectangle((x + 5, 218, x + 330, 264), fill="#9e8167")
         draw.rectangle((x + 5, 536, x + 330, 582), fill="#9e8167")
         center = x + 163
-        if growth or i != 1:
-            draw.polygon([(center - 49, 260), (center + 49, 260), (center + 4, 400 if i == 2 else 378),
-                          (center - 4, 400 if i == 2 else 378)], fill="#edcda6")
+        tip = 400 if i == 2 else 378
+        draw.polygon([(center - 49, 260), (center + 49, 260), (center + 4, tip),
+                      (center - 4, tip)], fill="#edcda6")
         if i != 0:
-            draw.polygon([(center - 75, 540), (center + 75, 540), (center + 7, 400 if i == 2 else 480),
-                          (center - 7, 400 if i == 2 else 480)], fill="#edcda6")
-        if growth and i != 2:
+            floor_tip = 400 if i == 2 else 480
+            draw.polygon([(center - 75, 540), (center + 75, 540), (center + 7, floor_tip),
+                          (center - 7, floor_tip)], fill="#edcda6")
+        if i != 2:
             draw.ellipse((center - 3, 417, center + 3, 426), fill="#68ceff")
         draw.text((x + 18, 625), label, fill="white", font=font)
+
+
+def speleothem_types(draw, font):
+    draw.text((76, 80), "Speleothem forms and positions", fill="white", font=font)
+    for i, (label, detail) in enumerate((
+            ("Stalactite", "Hangs from the ceiling"), ("Stalagmite", "Rises from the floor"),
+            ("Column", "Joins ceiling and floor"))):
+        y = 180 + 170 * i
+        draw.rectangle((76, y, 1120, y + 140), fill="#294357")
+        draw.line((120, y + 15, 390, y + 15), fill="#c9b393", width=8)
+        draw.line((120, y + 125, 390, y + 125), fill="#c9b393", width=8)
+        if i != 1:
+            draw.polygon([(198, y + 15), (312, y + 15), (272, y + 79), (238, y + 79)], fill="#ffe0ac")
+        if i != 0:
+            draw.polygon([(195, y + 125), (317, y + 125), (270, y + (74 if i == 2 else 53)),
+                          (242, y + (74 if i == 2 else 53))], fill="#ffe0ac")
+        draw.text((445, y + 26), label, fill="white", font=font)
+        draw.text((445, y + 79), detail, fill="#cee5ef", font=font)
 
 
 def render_diagram(template, records):
@@ -127,8 +142,10 @@ def render_diagram(template, records):
         cave_cross_section(draw, font)
     elif template == "groundwater-scale":
         water_storage_chart(draw, font)
-    elif template in {"cave-dripstone-growth", "cave-speleothem-types"}:
-        dripstone_shapes(draw, font, template)
+    elif template == "cave-dripstone-growth":
+        dripstone_growth(draw, font)
+    elif template == "cave-speleothem-types":
+        speleothem_types(draw, font)
     elif template == "comet-cold-storage":
         panels = [("Formation far", "from the Sun"), ("Preservation at", "low temperatures"),
                   ("Volatile-rich", "material retained")]
