@@ -46,7 +46,7 @@ jobs:
                           print('OUTNOW_SCHEMA',json.dumps(t.inputSchema,ensure_ascii=True),flush=True)
                           for query in ('Dune: Part Two','Dune'):
                               try:
-                                  result=await session.call_tool(t.name,{'query':query})
+                                  result=await session.call_tool(t.name,{'query':query,'language':'en','type':'title'})
                                   payload=result.model_dump(mode='json')
                                   print('OUTNOW_RESULT',query,'ERROR',result.isError,json.dumps(payload,ensure_ascii=True)[:3500],flush=True)
                                   if not result.isError and re.search('dune',json.dumps(payload),re.I):return
