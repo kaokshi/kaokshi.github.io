@@ -18,7 +18,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 
 from .editorial_memory import digest
-from .editorial_providers import Blocked
+from .editorial_http import Blocked
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_REPO = "kaokshi/zen-editorial-review"

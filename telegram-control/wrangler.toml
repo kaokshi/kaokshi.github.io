@@ -1,0 +1,6 @@
+name = "zen-editorial-control"
+main = "worker.mjs"
+compatibility_date = "2026-11-24"
+workers_dev = true
+[observability]
+enabled = false

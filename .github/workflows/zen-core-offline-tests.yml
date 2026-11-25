@@ -1,0 +1,34 @@
+name: ZEN CORE offline tests
+on:
+  push:
+    branches: [integration/zen-core-routerai-20261124]
+    paths: ['telegram-control/**', 'src/**', 'tests/**', 'config/zen_core.json', '.github/workflows/telegram-control-deploy.yml', '.github/workflows/zen-core-offline-tests.yml']
+  pull_request:
+    branches: [main, feature/telegram-control-mvp, integration/zen-core-routerai-20261124, codex/zen-control-1-integration]
+    paths: ['telegram-control/**', 'src/**', 'tests/**', 'config/**', '.github/workflows/zen-core-*.yml', '.github/workflows/telegram-control-deploy.yml']
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test telegram-control/worker.test.mjs telegram-control/adapter.test.mjs telegram-control/spend-simulation.test.mjs telegram-control/intake.test.mjs telegram-control/receipt.test.mjs telegram-control/notifications.test.mjs telegram-control/recovery.test.mjs telegram-control/account.test.mjs telegram-control/deploy-preflight.test.mjs telegram-control/probe.test.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify merged executor intake and receipt contract
+        run: |
+          node --input-type=module -e 'import {intakeView} from "./telegram-control/intake.mjs"; const j={id:"agent:fixture",status:"blocked_prelaunch",executed:false,publicationAuthorized:false,preview:{mode:"dry_run",executorMode:"semi_autonomous"},plan:{items:[{channel:"legends",count:2},{channel:"science",count:2},{channel:"cinema",count:2}],day:"2026-11-25",instructions:"Synthetic fixture"},releaseAt:1795597200000}; const storage={get:async k=>k==="production:job:"+j.id?j:k==="ops:state"?{requestedMode:"assisted",stopped:false}:null,transaction:async f=>f(storage)};const r=await intakeView(storage,j.id);if(r.status!==200)process.exit(1);console.log(JSON.stringify(r.body))' > "${RUNNER_TEMP}/intake-fixture.json"
+          python telegram-control/intake_contract_test.py . "${RUNNER_TEMP}/intake-fixture.json"
+          node --input-type=module -e 'import fs from "node:fs";import assert from "node:assert/strict";import {recordReceipt} from "./telegram-control/receipt.mjs";const input=JSON.parse(fs.readFileSync(process.argv[1]));const receipt=JSON.parse(fs.readFileSync(process.argv[2]));const {id,plan,mode,releaseAt}=input.intent;const j={id,plan,releaseAt:Date.parse(releaseAt),status:"blocked_prelaunch",executed:false,publicationAuthorized:false,preview:{executorMode:mode}};const m=new Map([["production:job:"+id,j]]);const s={get:async k=>m.get(k),put:async(k,v)=>m.set(k,v),transaction:async f=>f(s)};assert.equal((await recordReceipt(s,receipt)).status,200);assert.equal((await recordReceipt(s,receipt)).body.replay,true);assert.equal(m.get("production:job:"+id).executed,false);' "${RUNNER_TEMP}/intake-fixture.json" "${RUNNER_TEMP}/intake-fixture.receipt.json"
+      - name: Verify all three mode transitions and emergency gate across runtimes
+        run: node telegram-control/mode_contract_test.mjs
+      - name: Run executor offline regression suite
+        run: python -m unittest tests.test_editorial_routerai_adapter tests.test_editorial_routerai_two_articles tests.test_editorial_zen_core tests.test_editorial_zen_executor tests.test_editorial_zen_control tests.test_editorial_zen_finance_recovery tests.test_editorial_zen_intake_runner tests.test_editorial_zen_dispatch tests.test_editorial_zen_recovery tests.test_editorial_zen_production_runner -q

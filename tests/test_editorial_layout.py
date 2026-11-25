@@ -13,7 +13,7 @@ from src.editorial_images import validate_plan
 from src.editorial_layout import arrange, layout_issues
 from src.editorial_memory import digest
 from src.editorial_package import package
-from src.editorial_providers import Blocked
+from src.editorial_http import Blocked
 from src.editorial_review import canonical, parse_article, structural_checks
 
 

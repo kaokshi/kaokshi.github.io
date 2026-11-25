@@ -11,7 +11,10 @@ from pathlib import Path
 import re
 import sys
 
-from editorial_ai_check import ROOT, CONTENT, extract_text
+if __package__:
+    from .editorial_ai_check import ROOT, CONTENT, extract_text
+else:
+    from editorial_ai_check import ROOT, CONTENT, extract_text
 
 PRESETS = {"legends": "fiction", "science": "academic", "cinema": "plainrussian"}
 CURATED_RESEARCH = {

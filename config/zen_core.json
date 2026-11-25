@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "timezone": "Europe/Moscow",
+  "main_daily_rub": "300",
+  "reserve_daily_rub": "50",
+  "rolling_30_day_cap_rub": "9000",
+  "production_channels": ["cinema", "legends", "science"],
+  "max_image_retries": 2,
+  "image_sources": "licensed_photos",
+  "private_executor_available": true,
+  "execution_enabled": false,
+  "publication_enabled": false,
+  "rss_enabled": false
+}

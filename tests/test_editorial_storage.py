@@ -16,13 +16,12 @@ from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption,
 from docx import Document
 from PIL import Image
 
-from src.editorial_brain import Memory, review, settings
 from src.editorial_delivery import restore_blob, retrieve, save_outputs
 from src.editorial_groq_budget import snapshot
 from src.editorial_groq_ledger import archive_document, collection
-from src.editorial_memory import digest, read_json, write_json
-from src.editorial_package import ArticleHTML, package
-from src.editorial_providers import Blocked
+from src.editorial_memory import Memory, digest, read_json, write_json
+from src.editorial_package import ArticleHTML, package, zip_packet
+from src.editorial_http import Blocked
 from src.editorial_review import canonical, parse_article
 
 
@@ -32,7 +31,7 @@ ARTICLE_IDS = ("legends-01", "science-01")
 
 
 def build_fixture(root):
-    memory = Memory(root, DAY, datetime.now(timezone.utc), settings())
+    memory = Memory(root, DAY, datetime.now(timezone.utc), {})
     image_folder = root / "images"
     image_folder.mkdir(parents=True)
     for article_id in ARTICLE_IDS:
@@ -48,7 +47,15 @@ def build_fixture(root):
                 {"article": FIXTURE, "text_sha256": digest(canonical(FIXTURE)), "facts": {"evidence": []}},
                 images, image_folder, {"status": "rights_review_pending"})
         memory.data["articles"][article_id] = {"status": "rights_review_pending"}
-    review(memory)
+    review = memory.folder / "review"
+    write_json(review / "Статус комплекта.json", {
+        "day": DAY, "articles": dict.fromkeys(ARTICLE_IDS, "rights_review_pending"),
+        "publication_authorized": False,
+    })
+    packet = memory.folder / "Комплект согласования.zip"
+    sha = zip_packet(review, packet)
+    packet.with_suffix(".sha256").write_text(sha + "\n", encoding="utf-8")
+    memory.save()
 
 
 def write_owner_key(path, key):
@@ -113,6 +120,45 @@ class StorageTests(unittest.TestCase):
                 with self.assertRaisesRegex(Blocked, "checkpoint_authentication_failed"):
                     restore_blob((encrypted / "checkpoint.enc").read_bytes(), root / "wrong", DAY)
             self.assertFalse((root / "wrong").exists())
+
+
+    def test_production_docx_uses_validated_text_and_embeds_every_saved_image(self):
+        from io import BytesIO
+        from docx import Document
+        from PIL import Image
+        from src.editorial_memory import digest
+        from src.editorial_review import canonical
+
+        from src.editorial_zen_cloud import CloudCore
+        from src.editorial_zen_executor import Session
+        from tests.test_editorial_zen_executor import Store
+
+        cloud = CloudCore(Store())
+        cloud.access(lambda c: c.submit({"id": "fixture", "mode": "autonomous", "plan": {
+            "items": [{"channel": "legends", "count": 1}], "day": None, "instructions": ""}}), change=True)
+        session = Session(cloud, "fixture/legends/1")
+        article = {"intro": ["Synthetic intro"], "sections": [
+            {"heading": f"Synthetic heading {n}", "paragraphs": [f"Synthetic paragraph {n}"]}
+            for n in range(1, 7)]}
+        sha = digest(canonical(article))
+        session.quality_report = {"article": article, "text_sha256": sha, "facts": {"evidence": []}}
+        with TemporaryDirectory() as directory:
+            rows = []
+            for slot in range(7):
+                path = Path(directory) / f"image-{slot:02d}.jpg"
+                Image.new("RGB", (16, 12), (slot * 30, 70, 0)).save(path)
+                rows.append({"file": path.name, "section": max(1, slot), "ai_generated": True,
+                             "cover_score": int(slot == 0), "scene": "Synthetic visual",
+                             "kind": "illustration", "sha256": digest(path.read_bytes())})
+            checks = {"text_sha256": sha, "chars_without_spaces": 3200, "editorial_attempts": 2}
+            session.document("Synthetic fixture", article, checks, rows, Path(directory))
+            data = session.read("delivery/article.docx")
+            session.document("Synthetic fixture", article, checks, rows, Path(directory))
+            self.assertEqual(data, session.read("delivery/article.docx"))
+        doc = Document(BytesIO(data))
+        self.assertEqual(len(doc.inline_shapes), 7)
+        self.assertEqual([p.text for p in doc.paragraphs].count("ИИ-иллюстрация"), 7)
+        self.assertEqual(json.loads(session.read("delivery/manifest.json"))["sha256"], digest(data))
 
 
 def write_quota_fixture(out, run):

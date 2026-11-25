@@ -133,6 +133,10 @@ def package(folder, title, version, report, images, image_folder, summary):
         scene = picture_row["scene"]
         out.append(f'<figure><img src="images/{escape(name, quote=True)}" alt="{escape(scene, quote=True)}"></figure>')
         lines.append(f"![{scene}](images/{name})")
+        if picture_row.get("ai_generated") is True:
+            document.add_paragraph("ИИ-иллюстрация", "Caption")
+            out[-1] = out[-1].replace("</figure>", "<figcaption>ИИ-иллюстрация</figcaption></figure>")
+            lines.append("*ИИ-иллюстрация*")
 
     # Dzen screenshot structure: title -> contents -> the best cover -> intro.
     # An image immediately follows every bold section heading, before its prose.

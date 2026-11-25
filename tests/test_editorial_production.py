@@ -1,21 +1,15 @@
-"""Exercise the production entry point with deterministic provider boundaries."""
+"""Exercise editorial quality and recovery with deterministic fixtures."""
 from datetime import datetime, timedelta, timezone
-import io
-import json
-import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from docx import Document
-from PIL import Image
 
-from src import (editorial_brain as brain, editorial_cinema, editorial_delivery,
-                 editorial_images, editorial_providers, editorial_review)
+from src import editorial_cinema, editorial_images, editorial_review
 from src.editorial_learning import CATEGORIES, evaluate_cases
-from src.editorial_memory import Memory, digest, read_json, write
-from src.editorial_providers import Blocked, ProviderError
+from src.editorial_memory import Memory, digest, read_json
+from src.editorial_http import Blocked, ProviderError
 from src.editorial_review import CTA, fact_evidence, parse_article, structural_checks
 
 
@@ -36,126 +30,9 @@ def draft(channel):
     return value.replace("подробность", "деталь")
 
 
-def verdict(channel):
-    if channel == "legends":
-        return {"issues": [], "claims": []}
-    claim = "Если вам близка эта тема, подпишитесь на канал."
-    return {"issues": [], "claims": [{"claim": claim, "source": "S1",
-                                      "quote": "Достаточно длинная подтверждающая цитата",
-                                      "verdict": "supported"}]}
-
-
-class PrivateStub:
-    def checkpoint(self):
-        pass
-
-    def notify(self, day, status):
-        return "https://github.com/example/private/issues/1"
-
-    def review_url(self, day):
-        return "https://github.com/example/private/tree/main/" + day
-
-
 class ProductionTests(unittest.TestCase):
-    def test_two_channels_roundtrip_and_idempotency(self):
-        calls = []
-        def model(provider, prompt, tokens):
-            channel = "science" if any(w in prompt for w in ("научпопа", "Тема: Экосистема", "Канал: science",
-                                                              "Скомбинируй оба типа")) else "legends"
-            calls.append(provider)
-            if "Предложи 5" in prompt:
-                title = "Экосистема горячих источников в Йеллоустоне" if channel == "science" else "Зимой из фонтана звучал чужой голос"
-                text = json.dumps({"topics": [{"title": title, "angle": "Конкретный замысел",
-                    "sources": ["https://nps.gov/a", "https://usgs.gov/b"]}]})
-            elif "Верни JSON" in prompt and "subject" in prompt:
-                text = json.dumps({"subject": "water and environmental detail",
-                    "images": [{"section": 1 if i < 2 else i,
-                                "kind": "photo" if channel == "science" and i % 2 else "illustration",
-                                "subject": f"distinct subject {i}", "brief": f"Detailed scene description {i}",
-                                "query": "hot spring photograph"} for i in range(8)]})
-            elif "Проверь конкретные недостатки" in prompt:
-                text = json.dumps(verdict(channel))
-            else:
-                text = draft(channel)
-            return {"text": text, "model": provider, "usage": {"total_tokens": 1}}
-
-        def inspections(raw, *_):
-            article = parse_article(raw)
-            return {"article": article, "text_sha256": digest(brain.canonical(article)), "issues": [],
-                    **{key: {"status": "completed"} for key in ("model_a", "grammar", "editorial")},
-                    "facts": {"status": "completed", "evidence": []}}
-
-        def asset(scene, subject, path, *_):
-            content = io.BytesIO()
-            shade = (sum(scene["subject"].encode("utf-8")) * 3) % 220
-            Image.new("RGB", (580, 490), (shade, 10, 220)).save(content, "JPEG")
-            raw = content.getvalue()
-            write(path, raw)
-            return {"kind": scene["kind"], "section": scene["section"], "file": path.name,
-                    "scene": scene["subject"], "cover_score": 1.0, "sha256": digest(raw),
-                    "rights_status": "rights_review_pending",
-                    "source_page": "https://commons.wikimedia.org/wiki/File:Example"}
-
-        with TemporaryDirectory() as directory, patch.object(brain, "text_call", model), \
-                patch.object(brain, "qa", inspections), patch.object(brain, "photo", asset), \
-                patch.object(brain, "generated", asset), patch.object(brain, "sources", lambda urls, domains:
-                    [{"status": "accessible", "url": url, "text": "Доказательство"} for url in urls]):
-            root = Path(directory)
-            result = brain.execute("daily", root, PrivateStub(), validation_window=120)
-            self.assertEqual(result["articles"], {"legends-01": "partial_review_pending",
-                                                  "science-01": "partial_review_pending"})
-            state = read_json(root / result["day"] / "state.json")
-            self.assertTrue(all(task["executor"] != "openrouter" for task in state["tasks"].values()))
-            self.assertTrue(all("independent_edit_unavailable: gemini_limits_not_verified"
-                                in entry["blockers"] for entry in state["articles"].values()))
-            for task in state["tasks"].values():
-                self.assertEqual([x["status"] for x in task["events"]],
-                                 ["created", "assigned", "running", "validating", "completed"])
-            packet = root / result["day"] / "review"
-            science = packet / "science-01"
-            self.assertEqual(len(Document(science / "Статья.docx").inline_shapes), 8)
-            self.assertEqual(digest((science / "Текст для SHA-256.txt").read_bytes()),
-                             state["articles"]["science-01"]["text_sha256"])
-            report = read_json(science / "Статус и проверки.json")
-            self.assertEqual({row["kind"] for row in report["images"]}, {"photo", "illustration"})
-            self.assertIn("document_roundtrip", report)
-            self.assertEqual(brain.execute("review", root, PrivateStub())["status"],
-                             "owner_notification_created")
-            from cryptography.hazmat.primitives.asymmetric import x25519
-            from cryptography.hazmat.primitives.serialization import (
-                Encoding, PrivateFormat, NoEncryption, PublicFormat,
-            )
-            key = x25519.X25519PrivateKey.generate()
-            public = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
-            key_path = root / "owner.pem"
-            write(key_path, key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
-            editor = root / "editorial"
-            protected = root / "sealed"
-            stage = root / result["day"]
-            editor.mkdir()
-            shutil.copytree(stage, editor / result["day"])
-            with patch.dict("os.environ", {"EDITORIAL_REVIEW_PUBLIC_KEY": public,
-                                           "EDITORIAL_STATE_KEY_HEX": "ab" * 32}):
-                actual = editorial_delivery.save_outputs(editor, result["day"], protected)
-                self.assertEqual(actual["delivery"], "delivery_integration_pending")
-                self.assertEqual({x.name for x in protected.iterdir()}, {"checkpoint.enc", "owner-review.enc"})
-                state_wire = (protected / "checkpoint.enc").read_bytes()
-                self.assertEqual(editorial_delivery.unseal_state(state_wire)[:2], b"PK")
-                with self.assertRaisesRegex(Blocked, "authentication_failed"):
-                    editorial_delivery.unseal_state(state_wire[:-1] + bytes([state_wire[-1] ^ 1]))
-            delivered = editorial_delivery.retrieve(root / "authorized", key_path, day=result["day"],
-                                                     artifact=protected / "owner-review.enc", allow_incomplete=True)
-            self.assertEqual(delivered["status"], "verified_files_available")
-            self.assertTrue((root / "authorized" / "science-01" / "Статья.docx").is_file())
-            self.assertTrue((root / "authorized" / "science-01" / "Статья.html").is_file())
-            self.assertEqual(len(list((root / "authorized" / "science-01" / "images").glob("*.jpg"))), 8)
-
-            previous = len(calls)
-            brain.execute("daily", root, PrivateStub(), validation_window=120)
-            self.assertEqual(len(calls), previous)
-
-    def test_existing_truman_show_evidence_and_rights_fail_closed(self):
-        repo = Path(brain.ROOT)
+    def test_existing_truman_show_evidence_and_still_provenance_fail_closed(self):
+        repo = Path(__file__).resolve().parents[1]
         existing = read_json(repo / "content/articles/cinema-01-truman-show-real-photos.json")
         ref = read_json(repo / "config/movie_reference_index.json")[existing["slug"]]
         self.assertEqual(ref["imdb_id"], "tt0120382")
@@ -180,10 +57,9 @@ class ProductionTests(unittest.TestCase):
         class Index:
             class memory:
                 time_left = staticmethod(lambda: 1000)
-        with self.assertRaisesRegex(Blocked, "rights_review_pending"):
+        with self.assertRaisesRegex(Blocked, "no_verified_official_still_for_scene"):
             editorial_cinema.stills({"subject": "Truman in Seahaven"}, "Truman Show", None,
                                     Index(), details["film"], {})
-        self.assertEqual(brain.settings()["articles_per_channel"]["cinema"], 0)
 
     def test_unsupported_claim_cannot_be_covered_by_an_unrelated_fragment(self):
         text = "Наблюдение началось в 1998 году. Объект находился рядом."
@@ -194,29 +70,6 @@ class ProductionTests(unittest.TestCase):
               "text": "Достоверная цитата о положении объекта."}])
         self.assertEqual(len(actual), 1)
         self.assertTrue(any(line.startswith("unsupported_numeric_claim") for line in issue))
-
-    def test_revision_cap_and_rejected_versions(self):
-        def report(raw, **details):
-            article = parse_article(raw)
-            review = {"text_sha256": digest(brain.canonical(article)),
-                      "issues": ["logic: missing explanation"], "chars_without_spaces": 4000,
-                      **{k: {"status": "completed"} for k in ("editorial", "grammar", "facts", "model_a")}}
-            return {"raw": raw, "text_sha256": review["text_sha256"], "report": review, "article": article}
-
-        with TemporaryDirectory() as directory:
-            config = brain.settings()
-            memory = Memory(Path(directory), "2026-11-22", datetime.now(timezone.utc) + timedelta(hours=2), config)
-            article = brain.Article(memory, "legends", 1, ({}, [], set()), None)
-            article.current = report("**Начало**\n\nИсходная версия.")
-            before = article.current["text_sha256"]
-            candidates = (f"**Начало**\n\nКандидат {i}." for i in range(5))
-            with patch.object(article, "model", side_effect=lambda *a, **k: next(candidates)) as edit, \
-                    patch.object(article, "inspect", side_effect=lambda candidate, reference, **kwargs: report(candidate["raw"])):
-                article.revise("Сюжет")
-            self.assertEqual(edit.call_count, 5)
-            self.assertEqual(article.assistant, "assistant_handoff_pending")
-            self.assertEqual(article.current["text_sha256"], before)
-            self.assertTrue(all(row["status"] == "rejected" and row["after"] != before for row in article.attempts))
 
     def test_actual_check_runner_reports_incomplete_on_unavailable_tools(self):
         value = draft("legends")
@@ -229,13 +82,7 @@ class ProductionTests(unittest.TestCase):
         self.assertEqual(report["detectors"]["modernbert"]["status"], "unavailable")
         self.assertEqual(report["model_a"]["status"], "incomplete")
         self.assertEqual(report["grammar"]["status"], "unavailable")
-        self.assertEqual(report["text_sha256"], digest(brain.canonical(parse_article(value))))
-
-    def test_disabled_secondary_text_provider_never_makes_request(self):
-        with patch.object(editorial_providers, "request") as send:
-            with self.assertRaisesRegex(ProviderError, "text_provider_disabled"):
-                editorial_providers.text_call("not-enabled", "Контроль")
-        send.assert_not_called()
+        self.assertEqual(report["text_sha256"], digest(editorial_review.canonical(parse_article(value))))
 
     def test_cover_selection_uses_scores_and_retains_illustrated_sections(self):
         pictures = [{"file": "first.jpg", "section": 1, "cover_score": .1, "sha256": "a"},
@@ -246,7 +93,7 @@ class ProductionTests(unittest.TestCase):
 
     def test_corrupt_image_cannot_be_accepted(self):
         with TemporaryDirectory() as directory:
-            memory = Memory(Path(directory), "2026-11-22", datetime.now(timezone.utc), brain.settings())
+            memory = Memory(Path(directory), "2026-11-22", datetime.now(timezone.utc), {"daily_calls": {"fixture_a": 2, "fixture_b": 2}, "per_article_calls": {"fixture_a": 2, "fixture_b": 2}})
             index = editorial_images.ImageIndex(memory, [])
             with self.assertRaises(OSError):
                 index.save(b"not an image", {}, {"subject": "Figure"}, "Theme", Path(directory) / "a.jpg")
@@ -263,26 +110,24 @@ class ProductionTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             cutoff = datetime.now(timezone.utc) + timedelta(hours=2)
             path = Path(directory)
-            memory = Memory(path, "2026-11-22", cutoff, brain.settings())
+            memory = Memory(path, "2026-11-22", cutoff, {"daily_calls": {"fixture_a": 2, "fixture_b": 2}, "per_article_calls": {"fixture_a": 2, "fixture_b": 2}})
             with self.assertRaisesRegex(Blocked, "http_429"):
-                memory.task("legends-01", "image", "klein", {"n": 1}, lambda task:
-                    memory.call(task, "legends-01", "klein", lambda: fail("http_429_quota_or_rate_limit")))
-            restarted = Memory(path, "2026-11-22", cutoff, brain.settings(), retry=True)
+                memory.task("legends-01", "image", "fixture_a", {"n": 1}, lambda task:
+                    memory.call(task, "legends-01", "fixture_a", lambda: fail("http_429_quota_or_rate_limit")))
+            restarted = Memory(path, "2026-11-22", cutoff, {"daily_calls": {"fixture_a": 2, "fixture_b": 2}, "per_article_calls": {"fixture_a": 2, "fixture_b": 2}}, retry=True)
             with self.assertRaisesRegex(Blocked, "provider_stopped"):
-                restarted.call("t2", "legends-01", "klein", lambda: self.fail("repeated an exhausted route"))
-            self.assertEqual(restarted.call("t3", "science-01", "groq", lambda: {"text": "ok"})["text"], "ok")
+                restarted.call("t2", "legends-01", "fixture_a", lambda: self.fail("repeated an exhausted route"))
+            self.assertEqual(restarted.call("t3", "science-01", "fixture_b", lambda: {"text": "ok"})["text"], "ok")
             self.assertEqual(len(restarted.data["calls"]), 2)
 
-    def test_deadline_and_unconnected_review(self):
+    def test_deadline_stops_before_provider(self):
         with TemporaryDirectory() as directory:
             path = Path(directory)
-            memory = Memory(path, "2026-11-22", datetime.now(timezone.utc) - timedelta(seconds=30), brain.settings())
+            memory = Memory(path, "2026-11-22", datetime.now(timezone.utc) - timedelta(seconds=30), {"daily_calls": {"fixture_a": 2, "fixture_b": 2}, "per_article_calls": {"fixture_a": 2, "fixture_b": 2}})
             with self.assertRaisesRegex(Blocked, "production_deadline"):
-                memory.task("science-01", "draft", "groq", {},
+                memory.task("science-01", "draft", "fixture_b", {},
                             lambda _: self.fail("late provider call"))
-            result = brain.review(memory)
-            self.assertEqual(result["status"], "delivery_integration_pending")
-            self.assertFalse(brain.status(memory)["publication_authorized"])
+            self.assertEqual(memory.data["calls"], [])
 
     def test_verified_learning_detects_regression_and_overlap(self):
         def case(i, partition, regression=False):
