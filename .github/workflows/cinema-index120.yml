@@ -1,7 +1,7 @@
-name: Cinema indexed selection 120s benchmark
+name: Cinema indexed selection with heavy fallback
 on:
   push:
-    branches: [diagnostics/cinema-index-120s-20261125]
+    branches: [diagnostics/cinema-index-heavy-20261125]
 permissions:
   contents: read
 concurrency:
@@ -44,7 +44,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cinema-index120-${{ matrix.film }}
+          name: cinema-index-heavy-${{ matrix.film }}
           path: index-output/*-report.json
           retention-days: 7
           if-no-files-found: warn

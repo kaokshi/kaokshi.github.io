@@ -92,22 +92,52 @@ def main():
                 if len(captions)!=len(missing):raise RuntimeError('caption_count_mismatch')
                 for i,c in zip(missing,captions):put(capkey(i),c)
             caps={str(i):get(capkey(i)) for i in ids}
-            put(signature+':ready',{'pool':pool,'meta':meta,'pairs':pairs,'q':q,'caps':caps})
+            def unresolved(captions):
+                valid=np.zeros((7,len(rows)),dtype=bool)
+                for n,ix in enumerate(pairs):
+                    for i in ix:
+                        c=captions.get(str(i))
+                        valid[n,i]=bool(c and verify_caption(scenes[n],c)['verdict']=='supported')
+                obj=np.concatenate([np.where(valid,np.array(q),-1e6),np.full((7,7),-1000.)],axis=1)
+                x,y=linear_sum_assignment(obj,maximize=True)
+                filled={int(n) for n,i in zip(x,y) if i<len(rows) and valid[n,i]}
+                return [n for n in range(7) if n not in filled]
+            gaps=unresolved(caps)
+            # One heavy caption per unresolved chapter, deduplicated by frame.
+            heavy_ids=sorted({max(pairs[n],key=lambda i:q[n][i]) for n in gaps})
+            heavy_model='HuggingFaceTB/SmolVLM2-2.2B-Instruct'
+            def heavykey(i):return digest([VERSION,heavy_model,24,meta[i]['sha256']])
+            missing_heavy=[i for i in heavy_ids if get(heavykey(i)) is None]
+            if missing_heavy:
+                manifest=tmp/'heavy-input.json';result=tmp/'heavy-output.json'
+                manifest.write_text(json.dumps([paths[i] for i in missing_heavy]))
+                timed('smol_heavy',lambda:subprocess.run(['.smol-venv/bin/python','src/cinema_smol_worker.py',str(manifest),str(result)],env={**os.environ,'SMOL_MODEL_ID':heavy_model,'SMOL_MAX_TOKENS':'24'},check=True,timeout=600))
+                values=json.loads(result.read_text())
+                if len(values)!=len(missing_heavy):raise RuntimeError('heavy_caption_count_mismatch')
+                for i,c in zip(missing_heavy,values):put(heavykey(i),c)
+            # Do not silently accept a contradictory light/heavy result.
+            heavy_caps={str(i):get(heavykey(i)) for i in heavy_ids}
+            put(signature+':ready',{'pool':pool,'meta':meta,'pairs':pairs,'q':q,'caps':caps,'heavy_caps':heavy_caps})
+            report['heavy_candidates']=len(heavy_ids)
+            report['light_unresolved']=len(gaps)
             report['indexed_candidates']=len(ids)
             report['qwen_pairs']=sum(map(len,pairs))
     elif mode=='select':
         ready=get(signature+':ready')
         if ready is None:
             report['status']='index_missing';save();raise RuntimeError('index_missing')
-        q=np.array(ready['q']);meta=ready['meta'];caps=ready['caps']
+        q=np.array(ready['q']);meta=ready['meta'];caps=ready['caps'];heavy=ready.get('heavy_caps',{})
         valid=np.zeros(q.shape,dtype=bool)
         for n,ix in enumerate(ready['pairs']):
             for i in ix:
                 c=caps.get(str(i))
-                valid[n,i]=bool(c and verify_caption(scenes[n],c)['verdict']=='supported')
+                light_verdict=verify_caption(scenes[n],c)['verdict'] if c else 'uncertain'
+                h=heavy.get(str(i))
+                heavy_verdict=verify_caption(scenes[n],h)['verdict'] if h else 'uncertain'
+                valid[n,i]=('contradiction' not in (light_verdict,heavy_verdict) and 'supported' in (light_verdict,heavy_verdict))
         objective=np.concatenate([np.where(valid,q,-1e6),np.full((7,7),-1000.)],axis=1)
         x,y=linear_sum_assignment(objective,maximize=True)
-        selected=[{'chapter':chapters[n][0],**meta[i],'caption':caps[str(i)]} for n,i in zip(x,y) if i<len(meta) and valid[n,i]]
+        selected=[{'chapter':chapters[n][0],**meta[i],'caption':caps[str(i)],'heavy_caption':heavy.get(str(i))} for n,i in zip(x,y) if i<len(meta) and valid[n,i]]
         report['selected']=selected
         report['unresolved']=7-len(selected)
         report['needs_heavy_review']=len(selected)<7
