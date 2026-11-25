@@ -1,0 +1,107 @@
+name: Isolated cinema sources smoke
+on:
+  push:
+    branches: [diagnostics/cinema-three-sources-20261125]
+    paths: ['.github/workflows/cinema-three-sources-smoke.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Install image verifier
+        run: python3 -m pip install --quiet Pillow
+      - name: Check three read-only sources
+        env:
+          TMDB_API_TOKEN: ${{ secrets.TMDB_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.parse,hashlib,subprocess,tempfile,pathlib,re
+          from PIL import Image
+          from io import BytesIO
+          def get(url, headers=None, data=None, cap=2_000_000):
+              req=urllib.request.Request(url,data=data,headers={'User-Agent':'ZEN-Control-source-diagnostic/1.0',**(headers or {})})
+              with urllib.request.urlopen(req,timeout=25) as r:
+                  b=r.read(cap+1)
+                  if len(b)>cap: raise ValueError('response_size_limit')
+                  return b,dict(r.headers)
+          def jget(url,headers=None):
+              return json.loads(get(url,headers)[0])
+          failed=[]
+          def check(name,fn):
+              try: fn(); print(name+'_PASS',flush=True)
+              except Exception as e:
+                  print(name+'_FAIL',type(e).__name__,getattr(e,'code',''),flush=True); failed.append(name)
+          def outnow():
+              url='https://outnow.ch/mcp'
+              headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream'}
+              def rpc(method,params,id=None):
+                  msg={'jsonrpc':'2.0','method':method,'params':params}
+                  if id is not None: msg['id']=id
+                  b,h=get(url,headers,json.dumps(msg).encode())
+                  if h.get('Mcp-Session-Id'): headers['Mcp-Session-Id']=h['Mcp-Session-Id']
+                  if not b: return {}
+                  s=b.decode()
+                  if s.lstrip().startswith('{'): return json.loads(s)
+                  for line in s.splitlines():
+                      if line.startswith('data:'):
+                          v=json.loads(line[5:].strip())
+                          if v.get('id')==id:return v
+                  raise ValueError('rpc_response')
+              init=rpc('initialize',{'protocolVersion':'2025-03-26','capabilities':{},'clientInfo':{'name':'zen-source-test','version':'1'}},1)
+              headers['MCP-Protocol-Version']=init['result']['protocolVersion']
+              rpc('notifications/initialized',{})
+              tools=rpc('tools/list',{},2)['result']['tools']
+              print('OUTNOW_TOOL_COUNT',len(tools),flush=True)
+              assert tools
+              # Only invoke a documented read-only search when its schema is unambiguous.
+              for t in tools:
+                  if not re.search(r'search',t['name'],re.I): continue
+                  schema=t.get('inputSchema',{}); props=schema.get('properties',{})
+                  key=next((k for k in ('query','q','search','term') if props.get(k,{}).get('type')=='string'),None)
+                  if key and set(schema.get('required',[]))<={key}:
+                      result=rpc('tools/call',{'name':t['name'],'arguments':{key:'Dune: Part Two'}},3)['result']
+                      assert not result.get('isError')
+                      print('OUTNOW_SEARCH_DUNE',bool(re.search(r'dune',json.dumps(result),re.I)),flush=True)
+                      return
+              print('OUTNOW_SEARCH_SCHEMA_REQUIRES_REVIEW',flush=True)
+          def tmdb():
+              token=os.environ.get('TMDB_API_TOKEN','')
+              assert token,'missing_secret'
+              h={'Authorization':'Bearer '+token,'Accept':'application/json'}
+              base='https://api.themoviedb.org/3'
+              q=urllib.parse.urlencode({'query':'Dune: Part Two','year':2024})
+              results=jget(base+'/search/movie?'+q,h)['results']
+              movie=next(x for x in results if x['original_title']=='Dune: Part Two' and x['release_date'].startswith('2024'))
+              imgs=jget(base+'/movie/'+str(movie['id'])+'/images',h)
+              candidates=[x for x in imgs['backdrops'] if x.get('iso_639_1') is None and x['width']>=1280]
+              print('TMDB_MATCH',movie['id'],'BACKDROPS',len(imgs['backdrops']),'CANDIDATES',len(candidates),flush=True)
+              assert len(candidates)>=7
+              path=candidates[0]['file_path']
+              assert re.fullmatch(r'/[A-Za-z0-9]+\.(jpg|png)',path)
+              raw,_=get('https://image.tmdb.org/t/p/w1280'+path,cap=8_000_000)
+              with Image.open(BytesIO(raw)) as im: print('TMDB_IMAGE',im.format,im.size,flush=True); im.verify()
+          def blender():
+              title='File:WING IT! - Blender Open Movie-full movie.webm'
+              q=urllib.parse.urlencode({'action':'query','format':'json','titles':title,'prop':'imageinfo','iiprop':'url|size|extmetadata'})
+              p=next(iter(jget('https://commons.wikimedia.org/w/api.php?'+q)['query']['pages'].values()))
+              i=p['imageinfo'][0]; license=i['extmetadata']['LicenseShortName']['value']
+              assert license.startswith('CC BY') and i['size']<50_000_000 and i['url'].startswith('https://upload.wikimedia.org/')
+              raw,_=get(i['url'],cap=50_000_000)
+              print('BLENDER_LICENSE',license,'VIDEO_BYTES',len(raw),flush=True)
+              with tempfile.TemporaryDirectory() as tmp:
+                  d=pathlib.Path(tmp); video=d/'film.webm'; video.write_bytes(raw)
+                  hashes=set()
+                  for t in (15,40,65,90,115,140,165):
+                      dest=d/f'{t}.jpg'
+                      subprocess.run(['ffmpeg','-v','error','-ss',str(t),'-i',str(video),'-frames:v','1','-vf','scale=1280:-1','-y',str(dest)],check=True,timeout=20)
+                      with Image.open(dest) as im: im.verify()
+                      hashes.add(hashlib.sha256(dest.read_bytes()).hexdigest())
+                  print('BLENDER_DISTINCT_SHA256',len(hashes),flush=True); assert len(hashes)==7
+          check('OUTNOW',outnow)
+          check('TMDB',tmdb)
+          check('BLENDER',blender)
+          print('FAILED_SOURCES',','.join(failed),flush=True)
+          raise SystemExit(bool(failed))
+          PY
