@@ -18,7 +18,8 @@ from urllib.request import Request, urlopen
 
 from .editorial_routerai_diagrams import ASTEROID_SOURCE, CAVE_SOURCE, COMET_SOURCE, render_diagram
 from .editorial_images import ImageIndex, commons_photos, decode_candidate, duplicate_reason, warm_visual_matcher
-from .editorial_cinema import registered_stills, evidence as film_evidence, fetch_still, still_candidates
+from .editorial_cinema import (MIN_RELEASE_YEAR, PREFERRED_RELEASE_YEARS, eligible_year,
+                               evidence as film_evidence, fetch_still, registered_stills, still_candidates)
 from .editorial_layout import arrange
 from .editorial_memory import digest
 from .editorial_no_repeat import topic_duplicate_reason
@@ -611,12 +612,16 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         for qid, entry in film_registry.items():
             identity = {"qid": qid, "original_title": entry["original_title"], "year": entry["year"]}
             key = cinema_key(identity)
-            if (not topic_duplicate_reason(channel, key, history_titles)
+            if (eligible_year(identity["year"]) and not topic_duplicate_reason(channel, key, history_titles)
                     and len({row["sha256"] for row in registered_stills(identity, film_registry)}) >= 7):
                 film_options.append({"title": entry["title"], **identity})
+        film_options.sort(key=lambda row: -row["year"])
         if not film_options:
             raise UnsafeToTest("cinema_verified_stills_unavailable")
         mode = ("Редакционный материал о фильме. Выбери фильм только из каталога проверенных кадров. "
+                f"Оригинальный год выпуска от {MIN_RELEASE_YEAR} включительно. "
+                f"Приоритет новинкам проката и последним {PREFERRED_RELEASE_YEARS} годам выпуска. "
+                "Год переиздания не заменяет оригинальный. При нехватке кадров выбери другой допустимый фильм. "
                 "Укажи film_title, original_title, year, qid, format, spoilers и sources. "
                 "Приложи проверяемые URL студий или независимых источников о выбранной версии фильма.")
     if channel == "science" and not resume:

@@ -12,11 +12,12 @@ from tests.test_editorial_zen_executor import Store
 class CatalogueTests(unittest.TestCase):
     def test_catalogue_saves_hashed_assets_and_reuses_existing_entry(self):
         store = Store()
+        store.write("sources/cinema.json", json.dumps({f"Q{n}": {"year": 1998} for n in range(10, 14)}).encode(), None)
         qid = "Q555"
-        film = {"qid": qid, "original_title": "Fixture", "title": "Fixture", "year": 1910}
+        film = {"qid": qid, "original_title": "Fixture", "title": "Fixture", "year": 1999}
         origin = {"asset_url": "https://upload.wikimedia.org/a.webm",
                   "source_page": "https://commons.wikimedia.org/wiki/File:A.webm", "license": "Public domain"}
-        candidates = [(qid, "A.webm", film)]
+        candidates = [("Q554", "Old.webm", {**film, "year": 1998}), (qid, "A.webm", film)]
         frames = [(100 + n, hex(n)[2:], bytes([n])) for n in range(12)]
         with patch("src.editorial_cinema_catalogue.request", return_value=b"video") as download:
             for count in (1, 0):
@@ -36,7 +37,7 @@ class CatalogueTests(unittest.TestCase):
     def test_cascade_continues_when_primary_provider_has_no_available_entries(self):
         store = Store()
         fallback = ("internet_archive_film", ("archive.org",),
-                    lambda: [("Q5", "fixture", {"original_title": "Fixture", "year": 1920})],
+                    lambda: [("Q5", "fixture", {"original_title": "Fixture", "year": 2025})],
                     lambda _: {"asset_url": "https://archive.org/download/fixture/example.mp4",
                                "source_page": "https://archive.org/details/fixture"})
         primary = ("commons_film", ("upload.wikimedia.org",), lambda: [], lambda _: None)

@@ -1,5 +1,6 @@
 """Build a private catalogue from films linked to complete Wikimedia Commons videos."""
 import json
+from datetime import date
 from pathlib import Path
 import re
 import subprocess
@@ -7,7 +8,8 @@ from tempfile import TemporaryDirectory
 from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from .editorial_http import Blocked, request
-from .editorial_cinema import archive_film_identity, archive_source_record
+from .editorial_cinema import (MIN_RELEASE_YEAR, archive_film_identity, archive_source_record, eligible_year,
+                               verify_original_year)
 from .editorial_images import decode_candidate
 from .editorial_memory import digest
 
@@ -19,14 +21,15 @@ MAX_FILMS = 4
 QUERY_TEXT = """
 SELECT ?film ?video ?release ?title ?ru WHERE {
   ?film wdt:P31 wd:Q11424; wdt:P10 ?video; wdt:P577 ?release; rdfs:label ?title.
-  FILTER(LANG(?title) = "en" && YEAR(?release) >= 1900 && YEAR(?release) <= 1928)
+  FILTER(LANG(?title) = "en" && YEAR(?release) >= MIN_YEAR && YEAR(?release) <= MAX_YEAR)
   OPTIONAL { ?film rdfs:label ?ru. FILTER(LANG(?ru) = "ru") }
-} ORDER BY ?film ?release LIMIT 80
+} ORDER BY DESC(?release) ?film LIMIT 80
 """
 
 
 def linked_films(property_id):
     query = QUERY_TEXT.replace("wdt:P10", "wdt:" + property_id)
+    query = query.replace("MIN_YEAR", str(MIN_RELEASE_YEAR)).replace("MAX_YEAR", str(date.today().year))
     raw = request(QUERY + "?" + urlencode({"format": "json", "query": query}),
                   ("query.wikidata.org",), limit=1_000_000)
     for row in json.loads(raw)["results"]["bindings"]:
@@ -142,8 +145,7 @@ def video_frames(video, run=subprocess.run):
 def authorized_archives(qid, source, identity):
     checked = {**identity, "source_page": source["source_page"]}
     film = archive_film_identity(qid, checked)["film"]
-    if identity["year"] not in film["years"]:
-        raise Blocked("film_archive_version_unverified")
+    verify_original_year(identity["year"], film)
     archive_source_record(source["source_page"])
 
 
@@ -156,20 +158,19 @@ def refresh_catalogue(store, *, sources=None, extract=video_frames, verify=autho
     name = "sources/cinema.json"
     raw, rev = store.read(name)
     rows = json.loads(raw) if raw else {}
+    eligible = {qid: row for qid, row in rows.items() if eligible_year(row.get("year"))}
     added = 0
-    known = {entry.get("source_page") for entry in rows.values()}
+    known = {entry.get("source_page") for entry in eligible.values()}
     for source_type, domains, discover, lookup in sources:
-        if len(rows) >= MAX_FILMS:
+        if len(eligible) >= MAX_FILMS:
             break
-        consumed = set()
         try:
             candidates = list(discover())
         except (Blocked, KeyError, ValueError, OSError):
             continue
         for qid, identifier, identity in candidates:
-            if qid in rows or qid in consumed:
+            if not eligible_year(identity.get("year")) or qid in eligible:
                 continue
-            consumed.add(qid)
             try:
                 origin = lookup(identifier)
                 if not origin or origin["source_page"] in known:
@@ -190,13 +191,14 @@ def refresh_catalogue(store, *, sources=None, extract=video_frames, verify=autho
                                "scene": f"Frame at {timestamp:.2f} s", "timestamp_seconds": timestamp,
                                "perceptual_hash": signature, "sha256": sha, "private_path": path})
             rows[qid] = {**identity, "source_page": origin["source_page"], "stills": stills}
+            eligible[qid] = rows[qid]
             known.add(origin["source_page"])
             added += 1
-            if len(rows) >= MAX_FILMS:
+            if len(eligible) >= MAX_FILMS:
                 break
     if added:
         store.write(name, json.dumps(rows, ensure_ascii=False).encode(), rev)
-    return {"added": added, "available": len(rows)}
+    return {"added": added, "available": len(eligible)}
 
 
 if __name__ == "__main__":

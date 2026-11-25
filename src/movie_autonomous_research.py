@@ -91,7 +91,10 @@ def release_years(entity):
     years = []
     for claim in entity.get("claims", {}).get("P577", []):
         value = claim.get("mainsnak", {}).get("datavalue", {}).get("value", {})
-        time = value.get("time", "") if isinstance(value, dict) else ""
+        if (claim.get("rank") == "deprecated" or not isinstance(value, dict)
+                or value.get("precision", 0) < 9):
+            continue
+        time = value.get("time", "")
         match = re.match(r"^[+](\d{4})-", time)
         if match:
             years.append(int(match.group(1)))
