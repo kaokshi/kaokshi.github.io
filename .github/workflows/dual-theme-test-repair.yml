@@ -1,0 +1,51 @@
+name: Dual theme offline test repair
+on:
+  push:
+    branches: [development/opus-dual-theme-20261125]
+    paths: ['.github/workflows/dual-theme-test-repair.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-dual-theme
+          run-id: 45705875832
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/previous
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore candidate and repair truncated IIFE in fixture
+        run: |
+          git apply "$RUNNER_TEMP/previous/tracked.patch" "$RUNNER_TEMP/previous/new-files.patch"
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("telegram-control/ui_theme.test.mjs")
+          s=p.read_text()
+          old="runInNewContext(JS.slice(0,CUT)+expose,context);"
+          assert s.count(old)==1
+          p.write_text(s.replace(old,'runInNewContext(JS.slice(0,CUT)+expose+"})();",context);'))
+          PY
+          node --check telegram-control/ui.mjs
+          node --test telegram-control/ui_theme.test.mjs
+          node --test telegram-control/*.test.mjs
+      - name: Preserve repaired candidate
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/repaired"
+          git diff --binary HEAD > "$RUNNER_TEMP/repaired/tracked.patch"
+          git ls-files --others --exclude-standard -z | while IFS= read -r -d '' f; do
+            case "$f" in telegram-control/*.test.mjs|docs/*) git diff --no-index --binary /dev/null "$f" >> "$RUNNER_TEMP/repaired/new-files.patch" || test "$?" = 1 ;; esac
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dual-theme-repaired
+          path: ${{ runner.temp }}/repaired
