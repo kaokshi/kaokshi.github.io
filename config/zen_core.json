@@ -4,6 +4,7 @@
   "main_daily_rub": "300",
   "reserve_daily_rub": "50",
   "rolling_30_day_cap_rub": "9000",
+  "production_channels": ["cinema", "legends", "science"],
   "max_image_retries": 2,
   "execution_enabled": false,
   "publication_enabled": false,

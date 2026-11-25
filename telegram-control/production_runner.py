@@ -7,6 +7,7 @@ import sys
 from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from document_delivery import deliver_documents
 from intake_client import build_receipt, drain, push_receipt
 from intake_runner import CHECKPOINT, CURSOR, validate_checkpoint
 from src.editorial_memory import digest
@@ -70,7 +71,7 @@ def dispatch_cycle(core, endpoint, secret, token, *, guard, account, advance=dis
         return {"attempted": 0, "receipts": 0}
     raw, rev = core.store.read(DISPATCH_CURSOR)
     last = json.loads(raw)["after"] if raw else ""
-    if not isinstance(last, str) or last and not re.fullmatch(r"[-a-zA-Z0-9:]{1,120}/(?:legends|science)/[1-9]", last):
+    if not isinstance(last, str) or last and not re.fullmatch(r"[-a-zA-Z0-9:]{1,120}/(?:cinema|legends|science)/[1-9]", last):
         raise CoreBlocked("dispatch_cursor_invalid")
     ordered = [a for a in candidates if a > last] + [a for a in candidates if a <= last]
     attempted = receipts = 0
@@ -127,6 +128,13 @@ def main():
     intake = accept_cycle(core, endpoint, secret, production)
     steps = dispatch_cycle(core, endpoint, secret, os.environ["ROUTERAI_API_KEY"],
                            guard=configured_guard(), account=configured_account()) if production else {}
+    delivery_job = os.getenv("ZEN_CORE_TELEGRAM_DOCX_JOB", "")
+    if production and delivery_job:
+        jobs = core.access(lambda c: c.snapshot())["jobs"]
+        job = next((job for job in jobs if job["id"] == delivery_job), None)
+        if job:
+            steps["telegramDocuments"] = deliver_documents(core.store, job["articles"], delivery_job,
+                os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_OWNER_ID"))
     print(json.dumps({"intakeDelivered": intake["delivered"], **steps,
                       "executionEnabled": production, "publicationAuthorized": False, "rssEnabled": False}))
 

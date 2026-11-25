@@ -5,6 +5,8 @@ from .editorial_routerai import UnsafeToTest
 
 ESA_SOURCE = "https://www.esa.int/Science_Exploration/Space_Science/Rosetta/Comets_-_An_Introduction"
 ISON_SOURCE = "https://images.nasa.gov/details/PIA18153"
+CAVE_SOURCE = "https://www.nps.gov/subjects/caves/speleothems.htm"
+ASTEROID_SOURCE = "https://www.esa.int/Space_Safety/Planetary_Defence"
 COMET_SOURCE = "https://science.nasa.gov/solar-system/comets/facts/"
 
 
@@ -19,6 +21,10 @@ def render_diagram(template, records):
         url, terms = ESA_SOURCE, ("main-belt comet", "short-period comets", "depletion")
     elif template == "comet-observation-inference":
         url, terms = ISON_SOURCE, ("nucleus is unresolved", "symmetric and smooth")
+    elif template == "cave-formations":
+        url, terms = CAVE_SOURCE, ("stalactites", "stalagmites", "columns")
+    elif template == "asteroid-observations":
+        url, terms = ASTEROID_SOURCE, ("asteroid", "close approaches", "predict")
     else:
         raise UnsafeToTest("diagram_template_or_evidence_unavailable")
     if not any(row["url"].rstrip("/") == url.rstrip("/") and row["status"] == "accessible"
@@ -39,6 +45,17 @@ def render_diagram(template, records):
             if i < len(panels) - 1:
                 draw.line((x + 320, 385, x + 368, 385), fill="#e2bd89", width=6)
                 draw.polygon([(x + 368, 385), (x + 353, 375), (x + 353, 395)], fill="#e2bd89")
+    elif template in {"cave-formations", "asteroid-observations"}:
+        labels = (["Ceiling: stalactites", "Floor: stalagmites", "Joined: a column"]
+                  if template == "cave-formations" else
+                  ["Observe positions", "Fit a possible orbit", "Estimate future position"])
+        for i, label in enumerate(labels):
+            x = 30 + i * 390
+            draw.rounded_rectangle((x, 335, x + 310, 460), radius=14, outline="#68ceff", width=4)
+            draw.text((x + 18, 380), label, fill="white", font=ImageFont.load_default(size=24))
+            if i < 2:
+                draw.line((x + 326, 398, x + 367, 398), fill="#e2bd89", width=5)
+                draw.polygon([(x + 374, 398), (x + 360, 391), (x + 360, 405)], fill="#e2bd89")
     elif template == "comet-asteroid-relationship":
         draw.rounded_rectangle((80, 205, 1120, 385), radius=20, outline="#68ceff", width=4)
         draw.text((120, 253), "Asteroid-belt object", fill="white", font=font)

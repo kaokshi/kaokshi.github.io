@@ -12,9 +12,9 @@ from .editorial_no_repeat import topic_duplicate_reason
 
 CONFIG = Path(__file__).resolve().parents[1] / "config/zen_core.json"
 STAGES = ("plan", "draft", "edit", "visual_plan", "images", "qa", "package")
-CHANNELS = {"legends", "science"}
+CHANNELS = {"cinema", "legends", "science"}
 RESERVE_REASONS = {"images": {"missing_image", "image_correction", "required_check"},
-                   "edit": {"required_correction"}, "visual_plan": {"required_check"},
+                   "edit": {"required_correction"}, "visual_plan": {"required_check", "required_correction"},
                    "qa": {"required_check"}, "package": {"finish_started_article"}}
 
 
@@ -32,7 +32,7 @@ def amount(value):
     return number
 
 
-def validate_plan(plan, release_at):
+def validate_plan(plan, release_at, enabled_channels=CHANNELS):
     """Accept the existing ZEN CORE intent fields without enabling its scheduler."""
     try:
         rows = plan["items"]
@@ -48,7 +48,7 @@ def validate_plan(plan, release_at):
             instant = datetime.fromisoformat(release_at)
             if instant.utcoffset() is None:
                 raise ValueError
-        if (not rows or len(set(channels)) != len(rows) or set(channels) - CHANNELS
+        if (not rows or len(set(channels)) != len(rows) or set(channels) - enabled_channels
                 or any(type(count) is not int or count < 1 for count in counts)
                 or sum(counts) > 9 or not isinstance(instructions, str) or len(instructions) > 1000):
             raise ValueError
@@ -66,6 +66,10 @@ class Core:
             self.db.deserialize(checkpoint)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.policy = json.loads(CONFIG.read_text())
+        configured_channels = self.policy.get("production_channels", sorted(CHANNELS))
+        if not isinstance(configured_channels, list) or any(not isinstance(c, str) or c not in CHANNELS for c in configured_channels):
+            raise CoreBlocked("invalid_production_channels")
+        self.channels = set(configured_channels)
         self.main = amount(self.policy["main_daily_rub"])
         self.reserve = amount(self.policy["reserve_daily_rub"])
         self.rolling_cap = amount(self.policy.get("rolling_30_day_cap_rub", "9000"))
@@ -98,7 +102,7 @@ class Core:
         job_id = job.get("id")
         if not isinstance(job_id, str) or not re.fullmatch(r"[a-zA-Z0-9:_-]{1,120}", job_id):
             raise CoreBlocked("invalid_job_id")
-        intent = validate_plan(job.get("plan"), job.get("releaseAt"))
+        intent = validate_plan(job.get("plan"), job.get("releaseAt"), self.channels)
         mode = job.get("mode", "manual")
         if mode not in ("manual", "semi_autonomous", "autonomous"):
             raise CoreBlocked("invalid_execution_mode")
@@ -304,8 +308,11 @@ class Core:
             self.db.execute("BEGIN IMMEDIATE")
             rows = self.check_stage(article, stage)
             previous = json.loads(rows.get(stage, "{}"))
-            if previous.get("status") == "passed" and rows[stage] != encoded:
-                raise CoreBlocked("passed_stage_immutable")
+            if previous.get("status") == "passed":
+                existing = {key: previous.get(key) for key in ("status", "reason", "checks")}
+                if existing != json.loads(encoded):
+                    raise CoreBlocked("passed_stage_immutable")
+                return
             if stage == "images" and any(
                     status == "passed" and key.startswith("slot_") and checks.get(key) != "passed"
                     for key, status in previous.get("checks", {}).items()):
@@ -316,6 +323,11 @@ class Core:
                 if payload["blockedAt"] is None:
                     payload["blockedAt"] = int(self.clock().timestamp() * 1000)
                 encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+            payload = json.loads(encoded)
+            now = int(self.clock().timestamp() * 1000)
+            payload["firstRecordedAt"] = previous.get("firstRecordedAt", now)
+            payload["recordedAt"] = now
+            encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False)
             self.db.execute("INSERT OR REPLACE INTO stages VALUES (?, ?, ?)", (article, stage, encoded))
 
     def budget(self, day):

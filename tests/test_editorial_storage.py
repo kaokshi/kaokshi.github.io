@@ -122,6 +122,45 @@ class StorageTests(unittest.TestCase):
             self.assertFalse((root / "wrong").exists())
 
 
+    def test_production_docx_uses_validated_text_and_embeds_every_saved_image(self):
+        from io import BytesIO
+        from docx import Document
+        from PIL import Image
+        from src.editorial_memory import digest
+        from src.editorial_review import canonical
+
+        from src.editorial_zen_cloud import CloudCore
+        from src.editorial_zen_executor import Session
+        from tests.test_editorial_zen_executor import Store
+
+        cloud = CloudCore(Store())
+        cloud.access(lambda c: c.submit({"id": "fixture", "mode": "autonomous", "plan": {
+            "items": [{"channel": "legends", "count": 1}], "day": None, "instructions": ""}}), change=True)
+        session = Session(cloud, "fixture/legends/1")
+        article = {"intro": ["Synthetic intro"], "sections": [
+            {"heading": f"Synthetic heading {n}", "paragraphs": [f"Synthetic paragraph {n}"]}
+            for n in range(1, 7)]}
+        sha = digest(canonical(article))
+        session.quality_report = {"article": article, "text_sha256": sha, "facts": {"evidence": []}}
+        with TemporaryDirectory() as directory:
+            rows = []
+            for slot in range(7):
+                path = Path(directory) / f"image-{slot:02d}.jpg"
+                Image.new("RGB", (16, 12), (slot * 30, 70, 0)).save(path)
+                rows.append({"file": path.name, "section": max(1, slot), "ai_generated": True,
+                             "cover_score": int(slot == 0), "scene": "Synthetic visual",
+                             "kind": "illustration", "sha256": digest(path.read_bytes())})
+            checks = {"text_sha256": sha, "chars_without_spaces": 3200, "editorial_attempts": 2}
+            session.document("Synthetic fixture", article, checks, rows, Path(directory))
+            data = session.read("delivery/article.docx")
+            session.document("Synthetic fixture", article, checks, rows, Path(directory))
+            self.assertEqual(data, session.read("delivery/article.docx"))
+        doc = Document(BytesIO(data))
+        self.assertEqual(len(doc.inline_shapes), 7)
+        self.assertEqual([p.text for p in doc.paragraphs].count("ИИ-иллюстрация"), 7)
+        self.assertEqual(json.loads(session.read("delivery/manifest.json"))["sha256"], digest(data))
+
+
 def write_quota_fixture(out, run):
     now = datetime.now(timezone.utc)
     base = {"lane": "production", "at": now.isoformat()}

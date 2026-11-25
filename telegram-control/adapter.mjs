@@ -3,7 +3,6 @@
 export function buildDryRun(job,validateJob,stages){
  const plan=validateJob(job?.plan);
  if(!plan||typeof job.id!=="string")return null;
- if(plan.items.some(item=>item.channel==="cinema"))return null;
  const graph=stages.filter(s=>s.id!=="rss");
  const seen=new Set();
  for(const s of graph){

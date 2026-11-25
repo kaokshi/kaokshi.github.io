@@ -13,7 +13,7 @@ from .editorial_memory import digest
 from .editorial_http import Blocked
 from .editorial_review import qa, sources
 from .editorial_routerai import UnsafeToTest, call, credits
-from .editorial_routerai_two_articles import MODELS, ROOT, Spend, evaluate_channel, json_bytes, money, safe_reason
+from .editorial_routerai_two_articles import MODELS, ROOT, Spend, cinema_key, evaluate_channel, json_bytes, money, safe_reason
 from .editorial_zen_cloud import CloudCore, GitHubStore
 from .editorial_zen_core import CONFIG, STAGES, CoreBlocked
 from .editorial_zen_control import configured_guard, configured_account
@@ -28,7 +28,11 @@ class Pause(CoreBlocked):
 def classify(step, role):
     if {"plan": "brain", "draft": "draft", "edit": "edit"}.get(step) == role:
         return step, "new_article" if step != "edit" else "required_correction", None
-    if step == "editorial_and_image_plan" and role == "brain":
+    if re.fullmatch(r"edit-correction-[2-5]", step) and role == "edit":
+        return "edit", "required_correction", None
+    if re.fullmatch(r"audit-correction-[2-5]", step) and role == "edit":
+        return "visual_plan", "required_correction", None
+    if (step == "editorial_and_image_plan" or re.fullmatch(r"audit-correction-[2-5]-qa", step)) and role == "brain":
         return "visual_plan", "required_check", None
     if step == "article_visual_review" and role == "brain":
         return "qa", "required_check", None
@@ -165,7 +169,7 @@ class Session:
         if filename.endswith("-qa.json"):
             filename = "reports/" + digest(data) + "/" + filename
         self.save(filename, data)
-        if filename.endswith("/qwen-plan.json"):
+        if filename.endswith("/qwen-plan.json") and self.channel == "legends":
             plan = json.loads(json.loads(data)["output"])
             self.core.access(lambda c: c.register_title(self.article, self.channel, plan["title"]), change=True)
 
@@ -209,6 +213,64 @@ class Session:
             self.save("inputs/sources.json", json_bytes(records))
         return records
 
+    def register_topic(self, title):
+        self.core.access(lambda c: c.register_title(self.article, self.channel, title), change=True)
+
+    def cinema_registry(self):
+        raw = self.read("inputs/cinema-sources.json")
+        if raw is not None:
+            return json.loads(raw)
+        raw = self.core.store.read("sources/cinema.json")[0]
+        if raw is None:
+            raw = (ROOT / "config/editorial_cinema.json").read_bytes()
+        registry = json.loads(raw)
+        if not isinstance(registry, dict) or any(
+                not re.fullmatch(r"Q[1-9][0-9]*", qid) or not isinstance(row, dict)
+                or not isinstance(row.get("title"), str) or not isinstance(row.get("original_title"), str)
+                or type(row.get("year")) is not int or not isinstance(row.get("stills"), list)
+                for qid, row in registry.items()):
+            raise CoreBlocked("cinema_source_registry_invalid")
+        if registry:
+            self.save("inputs/cinema-sources.json", json_bytes(registry))
+        return registry
+
+    def cinema_evidence(self, plan, registry, verify):
+        name = "inputs/cinema-evidence.json"
+        raw = self.read(name)
+        result = json.loads(raw) if raw is not None else verify(plan, registry)
+        identity = cinema_key(result["film"])
+        self.register_topic(identity)
+        if raw is None:
+            self.save(name, json_bytes(result))
+        return result
+
+    def document(self, title, article, checks, rows, image_folder):
+        from .editorial_package import package
+        from .editorial_review import canonical
+
+        existing = self.read("delivery/article.docx")
+        if existing is None:
+            normalized_hash = digest(canonical(article))
+            report = self.quality_report
+            if report.get("text_sha256") != normalized_hash:
+                raise CoreBlocked("docx_quality_version_mismatch")
+            with tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory) / f"{self.channel}-{int(self.article.rsplit('/', 1)[1]):02d}"
+                try:
+                    result = package(folder, title, [], report, rows, image_folder,
+                                     {"publication_authorized": False, "status": "review_pending"})
+                    if result["cover"] != rows[0]["file"]:
+                        raise ValueError("docx_cover_order_invalid")
+                    existing = (folder / "Статья.docx").read_bytes()
+                except (OSError, ValueError) as exc:
+                    raise CoreBlocked("docx_packaging_failed") from exc
+            self.save("delivery/article.docx", existing)
+        self.save("delivery/manifest.json", json_bytes({
+            "article": self.article, "sha256": digest(existing), "images": len(rows),
+            "text_sha256": checks["text_sha256"], "chars_without_spaces": checks["chars_without_spaces"],
+            "editorial_attempts": checks["editorial_attempts"], "publication_authorized": False,
+        }))
+
     def image(self, slot, path):
         prior = self.read(f"accepted/{slot}.json")
         if prior is None:
@@ -242,6 +304,7 @@ class Session:
         from .editorial_enhancements import readability
         from .editorial_review import canonical
 
+        self.quality_report = report
         report["readability"] = readability({"channel": self.channel,
                                                "body_html": "<p>" + escape(canonical(report["article"])) + "</p>"})
         encoded = json_bytes(report)
@@ -258,6 +321,12 @@ class Session:
                                 row.get("rights_status") in {"license_metadata_verified",
                                                              "original_programmatic_graphic"} for row in rows),
                   "image_review": True}
+        if self.channel == "cinema":
+            del checks["rights"]
+            evidence = json.loads(self.read("inputs/cinema-evidence.json"))
+            checks["film_still_provenance"] = all(
+                row.get("kind") == "photo" and row.get("rights_status") == "not_checked"
+                and row.get("film_id") == evidence["film"]["qid"] for row in rows)
         statuses = {key: "passed" if ok else "blocked" for key, ok in checks.items()}
         if not all(checks.values()):
             self.core.access(lambda c: c.stage_result(
@@ -283,6 +352,10 @@ def execute(core, article, token, *, target=None, transport=call, balance=credit
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory)
         titles, prose, photos = archive(path)
+        if session.channel == "cinema":
+            catalog = json.loads((ROOT / "config/movie_reference_index.json").read_bytes())
+            titles["cinema"].extend(cinema_key({"original_title": row["film_title"],
+                                                "year": row["original_year"]}) for row in catalog.values())
         raw = session.read("inputs/history.json")
         if raw is None:
             others = core.access(lambda c: c.title_history(article, session.channel))

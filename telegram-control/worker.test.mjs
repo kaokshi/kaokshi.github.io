@@ -477,7 +477,7 @@ test("confirmed jobs in assisted or autonomous mode automatically get intake pre
  assert.equal((await saveJob(s,job.id,p,Date.now(),"agent")).preview.executorMode,"semi_autonomous");
  const scheduled=await saveJob(s,"scheduled:auto-intake",p,Date.now(),"schedule");
  assert.equal(scheduled.preview.executorMode,"autonomous");assert.equal(scheduled.publicationAuthorized,false);
- const cinema=await saveJob(s,"agent:cinema-intake",{...p,items:[{channel:"cinema",count:1}]},Date.now(),"agent");assert.equal(cinema.preview,undefined);
+ const cinema=await saveJob(s,"agent:cinema-intake",{...p,items:[{channel:"cinema",count:1}]},Date.now(),"agent");assert.equal(cinema.preview.executorMode,"autonomous");assert.equal(cinema.preview.articles[0].channel,"cinema");
  await s.put("ops:state",{requestedMode:"manual"});
  assert.equal((await saveJob(s,"agent:manual-intake",p,Date.now(),"agent")).preview,undefined);
 });

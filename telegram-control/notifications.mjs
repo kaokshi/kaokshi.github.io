@@ -27,7 +27,7 @@ export async function notifyReceipt(storage,env,receipt,events,now=Date.now()){
  if(!claim)return;
  let status="unconfirmed";
  try{
-  const text="ZEN CORE · отчёт исполнителя (тестовый контур)\n"+events.slice(0,15).map(e=>e.label).join("\n")+(events.length>15?"\nЕщё событий: "+(events.length-15):"")+"\nПубликация и платное исполнение не разрешены.";
+  const text="ZEN CORE · отчёт исполнителя\n"+events.slice(0,15).map(e=>e.label).join("\n")+(events.length>15?"\nЕщё событий: "+(events.length-15):"")+"\nПубликация и RSS выключены.";
   const r=await fetch("https://api.telegram.org/bot"+env.TELEGRAM_BOT_TOKEN+"/sendMessage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:env.TELEGRAM_OWNER_ID,text,link_preview_options:{is_disabled:true}}),redirect:"manual",signal:AbortSignal.timeout(10000)});
   if(r.ok&&(await r.json()).ok===true)status="sent";
  }catch{}

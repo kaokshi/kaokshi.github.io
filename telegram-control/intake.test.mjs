@@ -2,7 +2,7 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {bridgeRequest,exportIntent,intakeView,controlView,queueView} from "./intake.mjs";
 const job={id:"agent:fixture",status:"blocked_prelaunch",executed:false,publicationAuthorized:false,preview:{mode:"dry_run"},plan:{items:[{channel:"legends",count:2},{channel:"science",count:1}],day:"2026-11-25",instructions:"Synthetic fixture only"},releaseAt:Date.parse("2026-11-25T09:00:00Z")};
-test("maps exact PR85 contract and converts epoch milliseconds to ISO",()=>{assert.deepEqual(exportIntent(job),{id:job.id,plan:job.plan,releaseAt:"2026-11-25T09:00:00.000Z",mode:"manual"});for(const change of [{preview:null},{status:"cancelled"},{executed:true},{publicationAuthorized:true},{releaseAt:"bad"},{plan:{...job.plan,items:[{channel:"cinema",count:1}]}}])assert.equal(exportIntent({...job,...change}),null);});
+test("maps exact PR85 contract and converts epoch milliseconds to ISO",()=>{assert.deepEqual(exportIntent(job),{id:job.id,plan:job.plan,releaseAt:"2026-11-25T09:00:00.000Z",mode:"manual"});for(const change of [{preview:null},{status:"cancelled"},{executed:true},{publicationAuthorized:true},{releaseAt:"bad"}])assert.equal(exportIntent({...job,...change}),null);});
 test("intake only exports existing confirmed preview; pause prevents export",async()=>{const map=new Map([["production:job:"+job.id,job]]);const s={get:async k=>map.get(k),transaction:async fn=>fn(s)};const r=await intakeView(s,job.id);assert.equal(r.status,200);assert.equal(r.body.executionEnabled,false);assert.equal(r.body.publicationAuthorized,false);assert.equal(r.body.rssEnabled,false);assert.equal((await intakeView(s,"missing")).status,404);map.set("ops:state",{stopped:true});assert.equal((await intakeView(s,job.id)).status,409);});
 test("dedicated bearer is mandatory before reaching storage",async()=>{const secret="a".repeat(64);let calls=0;const env={ZEN_CORE_INTAKE_SECRET:secret,REVIEW_JOURNAL:{idFromName:n=>n,get:()=>({fetch:async(url,opts)=>{calls++;assert.equal(JSON.parse(opts.body).id,job.id);return Response.json({mode:"intents_only"});}})}};const req=token=>new Request("https://fixture.invalid/internal/zen-core/intake",{method:"POST",headers:token?{Authorization:"Bearer "+token}:{},body:JSON.stringify({id:job.id})});for(const token of [undefined,"b".repeat(64),"short"])assert.equal((await bridgeRequest(req(token),env)).status,401);assert.equal(calls,0);assert.equal((await bridgeRequest(req(secret),{})).status,401);assert.equal((await bridgeRequest(req(secret),env)).status,200);assert.equal(calls,1);});
 
@@ -51,4 +51,9 @@ test("control does not authorize operations when owner budget differs from execu
  const s={get:async k=>m.get(k),transaction:async f=>f(s)};
  assert.equal((await controlView(s,j.id)).body.reason,"budget_policy_mismatch");
  assert.equal((await controlView(s,j.id)).body.executionEnabled,false);
+});
+
+test("exports two articles for each of the three channels without enabling publishing",()=>{
+ const items=["cinema","legends","science"].map(channel=>({channel,count:2}));
+ assert.deepEqual(exportIntent({...job,plan:{...job.plan,items}}).plan.items,items);
 });

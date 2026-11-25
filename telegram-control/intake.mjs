@@ -14,7 +14,7 @@ async function matches(secret,header){
 export function exportIntent(job){
  if(!job?.preview||job.status!=="blocked_prelaunch"||job.executed!==false||job.publicationAuthorized!==false||typeof job.id!=="string"||!/^[-a-zA-Z0-9:]{1,120}$/.test(job.id))return null;
  const plan=validateJob(job.plan);
- if(!plan||plan.items.some(x=>x.channel==="cinema"))return null;
+ if(!plan)return null;
  let releaseAt=null;
  if(job.releaseAt!=null){if(!Number.isSafeInteger(job.releaseAt)||!Number.isFinite(new Date(job.releaseAt).getTime()))return null;releaseAt=new Date(job.releaseAt).toISOString();}
  const mode=job.preview.executorMode??"manual";

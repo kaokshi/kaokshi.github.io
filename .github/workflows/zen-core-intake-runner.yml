@@ -40,5 +40,8 @@ jobs:
           ZEN_CORE_CONTROL_ENDPOINT: 'https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/control'
           ZEN_CORE_PRODUCTION_ENABLED: ${{ github.ref == 'refs/heads/main' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true' }}
           OMP_NUM_THREADS: '2'
+          ZEN_CORE_TELEGRAM_DOCX_JOB: ${{ github.ref == 'refs/heads/main' && vars.ZEN_CORE_TELEGRAM_DOCX_JOB || '' }}
+          TELEGRAM_BOT_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.TELEGRAM_BOT_TOKEN || '' }}
+          TELEGRAM_OWNER_ID: ${{ github.ref == 'refs/heads/main' && secrets.TELEGRAM_OWNER_ID || '' }}
           HF_HUB_DISABLE_XET: '1'
         run: python -u telegram-control/production_runner.py
