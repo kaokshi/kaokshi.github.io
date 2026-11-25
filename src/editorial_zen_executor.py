@@ -8,6 +8,7 @@ import tempfile
 from threading import Lock
 from types import SimpleNamespace
 
+from .editorial_cinema import archive_film_identity, archive_source_record
 from .editorial_images import ImageIndex
 from .editorial_memory import digest
 from .editorial_http import Blocked
@@ -239,6 +240,17 @@ class Session:
                 or type(row.get("year")) is not int or not isinstance(row.get("stills"), list)
                 for qid, row in registry.items()):
             raise CoreBlocked("cinema_source_registry_invalid")
+        for qid, row in list(registry.items()):
+            if not row.get("source_page"):
+                continue
+            try:
+                identity = archive_film_identity(qid, row)["film"]
+                archive_source_record(row["source_page"])
+            except (Blocked, KeyError, ValueError):
+                registry.pop(qid)
+                continue
+            if row["year"] not in identity["years"]:
+                registry.pop(qid)
         if registry:
             self.save("inputs/cinema-sources.json", json_bytes(registry))
         return registry

@@ -259,12 +259,14 @@ async function main(){
  requireOk(stageRejected,"stage_confirm_gate_failed");
  console.log("STAGE_CONTROL_GATE_CONFIRMED");
  console.log("MODE_UI_CONFIRMED");
- stage="verify_private_bridge";
+ stage="verify_private_bridge_queue";
  const bridge=async(path,body,auth)=>fetch(endpoint+"/internal/zen-core/"+path,{method:"POST",headers:{"Content-Type":"application/json",...(auth?{Authorization:"Bearer "+intakeSecret}:{})},body:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(10000)});
  requireOk((await bridge("queue",{},false)).status===401,"bridge_auth_failed");
  await readBridgeProbe(()=>bridge("queue",{},true),v=>v.schema==="zen-core/queue-v1"&&Array.isArray(v.ids)&&v.executionEnabled===false&&v.rssEnabled===false&&v.publicationAuthorized===false);
+ stage="verify_private_bridge_account";
  await readBridgeProbe(()=>bridge("account",{action:"status"},true),v=>v.schema==="zen-core/account-status-v1"&&v.executionEnabled===production);
- await readBridgeProbe(()=>bridge("control",{id:"deploy-probe-not-a-real-job"},true),v=>v.schema==="zen-core/control-v1"&&v.controlClear===false&&v.executionEnabled===false&&v.publicationAuthorized===false&&v.rssEnabled===false);
+ stage="verify_private_bridge_control";
+ await readBridgeProbe(()=>bridge("control",{id:"deploy-probe-not-a-real-job"},true),v=>v.schema==="zen-core/control-v1"&&v.controlClear===false&&v.executionEnabled===production&&v.publicationAuthorized===false&&v.rssEnabled===false);
  console.log("PRIVATE_BRIDGE_MODE_CONFIRMED="+(production?"private_executor":"intake_only"));
  const diag=await journalRequest("/api/core/diagnostics",{initData:params.toString()});
  requireOk(diag.ok,"diagnostics_unavailable");
@@ -325,7 +327,10 @@ try{await main();}catch(e){
    const restored=activeDeployment(await cf(deploymentPath));
    requireOk(restored.version===previousDeployment.version,"rollback_unverified");
    console.log("DEPLOYMENT_ROLLED_BACK");
-  }catch{console.log("DEPLOYMENT_ROLLBACK_UNCONFIRMED");}
+  }catch(rollback){
+   const code=String(rollback?.message||"");
+   console.log("DEPLOYMENT_ROLLBACK_UNCONFIRMED="+(/^[a-z0-9_]{3,80}$/.test(code)?code:"operation_failed"));
+  }
  }
  process.exitCode=1;
 }

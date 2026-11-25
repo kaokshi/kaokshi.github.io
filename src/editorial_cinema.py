@@ -2,13 +2,15 @@
 from datetime import date, timedelta
 import json
 import re
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlsplit
 
+from .editorial_commons_images import PlainText
 from .editorial_memory import digest, read_json
 from .editorial_no_repeat import normalize
 from .editorial_http import Blocked, ProviderError, check_url, request
 from .editorial_review import sources
-from .movie_autonomous_research import movie_sources
+from .movie_autonomous_research import (FILM_CLASSES, WIKIDATA_API, claim_ids, fetch_json, label,
+                                        movie_sources, release_dates, release_years)
 
 FORMATS = {"retelling", "review", "critique", "plot_analysis"}
 DETAILED = {"retelling", "plot_analysis"}
@@ -17,6 +19,7 @@ STUDIO_DOMAINS = ("paramount.com", "universalpictures.com", "warnerbros.com", "s
                   "disney.com", "a24films.com", "focusfeatures.com", "lionsgate.com", "bfi.org.uk",
                   "rogerebert.com", "rottentomatoes.com", "bbc.com", "independent.co.uk", "theguardian.com")
 COMMONS_DOMAINS = ("commons.wikimedia.org", "upload.wikimedia.org")
+ARCHIVE_DOMAINS = ("archive.org",)
 WIFI = "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/ru.wikipedia/all-access/"
 
 
@@ -55,13 +58,85 @@ def recent_releases(today=None):
     ]}
 
 
+def archive_film_identity(qid, film, get_json=fetch_json):
+    """Resolve the exact catalogue QID without requiring a Russian Wikipedia page."""
+    if not re.fullmatch(r"Q[1-9][0-9]*", qid or ""):
+        raise Blocked("cinema_catalogue_qid_invalid")
+    movie = get_json(WIKIDATA_API, {"action": "wbgetentities", "ids": qid, "props": "claims|labels",
+                                   "languages": "ru|en", "format": "json"})["entities"][qid]
+    page = urlsplit(film["source_page"])
+    if page.hostname == "commons.wikimedia.org" and page.path.startswith("/wiki/File:"):
+        property_id, identifier = "P10", unquote(page.path).removeprefix("/wiki/File:").replace("_", " ")
+    elif page.hostname == "archive.org" and page.path.startswith("/details/"):
+        property_id, identifier = "P724", unquote(page.path).removeprefix("/details/")
+    else:
+        raise Blocked("film_archive_identity_conflict")
+    matches = [row.get("mainsnak", {}).get("datavalue", {}).get("value")
+               for row in movie.get("claims", {}).get(property_id, []) if row.get("rank") != "deprecated"]
+    if property_id == "P10":
+        matches = [str(name).replace("_", " ") for name in matches]
+    if identifier not in matches or not FILM_CLASSES.intersection(claim_ids(movie, "P31")):
+        raise Blocked("film_archive_identity_conflict")
+    labels = movie.get("labels", {})
+    if film["original_title"] != labels.get("en", {}).get("value"):
+        raise Blocked("film_archive_title_conflict")
+    directors, actors = claim_ids(movie, "P57")[:3], claim_ids(movie, "P161")[:8]
+    if not directors or not actors:
+        raise Blocked("film_metadata_incomplete")
+    people = get_json(WIKIDATA_API, {"action": "wbgetentities", "ids": "|".join(dict.fromkeys(directors + actors)),
+                                     "props": "labels", "languages": "ru|en", "format": "json"})["entities"]
+    names = {key: label(people[key]) for key in people}
+    years = release_years(movie)
+    resolved = {"qid": qid, "title": label(movie), "original_title": film["original_title"],
+                "years": years, "release_dates": release_dates(movie),
+                "directors": [names[q] for q in directors if names.get(q)],
+                "cast": [names[q] for q in actors if names.get(q)]}
+    text = (f"Film: {resolved['original_title']}. Release dates (years): {', '.join(map(str, years))}. "
+            f"Directors: {', '.join(resolved['directors'])}. Cast: {', '.join(resolved['cast'])}.")
+    return {"film": resolved, "documents": [{"url": "https://www.wikidata.org/wiki/" + qid,
+                                               "text": text, "kind": "structured_catalogue"}]}
+
+
+def archive_source_record(url):
+    page = urlsplit(url)
+    if page.hostname == "commons.wikimedia.org" and page.path.startswith("/wiki/File:"):
+        params = urlencode({"action": "query", "titles": unquote(page.path).removeprefix("/wiki/"),
+                            "prop": "imageinfo", "iiprop": "extmetadata", "formatversion": 2, "format": "json"})
+        raw = request("https://commons.wikimedia.org/w/api.php?" + params, COMMONS_DOMAINS, limit=1_000_000)
+        entry = json.loads(raw)["query"]["pages"][0]
+        metadata = entry["imageinfo"][0]["extmetadata"]
+        title = entry["title"]
+        fields = [metadata.get(key, {}).get("value", "") for key in ("ImageDescription", "DateTimeOriginal", "Artist")]
+    elif page.hostname == "archive.org" and page.path.startswith("/details/"):
+        identifier = page.path.removeprefix("/details/")
+        if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,120}", identifier):
+            raise Blocked("film_archive_identity_conflict")
+        raw = request("https://archive.org/metadata/" + identifier, ARCHIVE_DOMAINS, limit=2_000_000)
+        metadata = json.loads(raw)["metadata"]
+        title = metadata["title"]
+        fields = [metadata.get(key, "") for key in ("description", "date", "creator")]
+    else:
+        raise Blocked("film_archive_identity_conflict")
+    parser = PlainText()
+    for field in fields:
+        parser.feed(" " + str(field))
+    text = " ".join("".join(parser.data).split())
+    if len(text) < 25:
+        raise Blocked("film_archive_description_missing")
+    return {"url": url, "status": "accessible", "text": title + "\n" + text[:10_000],
+            "body_sha256": digest(raw), "kind": "archive_media_metadata"}
+
+
 def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
     film_title, year = plan.get("film_title"), plan.get("year")
     if (not isinstance(film_title, str) or not 2 <= len(film_title.strip()) <= 100
             or type(year) != int or not 1880 <= year <= date.today().year + 1
             or plan.get("format") not in FORMATS or type(plan.get("spoilers")) != bool):
         raise Blocked("cinema_plan_missing_exact_identity_or_format")
-    initial = resolver("discover", {"topic": f"«{film_title}» ({year})"})
+    qid = plan.get("qid")
+    archive_row = rights_registry.get(qid, {})
+    initial = (archive_film_identity(qid, archive_row) if archive_row.get("source_page") else
+               resolver("discover", {"topic": f"«{film_title}» ({year})"}))
     identity = initial["film"]
     today = date.today()
     dated = [value for value in identity.get("release_dates", []) if value[:4] == str(year)]
@@ -80,12 +155,11 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
                and row.get("version_year") == year and row.get("kind") == "complete_plot"]
     deep_urls = [row["url"] for row in trusted]
     fetched = fetch(list(dict.fromkeys([*deep_urls, *public_urls])), STUDIO_DOMAINS)
-    if archive_source := approved.get("source_page"):
-        check_url(archive_source, COMMONS_DOMAINS)
-        fetched.extend(fetch([archive_source], COMMONS_DOMAINS))
     sources_ok = [row for row in fetched if row["status"] == "accessible"
                   and any(normalize(name) in normalize(row["text"])
                           for name in (identity["title"], identity["original_title"]) if len(normalize(name)) > 3)]
+    if archive_source := approved.get("source_page"):
+        sources_ok.append(archive_source_record(archive_source))
     deep = [row for row in sources_ok if row["url"] in deep_urls and len(row["text"]) > 1200]
     # Never infer complete event coverage from the length of a trailer or synopsis.
     permitted_detail = (len(deep) >= 2 and len({row["url"].split("/")[2] for row in deep}) >= 2
@@ -107,7 +181,7 @@ def registered_stills(film, registry):
             and re.fullmatch(r"[a-f0-9]{64}", str(row.get("sha256", "")))
             and all(isinstance(row.get(k), str) and row[k].strip()
                     for k in ("source_page", "asset_url", "scene"))
-            and row.get("source_type") in {"official_press", "rights_holder", "commons_film"}]
+            and row.get("source_type") in {"official_press", "rights_holder", "commons_film", "internet_archive_film"}]
 
 
 def still_candidates(scene, film, registry):
@@ -117,8 +191,10 @@ def still_candidates(scene, film, registry):
 
 
 def fetch_still(row, film, downloader=request, *, private_read=None):
-    if row["source_type"] == "commons_film":
-        check_url(row["source_page"], COMMONS_DOMAINS)
+    if row["source_type"] in {"commons_film", "internet_archive_film"}:
+        domains = COMMONS_DOMAINS if row["source_type"] == "commons_film" else ARCHIVE_DOMAINS
+        check_url(row["source_page"], domains)
+        check_url(row["asset_url"], domains)
         path = f"sources/cinema/{film['qid']}/{row['sha256']}.jpg"
         if private_read is None or row.get("private_path") != path:
             raise Blocked("film_still_private_path_invalid")

@@ -20,8 +20,9 @@ class CatalogueTests(unittest.TestCase):
         frames = [(100 + n, hex(n)[2:], bytes([n])) for n in range(12)]
         with patch("src.editorial_cinema_catalogue.request", return_value=b"video") as download:
             for count in (1, 0):
-                result = refresh_catalogue(store, discover=lambda: candidates, lookup=lambda _: origin,
-                                           extract=lambda _: frames)
+                result = refresh_catalogue(store, sources=(("commons_film", ("upload.wikimedia.org",),
+                                                            lambda: candidates, lambda _: origin),),
+                                           extract=lambda _: frames, verify=lambda *_: None)
                 self.assertEqual(result, {"added": count, "available": 1})
             download.assert_called_once()
         raw, _ = store.read("sources/cinema.json")
@@ -31,3 +32,18 @@ class CatalogueTests(unittest.TestCase):
             fetch_still({**still, "private_path": "ledger.sqlite"}, film, private_read=lambda _: b"\x00")
         with self.assertRaisesRegex(Blocked, "film_still_sha_mismatch"):
             fetch_still(still, film, private_read=lambda _: b"different")
+
+    def test_cascade_continues_when_primary_provider_has_no_available_entries(self):
+        store = Store()
+        fallback = ("internet_archive_film", ("archive.org",),
+                    lambda: [("Q5", "fixture", {"original_title": "Fixture", "year": 1920})],
+                    lambda _: {"asset_url": "https://archive.org/download/fixture/example.mp4",
+                               "source_page": "https://archive.org/details/fixture"})
+        primary = ("commons_film", ("upload.wikimedia.org",), lambda: [], lambda _: None)
+        with patch("src.editorial_cinema_catalogue.request", return_value=b"video") as download:
+            result = refresh_catalogue(store, sources=(primary, fallback), verify=lambda *_: None,
+                                       extract=lambda _: [(30 + n, str(n), bytes([n])) for n in range(12)])
+        self.assertEqual(result["added"], 1)
+        self.assertEqual(download.call_args.args[1], ("archive.org",))
+        record = json.loads(store.read("sources/cinema.json")[0])["Q5"]
+        self.assertEqual(record["stills"][0]["source_type"], "internet_archive_film")

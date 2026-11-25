@@ -4,9 +4,10 @@ from pathlib import Path
 import re
 import subprocess
 from tempfile import TemporaryDirectory
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from .editorial_http import Blocked, request
+from .editorial_cinema import archive_film_identity, archive_source_record
 from .editorial_images import decode_candidate
 from .editorial_memory import digest
 
@@ -24,18 +25,30 @@ SELECT ?film ?video ?release ?title ?ru WHERE {
 """
 
 
-def film_links():
-    from urllib.parse import unquote
-
-    raw = request(QUERY + "?" + urlencode({"format": "json", "query": QUERY_TEXT}),
+def linked_films(property_id):
+    query = QUERY_TEXT.replace("wdt:P10", "wdt:" + property_id)
+    raw = request(QUERY + "?" + urlencode({"format": "json", "query": query}),
                   ("query.wikidata.org",), limit=1_000_000)
     for row in json.loads(raw)["results"]["bindings"]:
         qid = row["film"]["value"].rsplit("/", 1)[-1]
-        name = unquote(row["video"]["value"].rsplit("/", 1)[-1]).replace("_", " ")
-        if not re.fullmatch(r"Q[1-9][0-9]*", qid) or not re.search(r"\.(webm|ogv|mp4)$", name, re.I):
-            continue
-        yield qid, name, {"title": (row.get("ru") or row["title"])["value"],
-                          "original_title": row["title"]["value"], "year": int(row["release"]["value"][:4])}
+        if re.fullmatch(r"Q[1-9][0-9]*", qid):
+            yield qid, row["video"]["value"], {
+                "title": (row.get("ru") or row["title"])["value"],
+                "original_title": row["title"]["value"], "year": int(row["release"]["value"][:4]),
+            }
+
+
+def film_links():
+    for qid, url, identity in linked_films("P10"):
+        name = unquote(url.rsplit("/", 1)[-1]).replace("_", " ")
+        if re.search(r"\.(webm|ogv|mp4)$", name, re.I):
+            yield qid, name, identity
+
+
+def internet_archive_links():
+    for qid, identifier, identity in linked_films("P724"):
+        if re.fullmatch(r"[a-zA-Z0-9_.-]{1,120}", identifier):
+            yield qid, identifier, identity
 
 
 def commons_video(filename):
@@ -59,6 +72,35 @@ def commons_video(filename):
         return None
     return {"asset_url": item["url"], "source_page": item["descriptionurl"],
             "license": label, "license_url": license_url}
+
+
+def internet_archive_video(identifier):
+    if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,120}", identifier):
+        return None
+    raw = request("https://archive.org/metadata/" + identifier, ("archive.org",), limit=2_000_000)
+    item = json.loads(raw)
+    meta = item.get("metadata", {})
+    if meta.get("identifier") != identifier or meta.get("mediatype") != "movies":
+        return None
+    license_url = str(meta.get("licenseurl", "")).replace("http://", "https://").rstrip("/") + "/"
+    labels = {"https://creativecommons.org/publicdomain/mark/1.0/": "Public Domain Mark",
+              "https://creativecommons.org/publicdomain/zero/1.0/": "CC0 1.0"}
+    if license_url not in labels:
+        return None
+    candidates = []
+    for file in item.get("files", []):
+        name = file.get("name", "")
+        size = str(file.get("size", ""))
+        if (re.fullmatch(r"[^/\\]{1,230}\.mp4", name, re.I) and name not in {"..", "."}
+                and not re.search(r"(?:excerpt|trailer|preview|\bpart[ _][1-9]\b)", name, re.I)
+                and size.isascii() and size.isdecimal() and 0 < int(size) <= MAX_VIDEO_BYTES):
+            candidates.append((int(size), name))
+    if not candidates:
+        return None
+    _, name = max(candidates)
+    return {"asset_url": f"https://archive.org/download/{identifier}/{quote(name, safe='')}",
+            "source_page": f"https://archive.org/details/{identifier}", "license": labels[license_url],
+            "license_url": license_url}
 
 
 def video_frames(video, run=subprocess.run):
@@ -97,43 +139,61 @@ def video_frames(video, run=subprocess.run):
         return frames
 
 
-def refresh_catalogue(store, *, discover=film_links, lookup=commons_video, extract=video_frames):
+def authorized_archives(qid, source, identity):
+    checked = {**identity, "source_page": source["source_page"]}
+    film = archive_film_identity(qid, checked)["film"]
+    if identity["year"] not in film["years"]:
+        raise Blocked("film_archive_version_unverified")
+    archive_source_record(source["source_page"])
+
+
+def refresh_catalogue(store, *, sources=None, extract=video_frames, verify=authorized_archives):
+    if sources is None:
+        sources = (
+            ("commons_film", (UPLOAD,), film_links, commons_video),
+            ("internet_archive_film", ("archive.org",), internet_archive_links, internet_archive_video),
+        )
     name = "sources/cinema.json"
     raw, rev = store.read(name)
     rows = json.loads(raw) if raw else {}
     added = 0
-    # Only fill gaps. Keep earlier sources and published hashes stable between runs.
-    if len(rows) >= MAX_FILMS:
-        return {"added": 0, "available": len(rows)}
     known = {entry.get("source_page") for entry in rows.values()}
-    consumed = set()
-    for qid, filename, identity in discover():
-        if qid in rows or qid in consumed:
-            continue
-        consumed.add(qid)
-        try:
-            origin = lookup(filename)
-            if not origin or origin["source_page"] in known:
-                continue
-            video = request(origin["asset_url"], (UPLOAD,), timeout=55, limit=MAX_VIDEO_BYTES)
-            frames = extract(video)
-        except (Blocked, ValueError, KeyError, OSError, subprocess.SubprocessError):
-            continue
-        if len(frames) < 12:
-            continue
-        stills = []
-        for timestamp, signature, data in frames:
-            sha = digest(data)
-            path = f"sources/cinema/{qid}/{sha}.jpg"
-            store.immutable(path, data)
-            stills.append({**identity, **origin, "source_type": "commons_film",
-                           "scene": f"Frame at {timestamp:.2f} s", "timestamp_seconds": timestamp,
-                           "perceptual_hash": signature, "sha256": sha, "private_path": path})
-        rows[qid] = {**identity, "source_page": origin["source_page"], "stills": stills}
-        known.add(origin["source_page"])
-        added += 1
+    for source_type, domains, discover, lookup in sources:
         if len(rows) >= MAX_FILMS:
             break
+        consumed = set()
+        try:
+            candidates = list(discover())
+        except (Blocked, KeyError, ValueError, OSError):
+            continue
+        for qid, identifier, identity in candidates:
+            if qid in rows or qid in consumed:
+                continue
+            consumed.add(qid)
+            try:
+                origin = lookup(identifier)
+                if not origin or origin["source_page"] in known:
+                    continue
+                verify(qid, origin, identity)
+                video = request(origin["asset_url"], domains, timeout=55, limit=MAX_VIDEO_BYTES)
+                frames = extract(video)
+            except (Blocked, ValueError, KeyError, OSError, subprocess.SubprocessError):
+                continue
+            if len(frames) < 12:
+                continue
+            stills = []
+            for timestamp, signature, data in frames:
+                sha = digest(data)
+                path = f"sources/cinema/{qid}/{sha}.jpg"
+                store.immutable(path, data)
+                stills.append({**identity, **origin, "source_type": source_type,
+                               "scene": f"Frame at {timestamp:.2f} s", "timestamp_seconds": timestamp,
+                               "perceptual_hash": signature, "sha256": sha, "private_path": path})
+            rows[qid] = {**identity, "source_page": origin["source_page"], "stills": stills}
+            known.add(origin["source_page"])
+            added += 1
+            if len(rows) >= MAX_FILMS:
+                break
     if added:
         store.write(name, json.dumps(rows, ensure_ascii=False).encode(), rev)
     return {"added": added, "available": len(rows)}
