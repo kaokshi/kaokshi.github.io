@@ -15,6 +15,7 @@ from .editorial_images import ImageIndex
 from .editorial_memory import digest
 from .editorial_http import Blocked
 from .editorial_review import qa, sources
+from .editorial_no_repeat import topic_duplicate_reason
 from .editorial_routerai import UnsafeToTest, call, credits
 from .editorial_routerai_two_articles import MODELS, ROOT, Spend, cinema_key, evaluate_channel, json_bytes, money, safe_reason
 from .editorial_zen_cloud import CloudCore, GitHubStore
@@ -32,6 +33,8 @@ class Pause(CoreBlocked):
 def classify(step, role):
     if {"plan": "brain", "draft": "draft", "edit": "edit"}.get(step) == role:
         return step, "new_article" if step != "edit" else "required_correction", None
+    if step == "film-plan-correction" and role == "brain":
+        return "plan", "required_correction", None
     if re.fullmatch(r"edit-correction-[2-5]", step) and role == "edit":
         return "edit", "required_correction", None
     if re.fullmatch(r"audit-correction-[2-5]", step) and role == "edit":
@@ -264,6 +267,20 @@ class Session:
         if registry:
             self.save("inputs/cinema-sources.json", json_bytes(registry))
         return registry
+
+    def cinema_correction_options(self, film, options):
+        key = "inputs/cinema-correction-options.json"
+        prior = self.read(key)
+        if prior is not None:
+            return json.loads(prior)
+        used = self.core.access(lambda c: c.title_history(self.article, "cinema"))
+        if not topic_duplicate_reason("cinema", cinema_key(film), used):
+            return None
+        available = [row for row in options if not topic_duplicate_reason("cinema", cinema_key(row), used)]
+        if not available:
+            raise CoreBlocked("cinema_no_distinct_replacement")
+        self.save(key, json_bytes(available))
+        return available
 
     def cinema_evidence(self, plan, registry, verify):
         name = "inputs/cinema-evidence.json"

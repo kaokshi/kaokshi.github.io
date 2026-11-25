@@ -707,13 +707,28 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     ), 1200, reserve=reserve)
     save(f"{channel}/qwen-plan.json", json_bytes({"output": raw_plan, "sha256": digest(raw_plan)}))
     plan = object_response(raw_plan)
+    if channel == "cinema":
+        plan = resolve_cinema_plan(plan, film_options)
+        existing_film = {"original_title": plan["original_title"], "year": plan["year"]}
+        replacements = checkpoints.cinema_correction_options(existing_film, film_options)
+        if replacements is not None:
+            alternatives = json.dumps(replacements, ensure_ascii=False)
+            replacement = spend.chat(channel, "film-plan-correction", "brain", (
+                f"Канал «{name}». Исходный фильм уже занят другой статьёй заказа. "
+                "Выбери один фильм из оставшегося каталога. Верни JSON с title, assignment "
+                "и source_topic, где source_topic точно совпадает с названием из каталога. "
+                "Подготовь задание автору на обзор без спойлеров: вступление и шесть разделов. "
+                f"Каталог {alternatives}. Указания владельца: {checkpoints.instructions}"
+            ), 1200, reserve=reserve)
+            save(f"{channel}/qwen-plan-correction.json", json_bytes({"output": replacement,
+                                                                     "sha256": digest(replacement)}))
+            plan = resolve_cinema_plan(object_response(replacement), replacements)
     title = field(plan, "title", 180)
     assignment = field(plan, "assignment", 2200)
     if topic_duplicate_reason(channel, title, history_titles):
         raise UnsafeToTest("duplicate_topic")
     records = []
     if channel == "cinema":
-        plan = resolve_cinema_plan(plan, film_options)
         verified = checkpoints.cinema_evidence(plan, film_registry, film_evidence)
         film, records = verified["film"], verified["records"]
         mode = (f"Фильм {film['original_title']} ({film['year']}). Формат {verified['format']}. "

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from src.editorial_zen_cloud import CloudCore, Conflict, STATE, blob_sha
 from src.editorial_zen_core import CoreBlocked
-from src.editorial_zen_executor import MODELS, MeteredRouter, Pause, Session, seed_rights_verified, verify_seed_route
+from src.editorial_zen_executor import MODELS, classify, MeteredRouter, Pause, Session, seed_rights_verified, verify_seed_route
 
 
 class Store:
@@ -89,6 +89,22 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual(self.cloud.access(lambda c: c.snapshot())["budget"]["meteredRub"], "1.25")
         with self.assertRaisesRegex(CoreBlocked, "input_changed"):
             self.plan(self.router(), "changed")
+
+    def test_duplicate_film_is_replaced_once_from_the_remaining_frozen_catalogue(self):
+        cinema_job = {"id": "cinema-fixture", "mode": "autonomous", "plan": {
+            "items": [{"channel": "cinema", "count": 2}], "day": None, "instructions": ""}}
+        self.cloud.access(lambda c: c.submit(cinema_job), change=True)
+        first, second = ("cinema-fixture/cinema/1", "cinema-fixture/cinema/2")
+        already_used = {"original_title": "First synthetic film", "year": 2025}
+        alternative = {"original_title": "Second independent film", "year": 2025}
+        options = [already_used, alternative]
+        session = Session(self.cloud, second)
+        self.assertIsNone(session.cinema_correction_options(already_used, options))
+        self.cloud.access(lambda c: c.register_title(first, "cinema", "First synthetic film (2025)"),
+                          change=True)
+        self.assertEqual(session.cinema_correction_options(already_used, options), [alternative])
+        self.assertEqual(session.cinema_correction_options(already_used, []), [alternative])
+        self.assertEqual(classify("film-plan-correction", "brain"), ("plan", "required_correction", None))
 
     def test_deadline_blocks_new_charge_but_replays_saved_response(self):
         router = self.router()
