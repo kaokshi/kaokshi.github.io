@@ -1,0 +1,65 @@
+# Owner explicitly requested immediate mode UI update.
+# One-shot pinned release. No repeat on later commits or reruns. Main untouched.
+name: ZEN CONTROL analytics rollout
+on:
+  push:
+    branches: [assistant/zen-control-statistics-20261124]
+    paths: ['.github/workflows/zen-analytics-rollout.yml']
+permissions:
+  contents: read
+concurrency:
+  group: telegram-control-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/assistant/zen-control-statistics-20261124' && github.event.before == '68cd46ca792cf66619de8eb429b13d9450f0a003' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: telegram-control
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 68cd46ca792cf66619de8eb429b13d9450f0a003
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate pinned candidate offline
+        run: node --test ./*.test.mjs
+      - name: Validate channel navigation contract
+        run: |
+          node --input-type=module <<'JS'
+          import assert from "node:assert/strict";
+          import {HTML,JS} from "./ui.mjs";
+          assert.equal((HTML.match(/data-channel-open="/g)||[]).length,3);
+          assert.equal((HTML.match(/data-channel-filter="/g)||[]).length,4);
+          assert.match(JS,/c.channel==="cinema"\|\|s.paused\?"На паузе"/);
+          assert.match(JS,/card.dataset.reviewChannel=a.channel/);
+          assert.match(JS,/channelScheduleTarget=channelFilter/);
+          assert.doesNotThrow(()=>new Function(JS));
+          JS
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate cross-language stage commands and dispatcher
+        working-directory: .
+        run: |
+          node telegram-control/mode_contract_test.mjs
+          python -m unittest tests.test_editorial_zen_dispatch tests.test_editorial_zen_recovery -q
+      - name: Upgrade existing Worker only and verify
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          EDITORIAL_REVIEW_READ_TOKEN: ${{ secrets.EDITORIAL_REVIEW_READ_TOKEN }}
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+          ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
+          ZEN_CONTROL_EXPECTED_PREVIOUS_VERSION: '05a8fda7-7c99-4dd3-afa4-40ffa98c5d1f'
+          ZEN_CONTROL_PREFLIGHT_ONLY: 'false'
+          ZEN_CONTROL_CONFIRM_UPDATE: 'true'
+        run: node deploy.mjs
