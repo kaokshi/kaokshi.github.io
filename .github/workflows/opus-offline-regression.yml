@@ -16,4 +16,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m unittest tests.test_editorial_routerai_two_articles tests.test_editorial_production -v
+      - run: python -m pip install Pillow ImageHash
+      - run: python -m unittest tests.test_editorial_cinema_frame_pool tests.test_editorial_routerai_two_articles tests.test_editorial_production -v
