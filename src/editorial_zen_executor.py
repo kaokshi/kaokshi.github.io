@@ -8,7 +8,8 @@ import tempfile
 from threading import Lock
 from types import SimpleNamespace
 
-from .editorial_cinema import archive_film_identity, archive_source_record
+from .editorial_cinema import (archive_film_identity, archive_source_record, eligible_year, has_usable_stills,
+                               verify_original_year)
 from .editorial_images import ImageIndex
 from .editorial_memory import digest
 from .editorial_http import Blocked
@@ -229,7 +230,7 @@ class Session:
     def cinema_registry(self):
         raw = self.read("inputs/cinema-sources.json")
         if raw is not None:
-            return json.loads(raw)
+            return {qid: row for qid, row in json.loads(raw).items() if eligible_year(row.get("year"))}
         raw = self.core.store.read("sources/cinema.json")[0]
         if raw is None:
             raw = (ROOT / "config/editorial_cinema.json").read_bytes()
@@ -241,15 +242,19 @@ class Session:
                 for qid, row in registry.items()):
             raise CoreBlocked("cinema_source_registry_invalid")
         for qid, row in list(registry.items()):
-            if not row.get("source_page"):
-                continue
-            try:
-                identity = archive_film_identity(qid, row)["film"]
-                archive_source_record(row["source_page"])
-            except (Blocked, KeyError, ValueError):
+            if not eligible_year(row["year"]):
                 registry.pop(qid)
                 continue
-            if row["year"] not in identity["years"]:
+            if row.get("source_page"):
+                try:
+                    identity = archive_film_identity(qid, row)["film"]
+                    verify_original_year(row["year"], identity)
+                    archive_source_record(row["source_page"])
+                except (Blocked, KeyError, ValueError):
+                    registry.pop(qid)
+                    continue
+            film = {"qid": qid, "original_title": row["original_title"], "year": row["year"]}
+            if not has_usable_stills(film, registry, private_read=self.shared_asset):
                 registry.pop(qid)
         if registry:
             self.save("inputs/cinema-sources.json", json_bytes(registry))
@@ -259,6 +264,7 @@ class Session:
         name = "inputs/cinema-evidence.json"
         raw = self.read(name)
         result = json.loads(raw) if raw is not None else verify(plan, registry)
+        verify_original_year(plan["year"], result["film"])
         identity = cinema_key(result["film"])
         self.register_topic(identity)
         if raw is None:

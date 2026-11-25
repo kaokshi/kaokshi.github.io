@@ -39,27 +39,15 @@ class ProductionTests(unittest.TestCase):
         official = "https://www.paramount.com/movies/the-truman-show"
         plan = {"film_title": "Шоу Трумана", "year": 1998, "format": "retelling",
                 "spoilers": True, "sources": [official]}
-        def film_resolver(action, payload):
-            self.assertEqual(payload["topic"], "«Шоу Трумана» (1998)")
-            return {"film": {"title": "Шоу Трумана", "original_title": ref["film_title"],
-                "qid": "Q214801", "imdb_id": ref["imdb_id"], "years": [ref["original_year"]],
-                "cast": ["Jim Carrey"], "directors": [ref["director"]]},
-                "documents": [{"url": "https://www.wikidata.org/wiki/Q214801",
-                    "text": "The Truman Show. Peter Weir. 1998."}]}
-        details = editorial_cinema.evidence(plan, {}, resolver=film_resolver, fetch=lambda *args: [
-            {"status": "accessible", "url": official, "text": "The Truman Show. Jim Carrey stars."}])
-        self.assertEqual(details["format"], "review")
-        self.assertFalse(details["spoilers"])
-        self.assertFalse(details["detailed_plot_evidence"])
-        self.assertEqual(details["film"]["imdb_id"], ref["imdb_id"])
-        with self.assertRaisesRegex(Blocked, "film_independent_source_unavailable"):
-            editorial_cinema.evidence(plan, {}, resolver=film_resolver, fetch=lambda *args: [])
+        with self.assertRaisesRegex(Blocked, "film_original_release_before_minimum"):
+            editorial_cinema.evidence(plan, {}, resolver=lambda *_: self.fail("resolved an ineligible film"))
+        film = {"qid": "Q214801", "year": ref["original_year"], "original_title": ref["film_title"]}
         class Index:
             class memory:
                 time_left = staticmethod(lambda: 1000)
         with self.assertRaisesRegex(Blocked, "no_verified_official_still_for_scene"):
             editorial_cinema.stills({"subject": "Truman in Seahaven"}, "Truman Show", None,
-                                    Index(), details["film"], {})
+                                    Index(), film, {})
 
     def test_unsupported_claim_cannot_be_covered_by_an_unrelated_fragment(self):
         text = "Наблюдение началось в 1998 году. Объект находился рядом."

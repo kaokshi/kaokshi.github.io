@@ -1,6 +1,7 @@
 """Film identity, source sufficiency and source provenance for stills for the cinema channel."""
 from datetime import date, timedelta
 import json
+from pathlib import Path
 import re
 from urllib.parse import unquote, urlencode, urlsplit
 
@@ -21,6 +22,27 @@ STUDIO_DOMAINS = ("paramount.com", "universalpictures.com", "warnerbros.com", "s
 COMMONS_DOMAINS = ("commons.wikimedia.org", "upload.wikimedia.org")
 ARCHIVE_DOMAINS = ("archive.org",)
 WIFI = "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/ru.wikipedia/all-access/"
+
+
+_POLICY = json.loads((Path(__file__).resolve().parents[1] / "config/editorial_cinema_policy.json").read_text())
+MIN_RELEASE_YEAR = _POLICY["minimum_original_release_year"]
+PREFERRED_RELEASE_YEARS = _POLICY["preferred_release_year_count"]
+
+
+def eligible_year(year):
+    return type(year) is int and MIN_RELEASE_YEAR <= year <= date.today().year
+
+
+def verify_original_year(year, film):
+    years = film.get("years")
+    if not isinstance(years, list) or not years or any(type(value) is not int for value in years):
+        raise Blocked("film_original_release_unverified")
+    original = min(years)
+    if original < MIN_RELEASE_YEAR:
+        raise Blocked("film_original_release_before_minimum")
+    if year != original:
+        raise Blocked("film_original_release_year_mismatch")
+    return original
 
 
 def interest_signals(today=None):
@@ -130,9 +152,11 @@ def archive_source_record(url):
 def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
     film_title, year = plan.get("film_title"), plan.get("year")
     if (not isinstance(film_title, str) or not 2 <= len(film_title.strip()) <= 100
-            or type(year) != int or not 1880 <= year <= date.today().year + 1
+            or type(year) != int
             or plan.get("format") not in FORMATS or type(plan.get("spoilers")) != bool):
         raise Blocked("cinema_plan_missing_exact_identity_or_format")
+    if year < MIN_RELEASE_YEAR:
+        raise Blocked("film_original_release_before_minimum")
     qid = plan.get("qid")
     archive_row = rights_registry.get(qid, {})
     initial = (archive_film_identity(qid, archive_row) if archive_row.get("source_page") else
@@ -142,7 +166,8 @@ def evidence(plan, rights_registry, resolver=movie_sources, fetch=sources):
     dated = [value for value in identity.get("release_dates", []) if value[:4] == str(year)]
     if year > today.year or (dated and min(dated) > today.isoformat()) or (year == today.year and not dated):
         raise Blocked("film_release_not_confirmed")
-    if year not in identity["years"] or not identity["directors"] or not identity["cast"]:
+    verify_original_year(year, identity)
+    if not identity["directors"] or not identity["cast"]:
         raise Blocked("film_metadata_incomplete")
     if plan.get("qid") and plan["qid"] != identity["qid"]:
         raise Blocked("movie_catalog_id_conflict")
@@ -182,6 +207,37 @@ def registered_stills(film, registry):
             and all(isinstance(row.get(k), str) and row[k].strip()
                     for k in ("source_page", "asset_url", "scene"))
             and row.get("source_type") in {"official_press", "rights_holder", "commons_film", "internet_archive_film"}]
+
+
+def has_usable_stills(film, registry, *, private_read, minimum=7):
+    """Skip films with missing, corrupt or near-duplicate source images before drafting."""
+    candidates = registered_stills(film, registry)
+    if len({row["sha256"] for row in candidates}) < minimum:
+        return False
+
+    from imagehash import phash
+
+    from .editorial_images import decode_candidate
+
+    signatures = []
+    seen = set()
+    for row in candidates:
+        sha = row["sha256"]
+        if sha in seen:
+            continue
+        try:
+            raw, _ = fetch_still(row, film, private_read=private_read)
+            image, _ = decode_candidate(raw)
+        except (Blocked, TypeError, ValueError, OSError):
+            continue
+        seen.add(sha)
+        signature = phash(image)
+        if any(signature - previous <= 6 for previous in signatures):
+            continue
+        signatures.append(signature)
+        if len(signatures) >= minimum:
+            return True
+    return False
 
 
 def still_candidates(scene, film, registry):
