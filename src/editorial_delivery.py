@@ -15,7 +15,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from .editorial_encrypted_review import MAX_INPUT, decrypt, encrypt
 from .editorial_length import check_length
 from .editorial_memory import PrivateGit, StorageError, digest, read_json, write
-from .editorial_providers import Blocked
+from .editorial_http import Blocked
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_MAGIC = b"ZENSTATEv1!"
@@ -394,7 +394,7 @@ def main():
                 raise Blocked("delivery_integration_pending: authorized_key_and_output_required")
             repository = args.private_repository
             if not repository and not args.artifact and not args.run_id:
-                repository = read_json(ROOT / "config" / "editorial_production.json")["schedule"]["private_repository"]
+                repository = read_json(ROOT / "config" / "editorial_production.json")["storage"]["private_repository"]
             result = retrieve(args.output, args.private_key, day=args.date, artifact=args.artifact,
                               run_id=args.run_id, allow_incomplete=args.allow_incomplete,
                               private_repository=repository)

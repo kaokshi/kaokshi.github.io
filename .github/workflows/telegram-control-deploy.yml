@@ -1,0 +1,56 @@
+name: ZEN CONTROL guarded deployment
+on:
+  workflow_dispatch:
+    inputs:
+      preflight_only:
+        description: 'Check readiness without updating Worker or Telegram'
+        type: boolean
+        default: true
+        required: true
+      confirm_update:
+        description: 'Confirm updating the existing Telegram Worker (no publication or RSS)'
+        type: boolean
+        default: false
+        required: true
+      enable_private_executor:
+        description: Enable authenticated production claims. Publication and RSS stay disabled.
+        type: boolean
+        default: false
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: telegram-control-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: (github.ref == 'refs/heads/main' || (github.ref == 'refs/heads/integration/zen-core-routerai-20261124' && !inputs.enable_private_executor)) && (inputs.preflight_only || inputs.confirm_update)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: telegram-control
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Offline authorization tests
+        run: node --test ./*.test.mjs
+      - name: Preflight or explicitly update existing Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+          EDITORIAL_REVIEW_READ_TOKEN: ${{ secrets.EDITORIAL_REVIEW_READ_TOKEN }}
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+          ZEN_CONTROL_PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+          ZEN_CONTROL_CONFIRM_UPDATE: ${{ inputs.confirm_update }}
+          ZEN_CONTROL_ENABLE_PRIVATE_EXECUTOR: ${{ inputs.enable_private_executor }}
+          ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
+        run: node deploy.mjs

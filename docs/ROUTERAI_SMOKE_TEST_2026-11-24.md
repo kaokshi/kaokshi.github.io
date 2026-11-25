@@ -1,5 +1,7 @@
 # One-shot RouterAI test — 24.11.2026
 
+> Архив разового теста 24.11.2026. Команды этого workflow сняты с эксплуатации. [Действующая инструкция](EDITORIAL_PRODUCTION.md)
+
 Owner confirmed 150 RUB on RouterAI and authorized one-time testing. This run is isolated from article production and does not authorize publishing.
 
 - src/editorial_routerai_smoke.py reads GET /api/v1/credits with ROUTERAI_API_KEY and requires at least 30 RUB before any model call.

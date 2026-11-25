@@ -9,7 +9,7 @@ from .editorial_length import HARD_MAX, MIN_CHARS, check_length
 from .editorial_language_tool import serialize_match
 from .editorial_memory import digest
 from .editorial_no_repeat import normalize, words
-from .editorial_providers import Blocked, ProviderError, check_url, request
+from .editorial_http import Blocked, ProviderError, check_url, request
 from .editorial_quality import text_style
 
 HEADING = re.compile(r"\*\*([^*\n]{2,125})\*\*")
@@ -22,11 +22,13 @@ NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 
 def numbers(text):
     return {token.replace(",", ".") for token in NUMBER.findall(text)}
-RULES = (
-    "Русская статья, 3000–6000 непробельных знаков, ориентир 4300–4900. "
+LENGTH_RULE = "Русская статья, 3000–6000 непробельных знаков, ориентир 4300–4900. "
+EXCEPTION_RULE = (
     "Только при конкретной необходимости раскрыть материал можно написать 6001–7000 знаков. "
     "В этом случае после статьи добавь одну служебную строку "
     "<!-- length_exception_reason: конкретная причина -->. Строка в текст статьи не входит. "
+)
+STRUCTURE_RULES = (
     "Строго 6–7 смысловых разделов с отдельными жирными заголовками **такого вида** "
     "и коротким вступлением перед первым разделом (без заголовка). "
     "Каждый заголовок раздела обязан сопровождаться сразу следующей за ним иллюстрацией; "
@@ -35,9 +37,10 @@ RULES = (
     "экспортёр добавит их после проверки, без лишних пустых абзацев. "
     "Заголовок всей статьи перед разделами не добавляй. "
     "В исходном тексте абзацы отделяй пустой строкой только для разбора структуры. "
-    "Закончи естественным призывом "
-    "подписаться. Кроме строки обоснования объёма возвращай только текст статьи."
+    "Закончи естественным призывом подписаться. "
 )
+RULES = LENGTH_RULE + EXCEPTION_RULE + STRUCTURE_RULES + "Кроме строки обоснования объёма возвращай только текст статьи."
+STRICT_RULES = LENGTH_RULE + STRUCTURE_RULES + "Возвращай только текст статьи."
 
 
 LENGTH_NOTE = re.compile(r"\s*<!--\s*length_exception_reason:[ \t]*([^<>\n]*?)\s*-->\s*\Z")

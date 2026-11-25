@@ -1,7 +1,7 @@
 """Explicit, synthetic encrypted read/write probe of the owner-only GitHub store.
 
 No real drafts or secrets are written, and no production schedules are enabled.
-Run only on an explicitly dispatched storage-test workflow with trusted secrets.
+Run only in a trusted environment with explicit authorization to write the probe.
 """
 import base64
 import json
@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from .editorial_delivery import owner_key, seal_state, unseal_state
 from .editorial_memory import digest
-from .editorial_providers import Blocked
+from .editorial_http import Blocked
 
 EXPECTED_REPOSITORY = "kaokshi/zen-editorial-review"
 

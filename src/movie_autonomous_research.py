@@ -11,7 +11,7 @@ import re
 from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
 
-from .editorial_providers import Blocked
+from .editorial_http import Blocked
 
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 WIKIPEDIA_API = "https://ru.wikipedia.org/w/api.php"

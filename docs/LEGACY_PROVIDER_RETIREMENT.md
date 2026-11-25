@@ -1,11 +1,23 @@
-# Retirement of legacy editorial providers
+# Очистка редакционного контура ZEN CONTROL 1.0 RC2
 
-Owner request, 2026-11-24: remove Groq and other unused inference routes without breaking the project.
+Задача основана на аудите от 24 ноября 2026 года и RC2 из PR №90. Рабочая архитектура использует RouterAI, ZEN CORE и ZEN CONTROL. [Аудит](https://github.com/kaokshi/kaokshi.github.io/blob/audit/cleanup-20261124/docs/CLEANUP_AUDIT_20261124.md) · [PR №90](https://github.com/kaokshi/kaokshi.github.io/pull/90) · [Действующая инструкция](EDITORIAL_PRODUCTION.md)
 
-Active target: RouterAI Qwen 3.6 Plus (planning), Claude Sonnet 5.5 (writing), DeepSeek V4 Pro (review), Seedream 5.0 Flash (illustrations, alongside licensed photos and accurate diagrams). PR #85 remains the independent validation branch. No production activation until validated.
+| Компонент | Изменение |
+| --- | --- |
+| Groq, Klein, прежний OpenRouter | Удалены производственные вызовы, планировщик, резервирование старых квот и ключевые привязки из конфигурации и рабочих процессов |
+| Gemini и Cloudflare Workers AI | Удалены диагностические опросы квот, локальные адаптеры и соответствующие тесты. Cloudflare Worker, Durable Objects и аварийное управление сохранены |
+| Общие зависимости | Архив вынесен в `editorial_archive`, HTTPS и ошибки в `editorial_http`, действующие модели и запросы RouterAI в `editorial_routerai` |
+| GitHub Actions | Убраны разовые проверки и развёртывания. Офлайн-регрессия выделена из старого производственного workflow. Штатное защищённое развёртывание и ручной защищённый пилот RouterAI сохранены |
+| История | Сохранены архивные материалы, журнал расходов, редакционная память и проверка происхождения уже созданных пакетов |
 
-This maintenance change disables the old editorial-production workflow's execution job and removes automatic Groq/Klein-era Cloudflare AI and Gemini quota schedules. Offline regression coverage and explicitly manual read-only quota diagnostics remain. It does not delete provider adapters, shared code, tests, private drafts, historical branches, tokens, Cloudflare Workers (ZEN CONTROL hosting), RSS, or quality detectors (CLIP, SigLIP, Florence-2, text QA). These are not interchangeable with generation models.
+Названия прежних провайдеров встречаются в исторических отчётах и читателях архивов. `python -m src.editorial_groq_ledger collect --day YYYY-MM-DD --file /private/historical-groq.json` читает исторические артефакты GitHub Actions. Идентификатор `editorial-production.yml` используется в проверке происхождения ранее зашифрованных пакетов. Токены и исторические артефакты GitHub не удаляются.
 
-The old Python pipeline imports Groq budget utilities, calls Groq as fallback and Klein for image generation, so deleting adapters before the RouterAI production replacement is connected would break imports and tests. Full source removal is a second-stage change after the replacement and dependency audit. Never merge abandoned experimental PRs as a cleanup shortcut. The current main schedule and publication flags remain false; do not enable either as part of maintenance.
+Откат кода выполняется отменой коммита очистки. Любой запуск платного контура, обновление Worker и включение выпуска требуют отдельного решения.
 
-Rollback: revert the retirement commit/PR if required. A rollback is not authorization to start production.
+## История разовых Actions
+
+Ссылки на историю сохранены вместе с диагностикой RC2. Результаты rollout с ошибками сохранены для диагностики. Штатный deploy проверяет привязки и точную версию ресурсов, а `rollback.mjs` откатывает к зафиксированной версии. [Развёртывание и откат](../telegram-control/README.md#read-only-upgrade-preflight-and-rollback)
+
+- Успешные проверки интерфейса, этапов, публичного ответа и моста. [Mode UI](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45438783525) · [Stage API](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45444842375) · [Probe HTTP](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45437885194) · [Bridge](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45436593988) · [Connection](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45431454045)
+- История preflight и проб. [Preflight](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45434370816) · [Isolated probe](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45437211410) · [Probe retest](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45438321019)
+- Запуски rollout с ошибками. [V1](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45435222694) · [Stage](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45444557046) · [Recovery](https://github.com/kaokshi/kaokshi.github.io/actions/runs/45446058054)

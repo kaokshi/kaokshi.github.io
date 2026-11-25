@@ -10,7 +10,7 @@ from urllib.parse import quote, urlencode
 
 from . import editorial_commons_images as commons
 from .editorial_memory import digest, read_json, write, write_json
-from .editorial_providers import KLEIN, Blocked, ProviderError, klein, request
+from .editorial_http import Blocked, ProviderError, request
 
 COMMONS = ("commons.wikimedia.org", "upload.wikimedia.org")
 NASA = ("images-api.nasa.gov", "images-assets.nasa.gov", "images.nasa.gov")
@@ -168,6 +168,15 @@ def decode_candidate(raw):
     return image, contrast
 
 
+def duplicate_reason(sha, raw_sha, phash, embedding, hashes, vectors):
+    if any(previous in (sha, raw_sha) or (int(phash, 16) ^ int(near, 16)).bit_count() <= 6
+           for previous, near in hashes):
+        return "image_duplicate"
+    if any(sum(a * b for a, b in zip(embedding, previous)) > .965 for previous in vectors):
+        return "image_semantically_near_duplicate"
+    return None
+
+
 class ImageIndex:
     def __init__(self, memory, archive):
         self.memory = memory
@@ -178,12 +187,13 @@ class ImageIndex:
             except (OSError, ValueError):
                 continue
 
-    def save(self, raw, metadata, scene, subject, path):
+    def save(self, raw, metadata, scene, subject, path, *, require_scene_score=True):
         import imagehash
         image, contrast = decode_candidate(raw)
         model, scores, embedding = similarity(image, [scene["subject"], subject,
                                             "an unrelated image with no connection with this topic"])
-        if scores[0] < .19 or scores[0] <= scores[2] + .015:
+        scene_score_flags = scores[0] < .19 or scores[0] <= scores[2] + .015
+        if require_scene_score and scene_score_flags:
             raise ValueError("image_scene_match_below_threshold")
         quality = (min(1, image.width / 1200) * .3
                    + min(1, contrast / 60) * .25
@@ -203,14 +213,13 @@ class ImageIndex:
                                    (row["original_sha256"], row["perceptual_hash"])])
                     if row.get("match_model") == model and row.get("image_embedding"):
                         vectors.append(row["image_embedding"])
-            if any(previous in (sha, raw_sha) or (int(phash, 16) ^ int(near, 16)).bit_count() <= 6
-                   for previous, near in hashes):
-                raise ValueError("image_duplicate")
-            if any(sum(a * b for a, b in zip(embedding, previous)) > .965 for previous in vectors):
-                raise ValueError("image_semantically_near_duplicate")
+            reason = duplicate_reason(sha, raw_sha, phash, embedding, hashes, vectors)
+            if reason:
+                raise ValueError(reason)
             row = {**metadata, "file": path.name, "sha256": sha, "original_sha256": raw_sha,
                    "perceptual_hash": phash, "size": list(image.size), "match_model": model, "image_embedding": embedding,
                    "scene_similarity": scores[0], "topic_similarity": scores[1],
+                   "scene_score_flags": scene_score_flags,
                    "cover_score": round(scores[1] * 2 + scores[0] * .3 + quality * .3, 4),
                    "section": scene["section"], "scene": scene["subject"]}
             write(path, rendered)
@@ -245,33 +254,6 @@ def photo(scene, subject, path, index, *, experimental=False):
             errors.append(str(exc) if isinstance(exc, ProviderError) else type(exc).__name__)
     detail = "photo_candidates_rejected" if had_candidate else "no_traceable_photo_found"
     raise Blocked(detail + (": " + ", ".join(dict.fromkeys(errors)) if errors else ""))
-
-
-def generated(scene, subject, path, index, task, article, channel):
-    warm_visual_matcher()
-    style = ("Cinematic realistic urban mystery, restrained color grading and atmospheric lighting."
-             if channel == "legends" else
-             "Modern moderately stylized science editorial illustration with a coherent muted palette. "
-             "Explanatory concept art with accurate geometry where applicable. Do not mimic documentary "
-             "evidence, scientific measurements or labeled diagrams.")
-    for attempt in range(2):
-        if index.memory.time_left() < 150:
-            raise Blocked("production_deadline")
-        prompt = f"{scene['brief']} Depict {scene['subject']}. {style} Landscape. No text or watermark."
-        if attempt:
-            prompt += " Isolate the main subject in a clear composition with distinct foreground and background."
-        raw, params = index.memory.call(task, article, "klein", lambda: klein(prompt))
-        try:
-            return index.save(raw, {"kind": "illustration", "source": "Cloudflare Workers AI",
-                                    "model": KLEIN, "prompt": prompt, "parameters": params,
-                                    "rights_status": "rights_review_pending",
-                                    "rights_basis": "Generated via Cloudflare Workers AI; review terms and depicted material.",
-                                    "label": "ИИ-иллюстрация" if channel != "legends" else None},
-                              scene, subject, path)
-        except (OSError, ValueError):
-            if attempt:
-                raise Blocked("generated_image_quality_or_match_failed") from None
-    raise AssertionError("unreachable image attempt")
 
 
 def select_cover(rows):

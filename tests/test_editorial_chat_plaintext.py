@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from src.editorial_memory import digest
-from src.editorial_providers import Blocked
+from src.editorial_http import Blocked
 from src.editorial_chat_plaintext import (
     PRIVATE_REPO, approval, checked_day, cleanup, inputs, prune_directory, publish,
 )
@@ -50,9 +50,9 @@ class PrivateChatReviewTests(unittest.TestCase):
         self.assertEqual(c["repository"], PRIVATE_REPO)
         self.assertEqual(c["retention_days"], 7)
         site = json.loads(Path("config/site.json").read_text(encoding="utf-8"))
-        production = json.loads(Path("config/editorial_production.json").read_text(encoding="utf-8"))
+        production = json.loads(Path("config/zen_core.json").read_text(encoding="utf-8"))
         self.assertFalse(site["publication_enabled"])
-        self.assertFalse(production["schedule"]["enabled"])
+        self.assertFalse(production["execution_enabled"])
 
     def test_only_verified_agent_review_files_selected(self):
         with TemporaryDirectory() as root:
