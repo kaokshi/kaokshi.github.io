@@ -16,7 +16,8 @@ from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .editorial_routerai_diagrams import ASTEROID_SOURCE, CAVE_SOURCE, COMET_SOURCE, render_diagram
+from .editorial_routerai_diagrams import (ASTEROID_SOURCE, CAVE_SOURCE, COMET_SOURCE, render_diagram,
+                                          scene_diagram_replacement, template_contract)
 from .editorial_images import ImageIndex, commons_photos, decode_candidate, duplicate_reason, warm_visual_matcher
 from .editorial_cinema import (MIN_RELEASE_YEAR, PREFERRED_RELEASE_YEARS, eligible_year,
                                evidence as film_evidence, fetch_still, registered_stills, still_candidates)
@@ -320,6 +321,11 @@ def plan_images(answer, sections, *, science=False, cinema=False, legacy=False, 
         if kind == "diagram":
             scene["template"] = field(row, "template", 80)
         result.append(scene)
+    if any(row["kind"] == "diagram" and template_contract(row.get("template")) is None
+           for row in result):
+        # Reject unrenderable schematics at plan time, while the plan can still be
+        # corrected, instead of after the paid text stages inside illustrate().
+        raise UnsafeToTest("image_plan_template_invalid")
     kinds = {row["kind"] for row in result}
     expected = {"photo", "diagram"} if licensed_photos else {"illustration", "photo", "diagram"}
     if licensed_photos and not science and not cinema and kinds != {"photo"}:
@@ -456,16 +462,14 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 checkpoints.shared_asset if checkpoints else None)
         else:
             film_candidates = None
-        diagram_alternative = scene_diagram_replacement(scene) if scene["kind"] == "diagram" else None
+        diagram_alternative = (scene_diagram_replacement(scene, records)
+                               if scene["kind"] == "diagram" else None)
         for attempt in range(first_attempt, 4):
             if diagram_alternative and attempt == 2:
                 scene = {**scene, "template": diagram_alternative}
-                if diagram_alternative.startswith("asteroid-"):
-                    scene["brief"] = ("Use a clearly labelled conceptual schematic of this subject. "
-                                      "Do not imply real coordinates or measured probabilities.")
-                if diagram_alternative == "groundwater-scale":
-                    scene["brief"] = ("Compare global volumes of groundwater and surface waters using "
-                                      "USGS estimates. A logarithmic chart with labelled units is appropriate.")
+                substitute = template_contract(diagram_alternative)
+                if substitute and substitute.brief:
+                    scene["brief"] = substitute.brief
             stage = f"image-{slot:02d}-attempt-{attempt}"
             report["stage"] = f"{channel}/{stage}"
             issues, pixels, captions, preview, row = [], {}, "", None, None
@@ -940,7 +944,8 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         visual, scenes = plan_images(audit, article["sections"], **visual_options)
     except UnsafeToTest as exc:
         if not checkpoints or str(exc) not in {"image_plan_anchor_outside_section", "image_plan_count",
-                                               "image_plan_duplicate_brief", "science_visual_mix_required"}:
+                                               "image_plan_duplicate_brief", "science_visual_mix_required",
+                                               "image_plan_template_invalid"}:
             raise
         failed_rule = str(exc)
         replacement = object_response(spend.chat(channel, "image-plan-correction", "brain", (

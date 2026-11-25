@@ -184,8 +184,17 @@ class Session:
             filename = "reports/" + digest(data) + "/" + filename
         self.save(filename, data)
         if filename.endswith("/qwen-plan.json") and self.channel == "legends":
-            plan = json.loads(json.loads(data)["output"])
-            self.core.access(lambda c: c.register_title(self.article, self.channel, plan["title"]), change=True)
+            # The paid plan response is already checkpointed. A malformed body must
+            # surface as the pipeline's own validation error, not as an uncaught
+            # KeyError/ValueError that writes no stage record and repeats forever.
+            try:
+                plan = json.loads(json.loads(data)["output"])
+            except (KeyError, TypeError, ValueError):
+                plan = {}
+            title = plan.get("title") if isinstance(plan, dict) else None
+            if isinstance(title, str) and 4 <= len(title) <= 240:
+                self.core.access(
+                    lambda c: c.register_title(self.article, self.channel, title), change=True)
 
     def account_call(self, action, operation, outcome=None):
         if self.account is not None:
