@@ -456,7 +456,13 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 checkpoints.shared_asset if checkpoints else None)
         else:
             film_candidates = None
+        diagram_alternative = cave_diagram_replacement(scene) if scene["kind"] == "diagram" else None
         for attempt in range(first_attempt, 4):
+            if diagram_alternative and attempt == 2:
+                scene = {**scene, "template": diagram_alternative}
+                if diagram_alternative == "groundwater-scale":
+                    scene["brief"] = ("Compare global volumes of groundwater and surface waters using "
+                                      "USGS estimates. A logarithmic chart with labelled units is appropriate.")
             stage = f"image-{slot:02d}-attempt-{attempt}"
             report["stage"] = f"{channel}/{stage}"
             issues, pixels, captions, preview, row = [], {}, "", None, None
@@ -587,10 +593,10 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 break
             candidate.unlink(missing_ok=True)
             candidate.with_suffix(".json").unlink(missing_ok=True)
-            if attempt == 3 or scene["kind"] == "diagram":
+            if attempt == 3 or (scene["kind"] == "diagram" and (not diagram_alternative or attempt == 2)):
                 failed.append(slot)
                 break
-            if scene["kind"] == "photo":
+            if scene["kind"] in {"photo", "diagram"}:
                 continue
             if not isinstance(verdict.get("fix"), str) or len(verdict["fix"].strip()) < 4:
                 correction = object_response(spend.chat(channel, stage + "-correction", "brain", (
