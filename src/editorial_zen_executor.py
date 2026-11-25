@@ -402,9 +402,15 @@ def execute(core, article, token, *, target=None, transport=call, balance=credit
                               "prose": [(name, sorted(terms)) for name, terms in prose]})
             session.save("inputs/history.json", raw)
         history = json.loads(raw)
-        if session.channel == "cinema" and session.read("requests/plan.json") is None:
-            current = core.access(lambda c: c.title_history(article, session.channel))
-            history["titles"] = list(dict.fromkeys([*history["titles"], *current]))
+        if session.channel == "cinema":
+            name = "inputs/cinema-plan-titles.json"
+            frozen = session.read(name)
+            if frozen is None and session.read("requests/plan.json") is None:
+                current = core.access(lambda c: c.title_history(article, session.channel))
+                frozen = json_bytes(list(dict.fromkeys([*history["titles"], *current])))
+                session.save(name, frozen)
+            if frozen is not None:
+                history["titles"] = json.loads(frozen)
         index = ImageIndex(SimpleNamespace(root=path, lock=Lock(), save=lambda: None), photos)
         catalogue = json.loads((ROOT / "config/editorial_science_sources.json").read_text())
         try:
