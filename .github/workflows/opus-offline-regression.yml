@@ -1,0 +1,19 @@
+name: Opus offline regression
+on:
+  push:
+    branches: [development/opus-5-5]
+    paths: ['src/editorial_routerai_two_articles.py','tests/test_editorial_routerai_two_articles.py','.github/workflows/opus-offline-regression.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest tests.test_editorial_routerai_two_articles tests.test_editorial_production -v

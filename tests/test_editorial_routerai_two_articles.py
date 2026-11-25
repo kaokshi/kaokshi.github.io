@@ -112,5 +112,51 @@ class TwoArticleTest(unittest.TestCase):
             self.assertIn(f"**Блок {i}**\n![ИИ-иллюстрация](images/image-{i + 1}.jpg)", output)
 
 
+
+    def test_retry_clears_local_state_so_a_good_frame_can_pass(self):
+        import tempfile
+        from pathlib import Path
+        state = {"decode": 0}
+        def decode(raw):
+            state["decode"] += 1
+            if state["decode"] == 1:
+                raise OSError("first frame is unreadable")
+            return "image", None
+        class Spend:
+            image_price = Decimal("0.01")
+            def generate(self, channel, stage, prompt, reserve, retain):
+                retain(b"frame")
+            def chat(self, channel, stage, role, prompt, cap, pictures=(), reserve=0):
+                if stage.endswith("-qas"):
+                    return '{"passed": true, "issues": [], "evidence": "Visible scene"}'
+                if stage.endswith("-correction"):
+                    return '{"fix": "Тот же герой у окна в том же помещении"}'
+                if stage.endswith("-retry-check"):
+                    return '{"compatible": true}'
+                raise AssertionError(stage)
+        class Index:
+            def save(self, raw, metadata, scene, title, target, require_scene_score=False):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(raw)
+                return {"file": target.name, "sha256": "a" * 64, "original_sha256": "a" * 64,
+                        "perceptual_hash": "0" * 16, "image_embedding": [0.0],
+                        "scene_similarity": 0.5, "topic_similarity": 0.5,
+                        "scene_score_flags": [], "cover_score": 1}
+        scene = {"kind": "illustration", "brief": "Герой у окна", "subject": "герой у окна"}
+        article = {"intro": ["Вступление."],
+                   "sections": [{"heading": "Раздел", "paragraphs": ["Текст."]}]}
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(two, "decode_candidate", side_effect=decode), \
+                patch.object(two, "thumbnail", return_value="preview"), \
+                patch.object(two, "describe_pixels", return_value="кадр у окна"), \
+                patch.object(two, "compare_pixels", return_value=([0.5, 0.1], [0.0])):
+            rows, _, failed = two.illustrate(Spend(), lambda name, data: None, {}, "cinema",
+                                             article, "Заголовок", "стиль", [scene], Index(),
+                                             Path(directory), 0, [])
+        self.assertEqual(failed, [])
+        self.assertEqual([row["file"] for row in rows], ["image-00.jpg"])
+        self.assertEqual(state["decode"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

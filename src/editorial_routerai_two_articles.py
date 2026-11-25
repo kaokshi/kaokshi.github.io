@@ -397,6 +397,7 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
         for attempt in range(first_attempt, 4):
             stage = f"image-{slot:02d}-attempt-{attempt}"
             report["stage"] = f"{channel}/{stage}"
+            issues, pixels, captions, preview, row = [], {}, "", None, None
             extension = {"illustration": "jpeg", "photo": "source", "diagram": "png"}[scene["kind"]]
             filename = f"{channel}/attempts/{stage}.{extension}"
             if scene["kind"] == "illustration":
@@ -505,7 +506,7 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
             record.update(status="passed" if accepted else "rejected", local_checks=pixels,
                           local_issues=issues, qwen=verdict)
             save(f"{channel}/attempts/{stage}-qa.json", json_bytes(record))
-            if accepted:
+            if accepted and row is not None:
                 save(f"{channel}/images/{row['file']}", candidate.read_bytes())
                 save(f"{channel}/images/image-{slot:02d}.json", json_bytes(row))
                 if checkpoints:
