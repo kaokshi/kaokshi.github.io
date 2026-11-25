@@ -34,6 +34,30 @@ def cave_diagram_replacement(scene):
     return None
 
 
+ASTEROID_DIAGRAMS = {
+    "asteroid-tracking-network": ("Tracking near-Earth objects", ("near-earth objects", "predict", "close approaches")),
+    "asteroid-orbit-data": ("From measurements to a risk list", ("neo coordination centre", "risk list", "close approaches")),
+    "asteroid-kinetic-deflection": ("Kinetic deflection · before and after", ("dart", "dimorphos", "deflect")),
+    "asteroid-orbit-risk": ("Why orbit forecasts have uncertainty", ("risk list", "close approaches", "predict")),
+}
+
+
+def scene_diagram_replacement(scene):
+    cave = cave_diagram_replacement(scene)
+    if cave:
+        return cave
+    subject = scene["subject"].casefold()
+    for clue, template in (
+        ("planetary defense schematic", "asteroid-tracking-network"),
+        ("neo database", "asteroid-orbit-data"),
+        ("kinetic deflection", "asteroid-kinetic-deflection"),
+        ("risk probability", "asteroid-orbit-risk"),
+    ):
+        if clue in subject:
+            return template
+    return None
+
+
 @lru_cache(maxsize=1)
 def water_storage_evidence():
     from .editorial_review import sources
@@ -108,6 +132,52 @@ def speleothem_types(draw, font):
         draw.text((445, y + 79), detail, fill="#cee5ef", font=font)
 
 
+def asteroid_diagram(draw, font, template):
+    title, _ = ASTEROID_DIAGRAMS[template]
+    draw.text((76, 75), title, fill="white", font=font)
+    draw.text((77, 125), "Conceptual ESA-based illustration · no actual orbit or probabilities", fill="#bcefff", font=font)
+    if template == "asteroid-orbit-data":
+        labels = (("Telescope positions", "observations over time"),
+                  ("Orbit calculations", "computed paths and approach dates"),
+                  ("NEO centre outputs", "close approaches and risk list"))
+        for i, (label, detail) in enumerate(labels):
+            y = 205 + 160 * i
+            draw.rounded_rectangle((140, y, 1060, y + 111), radius=18, fill="#27445a")
+            draw.text((178, y + 18), label, fill="white", font=font)
+            draw.text((178, y + 61), detail, fill="#bcefff", font=font)
+            if i < 2:
+                draw.polygon([(592, y + 115), (608, y + 115), (608, y + 135),
+                              (620, y + 135), (600, y + 153), (580, y + 135), (592, y + 135)], fill="#e2bd89")
+        return
+    if template == "asteroid-kinetic-deflection":
+        draw.line((160, 543, 1015, 543), fill="#9badbc", width=5)
+        draw.line((160, 543, 576, 543, 1015, 315), fill="#68ceff", width=9)
+        draw.polygon([(1015, 315), (980, 318), (997, 344)], fill="#68ceff")
+        draw.line((365, 236, 565, 522), fill="#e2bd89", width=6)
+        draw.polygon([(573, 534), (541, 520), (565, 506)], fill="#e2bd89")
+        draw.ellipse((551, 516, 605, 570), fill="#c6b5a2")
+        draw.text((217, 208), "DART spacecraft", fill="#e2bd89", font=font)
+        draw.text((538, 595), "Impact", fill="white", font=font)
+        draw.text((728, 255), "Deflected path", fill="#68ceff", font=font)
+        draw.text((737, 567), "Original path", fill="#9badbc", font=font)
+        return
+    draw.ellipse((820, 360, 1010, 550), fill="#256ca0", outline="#8ae0f7", width=6)
+    draw.text((868, 565), "Earth", fill="white", font=font)
+    if template == "asteroid-orbit-risk":
+        for y, color in ((255, "#77cfee"), (370, "#e3be86"), (575, "#9cb0c4")):
+            draw.line((115, 426, 380, 412, 645, y, 1100, y - 20), fill=color, width=6)
+        draw.text((113, 464), "Observed positions", fill="white", font=font)
+        draw.text((578, 210), "Possible future paths", fill="white", font=font)
+        draw.text((486, 324), "Example crossing path", fill="#e3be86", font=font)
+    else:
+        draw.line((117, 510, 320, 438, 560, 365, 805, 294, 1090, 264), fill="#68ceff", width=6)
+        for i, (x, y) in enumerate(((155, 499), (380, 420), (595, 355)), 1):
+            draw.ellipse((x - 13, y - 13, x + 13, y + 13), fill="#ffc27c")
+            draw.text((x - 20, y + 27), f"t{i}", fill="white", font=font)
+        draw.text((136, 580), "Observations at successive times", fill="white", font=font)
+        draw.text((597, 226), "Estimated trajectory", fill="#68ceff", font=font)
+
+
 def render_diagram(template, records):
     from PIL import Image, ImageDraw, ImageFont
 
@@ -127,6 +197,8 @@ def render_diagram(template, records):
         records = [*records, *water_storage_evidence()]
     elif template in {"cave-dripstone-growth", "cave-speleothem-types", "cave-formations"}:
         url, terms = CAVE_SOURCE, ("stalactites", "stalagmites", "columns")
+    elif template in ASTEROID_DIAGRAMS:
+        url, terms = ASTEROID_SOURCE, ASTEROID_DIAGRAMS[template][1]
     elif template == "asteroid-observations":
         url, terms = ASTEROID_SOURCE, ("asteroid", "close approaches", "predict")
     else:
@@ -138,7 +210,9 @@ def render_diagram(template, records):
     image = Image.new("RGB", (1200, 800), "#102033")
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default(size=29)
-    if template == "cave-groundwater-zones":
+    if template in ASTEROID_DIAGRAMS:
+        asteroid_diagram(draw, font, template)
+    elif template == "cave-groundwater-zones":
         cave_cross_section(draw, font)
     elif template == "groundwater-scale":
         water_storage_chart(draw, font)
