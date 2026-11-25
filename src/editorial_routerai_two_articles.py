@@ -331,17 +331,44 @@ def plan_images(answer, sections, *, science=False, cinema=False, legacy=False, 
     return visual, result
 
 
-def science_asset(scene, records, photo_offset):
+def photo_queries(query):
+    words = re.findall(r"[A-Za-z0-9]+", query)
+    simplified = [word for word in words if word.casefold() not in {
+        "at", "the", "of", "and", "with", "detail", "evening", "night", "mist",
+        "rain", "reflection", "old", "near", "view", "soviet", "urban", "city",
+    }]
+    return tuple(dict.fromkeys(candidate for candidate in (
+        query, " ".join(simplified), " ".join(simplified[:2]), " ".join(simplified[-2:]),
+        simplified[-1] if simplified else "",
+    ) if len(candidate) >= 2))
+
+
+def science_asset(scene, records, photo_offset, cache=None):
     """Only verified Commons rights or an explicit, source-backed diagram template."""
     if scene["kind"] == "diagram":
         return render_diagram(scene["template"], records)
+    cache = {} if cache is None else cache
+    seen = set()
     try:
-        verified = (row for row in commons_photos(scene["query"])
-                    if row["rights_status"] == "license_metadata_verified")
-        row = next((row for i, row in enumerate(verified) if i == photo_offset), None)
-        if row:
-            raw = request(row["asset_url"], row.pop("domains"), timeout=10)
-            return raw, {**row, "label": "Фотография", "ai_generated": False}
+        for query in photo_queries(scene["query"]):
+            if query not in cache:
+                cache[query] = [row for row in commons_photos(query)
+                                if row["rights_status"] == "license_metadata_verified"]
+            for row in cache[query]:
+                asset = row["asset_url"]
+                if asset in seen:
+                    continue
+                seen.add(asset)
+                if len(seen) != photo_offset + 1:
+                    continue
+                try:
+                    raw = request(asset, row["domains"], timeout=10)
+                except ProviderError as exc:
+                    if exc.stop:
+                        raise
+                    continue
+                metadata = {key: value for key, value in row.items() if key != "domains"}
+                return raw, {**metadata, "label": "Фотография", "ai_generated": False}
     except ProviderError:
         pass
     raise UnsafeToTest("verified_photo_unavailable")
@@ -404,7 +431,7 @@ def ranked_film_stills(cache, film, rows, subject, private_read):
 def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, records, *, skip_cover=False, prior_section_attempt=False, checkpoints=None, film=None, film_registry=None):
     rows, previews = [], []
     failed = [0] if skip_cover else []
-    still_cache = {}
+    still_cache, photo_cache = {}, {}
     for slot, scene in enumerate(scenes):
         if slot == 0 and skip_cover:
             continue
@@ -465,9 +492,13 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                             failed.append(slot)
                         continue
                 else:
+                    saved = checkpoints.read_attempt_asset(filename, f"{channel}/attempts/{stage}.json") if checkpoints else None
                     try:
-                        raw, metadata = science_asset(scene, records, attempt - 1)
-                    except UnsafeToTest:
+                        raw, metadata = saved if saved else science_asset(scene, records, attempt - 1, photo_cache)
+                    except UnsafeToTest as exc:
+                        save(f"{channel}/attempts/{stage}-qa.json", json_bytes({
+                            "slot": slot, "attempt": attempt, "status": "rejected", "reason": str(exc),
+                        }))
                         if attempt == 3 or scene["kind"] == "diagram":
                             failed.append(slot)
                             break

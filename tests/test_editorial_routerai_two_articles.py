@@ -177,3 +177,26 @@ class CinemaPlanFixtureTest(unittest.TestCase):
             resolve_cinema_plan(original, [film, {**film, "qid": "Q2"}])
         with self.assertRaisesRegex(UnsafeToTest, "cinema_film_outside_approved_catalogue"):
             resolve_cinema_plan({**original, "qid": "Q2"}, [film])
+
+
+class CommonsPhotoRecoveryTest(unittest.TestCase):
+    def test_query_fallback_keeps_licence_checks_and_distinct_attempt_offsets(self):
+        from unittest.mock import patch
+        from src.editorial_routerai_two_articles import science_asset
+
+        first = {"asset_url": "first", "rights_status": "license_metadata_verified", "domains": ("fixture",)}
+        second = {**first, "asset_url": "second"}
+        unverified = {**first, "asset_url": "unverified", "rights_status": "rights_review_pending"}
+        def discover(query):
+            return {"Soviet apartment building entrance evening": [unverified],
+                    "apartment building entrance": [first],
+                    "apartment building": [first, second]}.get(query, [])
+
+        scene = {"kind": "photo", "query": "Soviet apartment building entrance evening"}
+        cache = {}
+        with patch("src.editorial_routerai_two_articles.commons_photos", side_effect=discover) as search, \
+                patch("src.editorial_routerai_two_articles.request", side_effect=lambda url, *_, **__: url.encode()) as get:
+            self.assertEqual(science_asset(scene, [], 0, cache)[0], b"first")
+            self.assertEqual(science_asset(scene, [], 1, cache)[0], b"second")
+            self.assertEqual(search.call_count, 3)
+            self.assertEqual(get.call_count, 2)

@@ -320,6 +320,16 @@ class Session:
             "editorial_attempts": checks["editorial_attempts"], "publication_authorized": False,
         }))
 
+    def read_attempt_asset(self, filename, metadata_file):
+        manifest = self.read(metadata_file)
+        if manifest is None:
+            return None
+        record = json.loads(manifest)
+        raw = self.read(filename)
+        if raw is None or digest(raw) != record.get("original_sha256"):
+            raise CoreBlocked("image_attempt_artifact_integrity_failed")
+        return raw, record["asset"]
+
     def image(self, slot, path):
         prior = self.read(f"accepted/{slot}.json")
         if prior is None:
