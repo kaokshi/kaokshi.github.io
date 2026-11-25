@@ -142,7 +142,7 @@ async function main(){
  const info=await telegram("getWebhookInfo");
  requireOk(info.url===endpoint+"/telegram","webhook_url_mismatch");
  stage="verify_miniapp";
- const page=await fetch(endpoint+"/app?v=16",{redirect:"error",signal:AbortSignal.timeout(8000)});
+ const page=await fetch(endpoint+"/app?v=17",{redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(page.ok&&(await page.text()).includes("ZEN CONTROL"),"app_page_unavailable");
  const unauthorized=await fetch(endpoint+"/api/dashboard",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({initData:"invalid"}),redirect:"error",signal:AbortSignal.timeout(8000)});
  requireOk(unauthorized.status===401,"app_auth_gate_failed");
@@ -259,6 +259,18 @@ async function main(){
  await readBridgeProbe(()=>bridge("account",{action:"status"},true),v=>v.schema==="zen-core/account-status-v1"&&v.executionEnabled===false);
  await readBridgeProbe(()=>bridge("control",{id:"deploy-probe-not-a-real-job"},true),v=>v.schema==="zen-core/control-v1"&&v.controlClear===false&&v.executionEnabled===false&&v.publicationAuthorized===false&&v.rssEnabled===false);
  console.log("PRIVATE_BRIDGE_READ_ONLY_CONFIRMED");
+ stage="verify_analytics";
+ requireOk((await journalRequest("/api/analytics/metrika",{initData:"invalid"})).status===401,"analytics_owner_gate_failed");
+ requireOk((await journalRequest("/api/core/statistics",{initData:"invalid",period:7})).status===401,"statistics_owner_gate_failed");
+ const analytics=await journalRequest("/api/analytics/metrika",{initData:params.toString()});
+ requireOk(analytics.ok,"analytics_report_unavailable");const ar=await analytics.json();
+ requireOk(ar.source==="yandex_metrika"&&ar.reports?.length===3&&ar.reports.every(r=>r.usableForEditorialAdvice===false&&r.periods?.[7]&&r.periods?.[30]),"analytics_report_contract_failed");
+ const stats=await journalRequest("/api/core/statistics",{initData:params.toString(),period:7});
+ requireOk(stats.ok,"statistics_read_failed");const sv=await stats.json();
+ requireOk(sv.schema==="zen-stats/v1"&&sv.reports?.length===3&&sv.automaticSync===false,"statistics_contract_failed");
+ console.log("ANALYTICS_OWNER_GATE_CONFIRMED");
+ console.log("ANALYTICS_PRIVATE_REPORT_CONFIRMED");
+ console.log("STUDIO_STATISTICS_READ_CONFIRMED");
  const diag=await journalRequest("/api/core/diagnostics",{initData:params.toString()});
  requireOk(diag.ok,"diagnostics_unavailable");
  const dv=await diag.json();requireOk(dv.mode==="read_only"&&dv.productionEnabled===false&&dv.publicationAuthorized===false,"diagnostics_gate_failed");
@@ -281,15 +293,15 @@ async function main(){
  console.log("OWNER_REPLY_CONFIRMED");
  }else console.log("OWNER_WEBHOOK_REPLY_REQUIRES_MANUAL_TEST");
  stage="miniapp_menu";
- requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=16"}}})===true,"miniapp_menu_failed");
+ requireOk(await telegram("setChatMenuButton",{chat_id:Number(owner),menu_button:{type:"web_app",text:"ZEN CONTROL",web_app:{url:endpoint+"/app?v=17"}}})===true,"miniapp_menu_failed");
  const menu=await telegram("getChatMenuButton",{chat_id:Number(owner)});
- requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=16","miniapp_menu_not_verified");
+ requireOk(menu.type==="web_app"&&menu.web_app.url===endpoint+"/app?v=17","miniapp_menu_not_verified");
  console.log("MINIAPP_MENU_CONFIRMED");
  stage="send_inline_launch";
- const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=16"}}]]}});
+ const launch=await telegram("sendMessage",{chat_id:Number(owner),text:"ZEN CONTROL обновлён. Закройте старое окно и войдите через кнопку ниже.",reply_markup:{inline_keyboard:[[{text:"Открыть ZEN CONTROL",web_app:{url:endpoint+"/app?v=17"}}]]}});
  requireOk(Number.isInteger(launch?.message_id),"inline_launch_failed");
  console.log("INLINE_LAUNCH_SENT");
- console.log("MINIAPP_URL="+endpoint+"/app?v=16");
+ console.log("MINIAPP_URL="+endpoint+"/app?v=17");
  stage="commands";
  try { requireOk(await telegram("setMyCommands",{scope:{type:"chat",chat_id:Number(owner)},commands:[
   {command:"start",description:"Главное меню"},{command:"status",description:"Состояние редакции"},
