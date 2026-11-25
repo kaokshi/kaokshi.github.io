@@ -1,4 +1,4 @@
-import json,sys
+import json,sys,os,time
 from pathlib import Path
 import torch
 from PIL import Image
@@ -11,6 +11,7 @@ def main():
     paths=json.loads(Path(sys.argv[1]).read_text())
     captions=[]
     for n,path in enumerate(paths):
+        start=time.monotonic()
         with Image.open(path) as img:
             image=img.convert('RGB')
         messages=[{'role':'user','content':[{'type':'image'},{'type':'text','text':'Describe only visible objects, actions, setting and characters in this movie frame in one concise sentence. Do not guess names or plot.'}]}]
@@ -22,10 +23,10 @@ def main():
         inputs['pixel_values']=inputs['pixel_values'].to(dtype=vision_dtype)
         assert inputs['pixel_values'].dtype==vision_dtype
         with torch.inference_mode():
-            ids=model.generate(**inputs,max_new_tokens=40,do_sample=False)
+            ids=model.generate(**inputs,max_new_tokens=int(os.environ.get('SMOL_MAX_TOKENS','40')),do_sample=False)
         caption=processor.decode(ids[0,inputs['input_ids'].shape[1]:],skip_special_tokens=True).strip()
         assert caption
         captions.append(caption)
-        print('SMOL_FRAME',n+1,'/',len(paths),flush=True)
+        print('SMOL_FRAME',n+1,'/',len(paths),'seconds',round(time.monotonic()-start,2),flush=True)
     Path(sys.argv[2]).write_text(json.dumps(captions,ensure_ascii=False))
 if __name__=='__main__':main()
