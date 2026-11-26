@@ -1,0 +1,117 @@
+name: ZEN Studio statistics
+on:
+  push:
+    branches: [development/zen-analytics-foundation-20261126]
+    paths:
+      - '.github/workflows/zen-studio-sync.yml'
+      - 'scripts/zen_studio*'
+      - 'src/zen_dzen*'
+      - 'tests/test_zen_dzen*'
+      - 'telegram-control/**'
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only quota or an authorized Studio collection
+        type: choice
+        default: quota
+        options: [quota, science, all, hourly]
+permissions:
+  contents: read
+concurrency:
+  group: zen-browser-account-exclusive
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: >-
+      github.repository == 'kaokshi/kaokshi.github.io' &&
+      (github.event_name != 'schedule' || (vars.ZEN_STUDIO_SYNC_ENABLED == 'true' &&
+       vars.ZEN_STUDIO_NATIVE_ACCEPTANCE_ENABLED == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run Studio, browser and ZEN CONTROL regression tests
+        run: |
+          python -m unittest discover -s tests -p 'test_zen_*.py'
+          node --test scripts/*.test.* telegram-control/*.test.mjs
+      - name: Install Chromium test driver
+        if: github.event_name != 'schedule'
+        working-directory: ${{ runner.temp }}
+        run: npm install --no-audit --no-fund --ignore-scripts --save-exact playwright-core@1.56.1
+      - name: Test export and both themes in Chromium with synthetic data
+        if: github.event_name != 'schedule'
+        env:
+          NODE_PATH: ${{ runner.temp }}/node_modules
+        run: ZEN_STUDIO_CHROMIUM="$(command -v google-chrome)" timeout 45s node scripts/zen_studio_chromium_smoke.mjs
+  quota:
+    needs: verify
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.mode == 'quota' &&
+      (github.ref_name == github.event.repository.default_branch ||
+       github.ref == 'refs/heads/development/zen-analytics-foundation-20261126')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read account quota without allocating a browser
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_BROWSER_TOKEN }}
+          CF_WORKERS_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          ZEN_STUDIO_MODE: quota
+        run: node scripts/zen_studio_sync.mjs
+  studio:
+    needs: verify
+    if: >-
+      github.ref_name == github.event.repository.default_branch && github.run_attempt == 1 &&
+      ((github.event_name == 'workflow_dispatch' && inputs.mode != 'quota' &&
+        vars.ZEN_STUDIO_NATIVE_ACCEPTANCE_ENABLED == 'true' &&
+        (inputs.mode != 'hourly' || vars.ZEN_STUDIO_SYNC_ENABLED == 'true')) ||
+       (github.event_name == 'schedule' && vars.ZEN_STUDIO_SYNC_ENABLED == 'true' &&
+        vars.ZEN_STUDIO_NATIVE_ACCEPTANCE_ENABLED == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CDP driver
+        working-directory: ${{ runner.temp }}
+        run: npm install --no-audit --no-fund --ignore-scripts --save-exact playwright-core@1.56.1
+      - name: Collect verified native Studio totals
+        env:
+          NODE_PATH: ${{ runner.temp }}/node_modules
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_BROWSER_TOKEN }}
+          CF_WORKERS_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          ZEN_STUDIO_WORKER_URL: ${{ vars.ZEN_STUDIO_WORKER_URL }}
+          ZEN_STUDIO_VAULT_KEY: ${{ secrets.ZEN_STUDIO_VAULT_KEY }}
+          ZEN_STUDIO_BRIDGE_SECRET: ${{ secrets.ZEN_STUDIO_BRIDGE_SECRET }}
+          ZEN_STUDIO_MODE: ${{ inputs.mode || 'hourly' }}
+          DZEN_SCIENCE_STATS_URL: ${{ secrets.DZEN_SCIENCE_STATS_URL }}
+          DZEN_LEGENDS_STATS_URL: ${{ secrets.DZEN_LEGENDS_STATS_URL }}
+          DZEN_CINEMA_STATS_URL: ${{ secrets.DZEN_CINEMA_STATS_URL }}
+          DZEN_STUDIO_EXPORT_PATH: ${{ vars.DZEN_STUDIO_EXPORT_PATH }}
+          DZEN_STUDIO_EXPORT_LABEL: ${{ vars.DZEN_STUDIO_EXPORT_LABEL }}
+        run: node scripts/zen_studio_sync.mjs

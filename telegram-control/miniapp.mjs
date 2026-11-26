@@ -1,4 +1,5 @@
 import {HTML,CSS,JS} from "./ui.mjs";
+import {analyticsStub} from "./studio-analytics.mjs";
 import {RELEASE} from "./release.mjs";
 import {coreStub,rssStatus} from "./core.mjs";
 import {journalStub,validateDecision} from "./journal.mjs";
@@ -47,11 +48,19 @@ export async function miniApp(request,env,getBalance){
   if(path==="/app.css")return serve(CSS,"text/css; charset=utf-8");
   if(path==="/app.js")return serve(JS,"application/javascript; charset=utf-8");
  }
- if(!["/api/dashboard","/api/release","/api/image","/api/review","/api/journal","/api/core","/api/core/schedule","/api/core/order","/api/core/agent","/api/core/agent/chat","/api/core/agent/apply","/api/core/jobs","/api/core/jobs/cancel","/api/core/jobs/preview","/api/core/jobs/stage","/api/core/budget","/api/core/budget/settings","/api/core/ops","/api/core/memory","/api/core/diagnostics","/api/core/memory/settings","/api/core/ops/settings","/api/rss"].includes(path))return null;
+ if(!["/api/dashboard","/api/release","/api/image","/api/review","/api/journal","/api/core","/api/core/schedule","/api/core/order","/api/core/agent","/api/core/agent/chat","/api/core/agent/apply","/api/core/jobs","/api/core/jobs/cancel","/api/core/jobs/preview","/api/core/jobs/stage","/api/core/budget","/api/core/budget/settings","/api/core/ops","/api/core/memory","/api/core/diagnostics","/api/core/memory/settings","/api/core/ops/settings","/api/rss","/api/analytics","/api/analytics/refresh"].includes(path))return null;
  if(request.method!=="POST")return new Response("Method not allowed",{status:405,headers});
  let data;
  try{if(Number(request.headers.get("Content-Length")||0)>16000)throw Error();const raw=await request.text();if(raw.length>16000)throw Error();data=JSON.parse(raw);}catch{return new Response("Bad request",{status:400,headers});}
  if(!await verifyInitData(data?.initData,env))return new Response("Unauthorized",{status:401,headers});
+ if(path==="/api/analytics"||path==="/api/analytics/refresh"){
+  const stub=analyticsStub(env),refresh=path.endsWith("/refresh");
+  if(stub)try{
+   const response=await stub.fetch("https://studio.internal/analytics/"+(refresh?"refresh":"status"),{method:refresh?"POST":"GET"});
+   return Response.json(await response.json(),{status:response.status,headers});
+  }catch{}
+  return Response.json({error:"studio_unavailable"},{status:503,headers});
+ }
  if(path==="/api/release")return Response.json(RELEASE,{headers});
  if(path==="/api/rss")return Response.json(await rssStatus(),{headers});
  if(path==="/api/core"||path.startsWith("/api/core/")){

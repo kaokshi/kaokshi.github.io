@@ -1,0 +1,68 @@
+name: ZEN Browser synthetic state persistence
+on:
+  workflow_dispatch:
+    inputs:
+      usage_only:
+        description: Check read-only usage API access without allocating a browser
+        type: boolean
+        default: false
+  push:
+    branches: [development/zen-analytics-foundation-20261126]
+    paths: ['.github/workflows/zen-browser-synthetic-state.yml']
+permissions:
+  contents: read
+concurrency:
+  group: zen-browser-account-exclusive
+  cancel-in-progress: false
+jobs:
+  probe:
+    if: >-
+      github.repository == 'kaokshi/kaokshi.github.io' &&
+      github.ref == 'refs/heads/development/zen-analytics-foundation-20261126' &&
+      github.run_attempt == 1 &&
+      (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[zen-synthetic-cloud]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Initialize redacted diagnostic
+        run: printf '%s\n' '{"schema":"zen-browser-synthetic-diagnostics/v1","status":"not_started"}' > "$RUNNER_TEMP/zen-browser-synthetic.json"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate budget, closure and state without browser allocation
+        run: |
+          node --check scripts/zen_browser_synthetic_state.cjs
+          node --check scripts/zen_browser_usage_readonly.cjs
+          node --test scripts/zen_browser_close.test.cjs scripts/zen_browser_synthetic_state.test.cjs scripts/zen_browser_usage_readonly.test.cjs
+      - name: Install CDP client
+        if: inputs.usage_only != true
+        working-directory: ${{ runner.temp }}
+        run: npm install --no-audit --no-fund --ignore-scripts --save-exact playwright-core@1.56.1
+      - name: Verify synthetic state across explicitly closed sessions
+        if: inputs.usage_only != true
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_BROWSER_TOKEN }}
+          CF_WORKERS_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          NODE_PATH: ${{ runner.temp }}/node_modules
+          ZEN_BROWSER_DIAGNOSTIC_PATH: ${{ runner.temp }}/zen-browser-synthetic.json
+        run: node scripts/zen_browser_synthetic_state.cjs
+      - name: Check account usage access without allocation
+        if: inputs.usage_only == true
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_BROWSER_TOKEN }}
+          CF_WORKERS_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          ZEN_BROWSER_DIAGNOSTIC_PATH: ${{ runner.temp }}/zen-browser-synthetic.json
+        run: node scripts/zen_browser_usage_readonly.cjs
+      - name: Save redacted diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-browser-synthetic-diagnostics
+          path: ${{ runner.temp }}/zen-browser-synthetic.json
+          if-no-files-found: error
+          retention-days: 7
