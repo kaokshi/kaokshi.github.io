@@ -1,0 +1,82 @@
+name: Opus financial reconciliation development
+on:
+  push:
+    branches: [development/opus-finance-20261126]
+    paths: ['.github/workflows/opus-finance-recovery.yml']
+permissions:
+  contents: read
+concurrency:
+  group: opus-developer
+  cancel-in-progress: false
+jobs:
+  develop:
+    if: github.run_attempt == 1 && github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Claude Code
+        run: npm install --global @anthropic-ai/claude-code@2.1.316
+      - name: First bounded development session
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPUS_ROUTERAI_API_KEY }}
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_BASE_URL: https://routerai.ru/api
+          ANTHROPIC_DEFAULT_OPUS_MODEL: anthropic/claude-opus-5.5
+          ANTHROPIC_DEFAULT_SONNET_MODEL: anthropic/claude-opus-5.5
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: anthropic/claude-opus-5.5
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+          DISABLE_TELEMETRY: '1'
+          DISABLE_AUTOUPDATER: '1'
+          CLAUDE_CODE_EFFORT_LEVEL: low
+        run: |
+          test -n "$ANTHROPIC_AUTH_TOKEN" || { echo "::error::developer_key_missing"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/opus-report"
+          claude --version
+          claude -p "Read AGENTS.md and docs/OPUS_REMAINING_TASKS.md. Implement only phase 1: safe financial reconciliation of interrupted paid operations. First save a checkpoint report docs/OPUS_FINANCE_REPORT.md. Inspect existing finance recovery, ledger, account hold, request persistence and provider transport. Design and implement evidence-bound recovery from already persisted responses or independently verified provider billing records, including exact operation attribution, immutable evidence hash, idempotent settlement, conflict and concurrency guards. Unknown charges remain blocked; never infer zero or use aggregate balance delta alone, never reopen paid operation or invent invoices. Add negative and replay tests. No live provider calls, no private ledger access, no workflow edits, no changes to financial limits, authorizations, RSS or publishing. No specific job IDs in code. Only src, tests and report. Read Glob Grep Edit Write only. Independent tests follow." --model anthropic/claude-opus-5.5 --effort low --max-turns 25 --max-budget-usd 2 --allowedTools "Read,Glob,Grep,Edit,Write" --disallowedTools "Bash,WebFetch,WebSearch,Task,Agent" --output-format json > "$RUNNER_TEMP/opus-report/session.json"
+      - name: Preserve changes even on failure
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/opus-report"
+          git diff --binary HEAD > "$RUNNER_TEMP/opus-report/tracked.patch"
+          git ls-files --others --exclude-standard -z | while IFS= read -r -d '' f; do
+            case "$f" in src/*|tests/*|docs/OPUS_FINANCE_REPORT.md) git diff --no-index --binary /dev/null "$f" >> "$RUNNER_TEMP/opus-report/new-files.patch" || test "$?" = 1 ;; esac
+          done
+          git status --short > "$RUNNER_TEMP/opus-report/status.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opus-finance-recovery
+          path: ${{ runner.temp }}/opus-report/
+          retention-days: 7
+  verify:
+    needs: develop
+    if: always() && needs.develop.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: opus-finance-recovery
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-editorial.txt Pillow ImageHash cryptography python-docx
+      - name: Apply candidate and run full regression
+        run: |
+          if test -s "$RUNNER_TEMP/candidate/tracked.patch"; then git apply "$RUNNER_TEMP/candidate/tracked.patch"; fi
+          if test -s "$RUNNER_TEMP/candidate/new-files.patch"; then git apply "$RUNNER_TEMP/candidate/new-files.patch"; fi
+          python -m unittest discover -s tests -q
+          node --test telegram-control/*.test.mjs
