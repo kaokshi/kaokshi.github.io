@@ -71,7 +71,15 @@ async function controlSnapshot(tx,id,now,executionEnabled=false){
   const effective=transition?job?.executorReceipt?.effectiveMode:intent?.mode;
   const policy=await tx.get("budget:policy");
   const mismatch=Boolean(policy&&(policy.mainKop!==30000||policy.reserveKop!==5000));
-  const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":job.origin==="schedule"&&settings?.paused!==false?"schedule_paused":transition&&job.executorReceipt?.modeRevision!==transition.revision?"mode_sync_pending":effective!==mode?"mode_changed":mismatch?"budget_policy_mismatch":null;
+  let settingsBlocked=false;
+  if(job?.settingsPin){
+   try{
+    const pinned=(await settingsForPinIn(tx,job.settingsPin)).models;
+    const reported=job.executorReceipt?.editorialSettingsReport?.models;
+    settingsBlocked=!reported||reported.revision!==pinned.revision||reported.hash!==pinned.hash;
+   }catch{settingsBlocked=true;}
+  }
+  const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":job.origin==="schedule"&&settings?.paused!==false?"schedule_paused":transition&&job.executorReceipt?.modeRevision!==transition.revision?"mode_sync_pending":effective!==mode?"mode_changed":mismatch?"budget_policy_mismatch":settingsBlocked?"model_settings_sync_pending":null;
   return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:effective??null,modeRevision:transition?.revision??0,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:executionEnabled===true,publicationAuthorized:false,rssEnabled:false}};
 }
 export async function accountView(storage,d,now=Date.now(),executionEnabled=false){
