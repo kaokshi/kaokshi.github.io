@@ -52,5 +52,9 @@ jobs:
           ZEN_CONTROL_PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
           ZEN_CONTROL_CONFIRM_UPDATE: ${{ inputs.confirm_update }}
           ZEN_CONTROL_ENABLE_PRIVATE_EXECUTOR: ${{ inputs.enable_private_executor }}
+          ZEN_STUDIO_BRIDGE_SECRET: ${{ secrets.ZEN_STUDIO_BRIDGE_SECRET }}
+          ZEN_STUDIO_ENROLL_SECRET: ${{ secrets.ZEN_STUDIO_ENROLL_SECRET }}
+          ZEN_STUDIO_DISPATCH_TOKEN: ${{ secrets.ZEN_STUDIO_DISPATCH_TOKEN }}
+          ZEN_STUDIO_SYNC_ENABLED: ${{ vars.ZEN_STUDIO_SYNC_ENABLED }}
           ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
         run: node deploy.mjs

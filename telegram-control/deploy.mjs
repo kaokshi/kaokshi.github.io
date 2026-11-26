@@ -96,6 +96,12 @@ async function main(){
  const settings=await cf("/scripts/"+SCRIPT+"/settings");
  requireOk(Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="TELEGRAM_WEBHOOK_SECRET"&&b.type==="secret_text"),"existing_webhook_binding_required");
  bindings.push({type:"plain_text",name:"ZEN_CORE_EXECUTION_ENABLED",text:String(production)});
+ for(const name of ["ZEN_STUDIO_BRIDGE_SECRET","ZEN_STUDIO_ENROLL_SECRET","ZEN_STUDIO_DISPATCH_TOKEN"]){
+  const value=process.env[name];
+  if(value)bindings.push({type:"secret_text",name,text:value});
+ }
+ if(["true","false"].includes(process.env.ZEN_STUDIO_SYNC_ENABLED))
+  bindings.push({type:"plain_text",name:"ZEN_STUDIO_SYNC_ENABLED",text:process.env.ZEN_STUDIO_SYNC_ENABLED});
  const hasJournal=Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="REVIEW_JOURNAL"&&b.type==="durable_object_namespace"&&b.class_name==="ReviewJournal");
  bindings.push({type:"inherit",name:"REVIEW_JOURNAL"});
  requireOk(hasJournal,"existing_journal_binding_required");
@@ -106,7 +112,7 @@ async function main(){
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"entry.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs","ops.mjs","adapter.mjs","intake.mjs","receipt.mjs","memory.mjs","notifications.mjs","diagnostics.mjs","recovery.mjs","account.mjs","release.mjs","probe.mjs","stage-intent.mjs"]){
+ for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","production.mjs","budget.mjs","ops.mjs","adapter.mjs","intake.mjs","receipt.mjs","memory.mjs","notifications.mjs","diagnostics.mjs","recovery.mjs","account.mjs","release.mjs","probe.mjs","stage-intent.mjs","studio-analytics.mjs","studio-auth.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }

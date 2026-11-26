@@ -1,6 +1,7 @@
 export {ReviewJournal} from "./journal.mjs";
 import {miniApp} from "./miniapp.mjs";
 import {bridgeRequest} from "./intake.mjs";
+import {studioBridge} from "./studio-analytics.mjs";
 // Owner-only, read-only Telegram control interface. No generation or publishing.
 const MENU = {keyboard:[[{text:"Состояние редакции"},{text:"Баланс RouterAI"}],[{text:"Модели"},{text:"Тесты"}],[{text:"Статьи"},{text:"Помощь"}]],resize_keyboard:true};
 const COMMANDS = new Map([
@@ -67,6 +68,7 @@ export default {async scheduled(controller,env) {
  const r=await stub.fetch("https://core.internal/core/watchdog",{method:"POST",body:"{}"});
  if(!r.ok)throw Error("watchdog_failed");
 },async fetch(request,env) {
+ const studio=await studioBridge(request,env);if(studio)return studio;
  const bridge=await bridgeRequest(request,env);if(bridge)return bridge;
  const app=await miniApp(request,env,balanceValue);
  if(app)return app;
