@@ -19,19 +19,25 @@ async function probe() {
     const rows = Array.isArray(payload) ? payload : payload.result;
     if (Array.isArray(rows)) report.activeSessions.count = rows.length;
   }
-  report.analytics.browser = await analytics(token);
+  const day = new Date().toISOString().slice(0, 10);
+  report.analytics.browser = await analytics({id, token, day});
   if (!report.analytics.browser.enabled && process.env.CF_WORKERS_TOKEN) {
-    report.analytics.workers = await analytics(process.env.CF_WORKERS_TOKEN);
+    const credentials = {id, token: process.env.CF_WORKERS_TOKEN, day};
+    report.analytics.workers = await analytics(credentials);
+    if (report.analytics.workers.enabled) {
+      report.analytics.byHour = await analytics({...credentials, byHour: true});
+    }
   }
 }
 
-async function analytics(token) {
+async function analytics({id, token, day, byHour = false, request = fetch}) {
   const result = {};
   const query = `query BrowserUsage($account: string, $day: Date) {
     viewer {
       accounts(filter: {accountTag: $account}) {
         settings { browserRenderingBrowserTimeUsageAdaptiveGroups { enabled } }
-        browserRenderingBrowserTimeUsageAdaptiveGroups(limit: 1, filter: {date: $day}) {
+        browserRenderingBrowserTimeUsageAdaptiveGroups(limit: ${byHour ? 24 : 1}, filter: {date: $day}) {
+          ${byHour ? "dimensions { datetimeHour }" : ""}
           count
           sum { totalSessionDurationMs }
           confidence(level: 0.95) {
@@ -42,8 +48,8 @@ async function analytics(token) {
       }
     }
   }`;
-  const response = await fetch(origin + "/graphql", {method: "POST", headers: authorization(token),
-    body: JSON.stringify({query, variables: {account: id, day: new Date().toISOString().slice(0, 10)}}),
+  const response = await request(origin + "/graphql", {method: "POST", headers: authorization(token),
+    body: JSON.stringify({query, variables: {account: id, day}}),
     redirect: "error", signal: AbortSignal.timeout(10000)});
   result.httpStatus = response.status;
   if (!response.ok) return result;
@@ -56,24 +62,31 @@ async function analytics(token) {
     if (/parse|type|invalid|expected|argument/i.test(message)) return "query";
     return "other";
   }))];
-  const account = payload.data?.viewer?.accounts?.[0];
+  const accounts = payload.data?.viewer?.accounts;
+  const account = accounts?.length === 1 ? accounts[0] : undefined;
   const dataset = "browserRenderingBrowserTimeUsageAdaptiveGroups";
   result.enabled = account?.settings?.[dataset]?.enabled === true;
-  const [usage] = account?.[dataset] || [];
-  if (Number.isSafeInteger(usage?.count) && Number.isSafeInteger(usage?.sum?.totalSessionDurationMs)) {
-    result.sessionCount = usage.count;
-    result.reportedUsageMs = usage.sum.totalSessionDurationMs;
-    result.unsampled = usage.confidence?.count?.sampleSize === usage.count
+  const rows = account?.[dataset];
+  if (Array.isArray(rows) && rows.length && rows.every(usage =>
+    Number.isSafeInteger(usage?.count) && Number.isSafeInteger(usage?.sum?.totalSessionDurationMs))) {
+    result.sessionCount = rows.reduce((total, usage) => total + usage.count, 0);
+    result.reportedUsageMs = rows.reduce((total, usage) => total + usage.sum.totalSessionDurationMs, 0);
+    result.unsampled = rows.every(usage => usage.confidence?.count?.sampleSize === usage.count
       && usage.confidence?.sum?.totalSessionDurationMs?.sampleSize === usage.count
-      && usage.confidence?.sum?.totalSessionDurationMs?.upper === result.reportedUsageMs
-      && usage.confidence?.sum?.totalSessionDurationMs?.lower === result.reportedUsageMs;
-    result.confidenceSampleSizes = [usage.confidence?.count?.sampleSize,
-      usage.confidence?.sum?.totalSessionDurationMs?.sampleSize].map(value => Number.isSafeInteger(value) ? value : null);
+      && usage.confidence?.sum?.totalSessionDurationMs?.upper === usage.sum.totalSessionDurationMs
+      && usage.confidence?.sum?.totalSessionDurationMs?.lower === usage.sum.totalSessionDurationMs);
+    const upper = rows.map(usage => usage.confidence?.sum?.totalSessionDurationMs?.upper);
+    if (upper.every(Number.isFinite)) result.confidenceUpperMs = upper.reduce((total, value) => total + value, 0);
+    if (byHour) result.groups = rows.length;
   }
   return result;
 }
-probe().catch(() => { report.status = "read_only_error"; }).finally(() => {
-  const data = JSON.stringify(report, null, 2);
-  writeFileSync(process.env.ZEN_BROWSER_DIAGNOSTIC_PATH, data + "\n", {mode: 0o600});
-  console.log(data);
-});
+
+if (require.main === module) {
+  probe().catch(() => { report.status = "read_only_error"; }).finally(() => {
+    const data = JSON.stringify(report, null, 2);
+    writeFileSync(process.env.ZEN_BROWSER_DIAGNOSTIC_PATH, data + "\n", {mode: 0o600});
+    console.log(data);
+  });
+}
+module.exports = {analytics};
