@@ -27,37 +27,4 @@ jobs:
           ZEN_METRIKA_OUTPUT: ${{ runner.temp }}/zen-metrika.json
         run: |
           python -m src.zen_metrika_collector
-          python - <<'PY'
-          import os,json,urllib.request,urllib.error,base64
-          class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self,*args,**kwargs): return None
-          opener=urllib.request.build_opener(NoRedirect)
-          token=os.environ["EDITORIAL_PRIVATE_TOKEN"]
-          root="https://api.github.com/repos/kaokshi/zen-editorial-review"
-          def req(path,body=None):
-              r=urllib.request.Request(root+path,headers={"Authorization":"Bearer "+token,"Accept":"application/vnd.github+json","User-Agent":"ZEN-Analytics/1.0","Content-Type":"application/json"},data=json.dumps(body).encode() if body is not None else None,method="PUT" if body is not None else "GET")
-              try:
-                  with opener.open(r,timeout=20) as x: return x.status,json.load(x)
-              except urllib.error.HTTPError as e: return e.code,None
-          status,meta=req("")
-          if status!=200 or meta.get("private") is not True: raise SystemExit("PRIVATE_REPO_UNVERIFIED")
-          with open(os.environ["ZEN_METRIKA_OUTPUT"],"rb") as f: raw=f.read()
-          report=json.loads(raw)
-          if report.get('schema')!='zen-metrika/v1' or set(report.get('channels',{}))!={'cinema','science','legends'} or any(e.get('status') not in ('binding_unverified','mixed_channel_traffic') or set(e.get('periods',{}))!={'7','30'} for e in report['channels'].values()): raise SystemExit('COLLECTOR_INCOMPLETE_KEEP_PREVIOUS')
-          if len(raw)>100000: raise SystemExit('REPORT_TOO_LARGE_KEEP_PREVIOUS')
-          if meta.get('full_name')!='kaokshi/zen-editorial-review' or meta.get('visibility')!='private': raise SystemExit('PRIVATE_REPO_UNVERIFIED')
-          path="/contents/zen-analytics/collector-validation.json"
-          code,old=req(path)
-          if code not in (200,404): raise SystemExit("PRIVATE_READ_FAILED")
-          body={"message":"Save hourly independent Metrika report","content":base64.b64encode(raw).decode(),"branch":meta["default_branch"]}
-          if code==200:
-              previous=json.loads(base64.b64decode(old["content"]))
-              if previous["collected_at"]>=report["collected_at"]: raise SystemExit("NEWER_REPORT_ALREADY_EXISTS")
-              body["sha"]=old["sha"]
-          code,_=req(path,body)
-          if code not in (200,201): raise SystemExit("PRIVATE_WRITE_FAILED")
-          print("PRIVATE_REPORT_SAVED")
-          for channel,entry in report["channels"].items():
-              print(channel.upper()+"_REPORT_STATUS="+entry["status"])
-          if any(e["status"]=="unavailable" for e in report["channels"].values()): raise SystemExit("COLLECTOR_INCOMPLETE")
-          PY
+          python -m src.zen_analytics_private_archive

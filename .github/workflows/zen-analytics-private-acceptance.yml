@@ -1,0 +1,25 @@
+name: ZEN Analytics private acceptance
+on:
+  push:
+    branches: [development/zen-analytics-foundation-20261126]
+    paths: ['.github/workflows/zen-analytics-private-acceptance.yml']
+permissions:
+  contents: read
+concurrency:
+  group: zen-analytics-private-sync
+  cancel-in-progress: false
+jobs:
+  acceptance:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python -m unittest discover -s tests -p 'test_zen_*.py' -v
+      - name: Verify private seed and archive existing proxy snapshot
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ZEN_ANALYTICS_SEED_CHECK: discover
+        run: python -m src.zen_analytics_private_archive
