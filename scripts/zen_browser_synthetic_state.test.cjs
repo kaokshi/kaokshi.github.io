@@ -9,7 +9,7 @@ const sid = "00000000-0000-4000-8000-00000000000";
 
 function fixture({failure, previous = 0, unconfirmed = false} = {}) {
   let acquired = 0, disconnected = 0;
-  const alive = new Map(), closed = new Map(), actions = [];
+  const alive = new Map(), actions = [];
   const call = async (url, method) => {
     if (method === "POST") {
       assert.ok(url.endsWith("?keep_alive=10000"));
@@ -23,17 +23,11 @@ function fixture({failure, previous = 0, unconfirmed = false} = {}) {
     if (method === "DELETE") {
       const value = alive.get(id);
       assert.ok(value);
-      alive.delete(id);
-      if (!unconfirmed) closed.set(id, {...value, closeReason: 1, endTime: start - 1});
+      if (!unconfirmed) alive.delete(id);
       actions.push("delete");
       return {status: "closing"};
     }
-    return {result: null};
-  };
-  const listHistory = async () => {
-    const rows = [...alive.values(), ...closed.values()];
-    if (previous) rows.push({sessionId: "old", startTime: start - previous, endTime: start});
-    return rows;
+    throw Error("HTTP_404");
   };
   const connect = async () => {
     assert.equal(alive.size, 1);
@@ -64,7 +58,8 @@ function fixture({failure, previous = 0, unconfirmed = false} = {}) {
       close: async () => { disconnected++; },
     };
   };
-  return {options: {root, call, connect, listHistory, now: () => start, wait: async () => {}},
+  return {options: {root, call, connect, readUsage: async () => previous,
+                    listActive: async () => [...alive.keys()], now: () => start, wait: async () => {}},
           actions, counts: () => ({acquired, disconnected})};
 }
 
@@ -74,7 +69,7 @@ test("captures and restores in a separate browser only after explicit closure", 
   assert.equal(report.status, "passed");
   assert.deepEqual(f.actions, ["acquire", "delete", "acquire", "delete"]);
   assert.equal(f.counts().disconnected, 2);
-  assert.ok(report.sessions.every(entry => entry.cleanup.history_terminal === 1
+  assert.ok(report.sessions.every(entry => entry.cleanup.removed_from_active_list === 1
     && entry.cleanup.confirmed && entry.checks.cookie && entry.checks.localStorage));
   assert.equal(report.limits.dailyMs, 480000);
   assert.equal(report.limits.sessionMs, 60000);
@@ -118,8 +113,28 @@ test("the two-session reservation is rejected before cloud allocation", async ()
 
 test("an active-only session list cannot substitute for account usage", async () => {
   const f = fixture();
-  const report = await runProbe({...f.options, listHistory: undefined});
+  const report = await runProbe({...f.options, readUsage: undefined});
   assert.equal(report.error, "ACCOUNT_USAGE_UNAVAILABLE");
+  assert.deepEqual(f.actions, []);
+});
+
+test("a second allocation keeps the first reservation even if analytics lags", async () => {
+  const f = fixture();
+  const totals = [LIMITS.dailyMs - 2 * LIMITS.admissionMs,
+                  LIMITS.dailyMs - 2 * LIMITS.admissionMs + 1];
+  const report = await runProbe({...f.options, readUsage: async day => {
+    assert.equal(day, "2026-11-26");
+    return totals.shift();
+  }});
+  assert.equal(report.error, "BUDGET_STOP");
+  assert.equal(report.admission[1].previouslyReservedMs, LIMITS.admissionMs);
+  assert.deepEqual(f.actions, ["acquire", "delete"]);
+});
+
+test("active account sessions block admission", async () => {
+  const f = fixture();
+  const report = await runProbe({...f.options, listActive: async () => ["active"]});
+  assert.equal(report.error, "ACTIVE_SESSION");
   assert.deepEqual(f.actions, []);
 });
 

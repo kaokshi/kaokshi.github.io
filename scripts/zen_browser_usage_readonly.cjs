@@ -36,7 +36,7 @@ async function analytics({id, token, day, byHour = false, request = fetch}) {
     viewer {
       accounts(filter: {accountTag: $account}) {
         settings { browserRenderingBrowserTimeUsageAdaptiveGroups { enabled } }
-        browserRenderingBrowserTimeUsageAdaptiveGroups(limit: ${byHour ? 24 : 1}, filter: {date: $day}) {
+        browserRenderingBrowserTimeUsageAdaptiveGroups(limit: ${byHour ? 24 : 1}, filter: {date: $day, sessionDurationMs_gt: 0}) {
           ${byHour ? "dimensions { datetimeHour }" : ""}
           count
           sum { totalSessionDurationMs }
@@ -67,6 +67,9 @@ async function analytics({id, token, day, byHour = false, request = fetch}) {
   const dataset = "browserRenderingBrowserTimeUsageAdaptiveGroups";
   result.enabled = account?.settings?.[dataset]?.enabled === true;
   const rows = account?.[dataset];
+  if (Array.isArray(rows) && rows.length === 0 && result.enabled && !errors.length) {
+    return {...result, sessionCount: 0, reportedUsageMs: 0, unsampled: true};
+  }
   if (Array.isArray(rows) && rows.length && rows.every(usage =>
     Number.isSafeInteger(usage?.count) && Number.isSafeInteger(usage?.sum?.totalSessionDurationMs))) {
     result.sessionCount = rows.reduce((total, usage) => total + usage.count, 0);

@@ -1,6 +1,7 @@
 // Two independent Cloudflare sessions with a local synthetic fixture.
 const {writeFile} = require("node:fs/promises");
 const {confirmClose} = require("./zen_browser_close.cjs");
+const {analytics} = require("./zen_browser_usage_readonly.cjs");
 
 const LIMITS = Object.freeze({
   dailyMs: 480000, sessionMs: 60000, keepAliveMs: 10000, admissionMs: 90000,
@@ -10,8 +11,8 @@ const ORIGIN = "https://example.invalid";
 const KEY = "synthetic_state";
 const VALUE = "test-only";
 const ERROR_CODES = new Set([
-  "CONFIG_MISSING", "ACCOUNT_USAGE_UNAVAILABLE", "INVALID_HISTORY", "HISTORY_INCOMPLETE", "INVALID_START",
-  "ACTIVE_OR_INVALID_SESSION", "BUDGET_STOP", "SESSION_ID_MISSING",
+  "CONFIG_MISSING", "ACCOUNT_USAGE_UNAVAILABLE", "INVALID_ACTIVE_LIST",
+  "ACTIVE_SESSION", "BUDGET_STOP", "SESSION_ID_MISSING",
   "UNEXPECTED_STATE", "RESTORE_FAILED", "WATCHDOG", "CLOSE_UNCONFIRMED",
   "UNKNOWN_CLOSE_STATE", "NOT_NORMAL_CLOSURE", "HTTP_TIMEOUT",
 ]);
@@ -33,46 +34,24 @@ function within(work, ms) {
   ]).finally(() => clearTimeout(timer));
 }
 
-function sessionList(data) {
-  const list = Array.isArray(data) ? data : data.result;
-  if (!Array.isArray(list)) throw Error("INVALID_HISTORY");
-  return list;
-}
-
-async function history(list) {
-  const rows = [], seen = new Set();
-  for (let offset = 0; offset < 10000; offset += 100) {
-    const page = await list(offset);
-    for (const row of page) {
-      if (typeof row.sessionId !== "string" || seen.has(row.sessionId)) throw Error("INVALID_HISTORY");
-      seen.add(row.sessionId);
-      rows.push(row);
-    }
-    if (page.length < 100) return rows;
-  }
-  throw Error("HISTORY_INCOMPLETE");
-}
-
-async function admit(list, count, now, report) {
-  const rows = await history(list), observed = now(), day = new Date(observed);
+async function admit({readUsage, listActive, now, report, alreadyReserved = 0}) {
+  if (!readUsage) throw Error("ACCOUNT_USAGE_UNAVAILABLE");
+  const day = new Date(now());
   day.setUTCHours(0, 0, 0, 0);
-  let usedMs = 0;
-  for (const row of rows) {
-    if (!Number.isFinite(row.startTime) || row.startTime < 1e12 || row.startTime > observed) {
-      throw Error("INVALID_START");
-    }
-    if (!Number.isFinite(row.endTime) || row.endTime < row.startTime || row.endTime > observed + 5000) {
-      throw Error("ACTIVE_OR_INVALID_SESSION");
-    }
-    usedMs += Math.max(0, Math.min(observed, row.endTime) - Math.max(day.getTime(), row.startTime));
-  }
-  const reservedMs = LIMITS.admissionMs * count;
-  const admitted = usedMs + reservedMs <= LIMITS.dailyMs && observed + reservedMs < day.getTime() + 86400000;
-  report.admission.push({usedMs, reservedMs, admitted});
+  const date = day.toISOString().slice(0, 10);
+  const usage = await readUsage(date);
+  if (!Number.isSafeInteger(usage) || usage < 0) throw Error("ACCOUNT_USAGE_UNAVAILABLE");
+  if ((await listActive()).length) throw Error("ACTIVE_SESSION");
+  const usedMs = Math.max(usage, report.admission[0]?.usedMs ?? 0);
+  const reservedMs = LIMITS.admissionMs * 2 - alreadyReserved;
+  const timeToFinish = reservedMs + (alreadyReserved ? 0 : LIMITS.acquisitionIntervalMs);
+  const admitted = usedMs + alreadyReserved + reservedMs <= LIMITS.dailyMs
+    && now() + timeToFinish < day.getTime() + 86400000;
+  report.admission.push({usedMs, previouslyReservedMs: alreadyReserved, reservedMs, admitted});
   if (!admitted) throw Error("BUDGET_STOP");
 }
 
-async function session({state, first, root, call, connect, list, isActive, now, wait, report, workMs}) {
+async function session({state, first, root, call, connect, listActive, now, wait, report, workMs}) {
   const started = now();
   const deadline = started + LIMITS.sessionMs;
   const workDeadline = started + workMs;
@@ -128,7 +107,7 @@ async function session({state, first, root, call, connect, list, isActive, now, 
       try {
         await confirmClose({
           sid, root, call, pause: wait, now, expiresAt: deadline - 1500,
-          latest: timeout => list(0, timeout), isActive,
+          isActive: async (id, timeout) => (await listActive(timeout)).includes(id),
           observe: event => { result.cleanup[event] = (result.cleanup[event] || 0) + 1; },
           onDuration: duration => { result.browserDurationMs = duration; },
         });
@@ -157,23 +136,19 @@ async function session({state, first, root, call, connect, list, isActive, now, 
   }
 }
 
-async function runProbe({root, call, connect, listHistory, isActive, now = Date.now, wait = pause, workMs = 33000} = {}) {
+async function runProbe({root, call, connect, readUsage, listActive, now = Date.now, wait = pause, workMs = 33000} = {}) {
   const report = {schema: "zen-browser-synthetic-diagnostics/v1", limits: LIMITS,
                   status: "failed", stage: "configuration", admission: [], sessions: []};
   try {
-    if (!root || !call || !connect) throw Error("CONFIG_MISSING");
-    const list = async (offset, timeout) => {
-      if (!listHistory) throw Error("ACCOUNT_USAGE_UNAVAILABLE");
-      return sessionList(await listHistory(offset, timeout));
-    };
-    const config = {root, call, connect, list, isActive, now, wait, workMs};
+    if (!root || !call || !connect || !listActive) throw Error("CONFIG_MISSING");
+    const config = {root, call, connect, listActive, now, wait, workMs};
     report.stage = "save_admission";
-    await admit(list, 2, now, report);
+    await admit({readUsage, listActive, now, report});
     report.stage = "save";
     const state = await session({...config, first: true, report});
     await wait(LIMITS.acquisitionIntervalMs);
     report.stage = "restore_admission";
-    await admit(list, 1, now, report);
+    await admit({readUsage, listActive, now, report, alreadyReserved: LIMITS.admissionMs});
     report.stage = "restore";
     await session({...config, first: false, state, report});
     report.stage = "complete";
@@ -186,6 +161,7 @@ async function runProbe({root, call, connect, listHistory, isActive, now = Date.
 
 async function main() {
   const id = process.env.CF_ACCOUNT_ID, token = process.env.CF_API_TOKEN;
+  const analyticsToken = process.env.CF_WORKERS_TOKEN;
   const config = {};
   if (/^[a-f0-9]{32}$/i.test(id || "") && token) {
     const headers = {Authorization: "Bearer " + token};
@@ -201,15 +177,21 @@ async function main() {
       }
     };
     config.connect = url => require("playwright-core").chromium.connectOverCDP(url, {headers, timeout: 14000});
-    config.isActive = async (sid, timeout) => {
-      const rows = sessionList(await config.call(
-        config.root.replace(/\/browser$/, "/session") + "?limit=100", "GET", timeout));
-      if (rows.some(row => row.sessionId === sid)) return true;
-      if (rows.length >= 100 || rows.some(row => typeof row.sessionId !== "string")) {
-        throw Error("INVALID_HISTORY");
+    config.listActive = async timeout => {
+      const data = await config.call(config.root.replace(/\/browser$/, "/session") + "?limit=100", "GET", timeout);
+      const rows = Array.isArray(data) ? data : data?.result;
+      if (!Array.isArray(rows) || rows.length >= 100 || rows.some(row => typeof row?.sessionId !== "string")) {
+        throw Error("INVALID_ACTIVE_LIST");
       }
-      return false;
+      return rows.map(row => row.sessionId);
     };
+    if (analyticsToken) {
+      config.readUsage = async day => {
+        const usage = await analytics({id, token: analyticsToken, day, byHour: true});
+        if (!usage.enabled || usage.errorCount !== 0 || !usage.unsampled) throw Error("ACCOUNT_USAGE_UNAVAILABLE");
+        return usage.reportedUsageMs;
+      };
+    }
   }
   const report = await runProbe(config);
   const encoded = JSON.stringify(report, null, 2);
