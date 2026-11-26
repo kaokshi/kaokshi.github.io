@@ -1,0 +1,42 @@
+name: ZEN CORE read-only finance audit
+on:
+  push:
+    branches: [diagnostics/zen-finance-20261126]
+    paths: ['.github/workflows/zen-finance-readonly-audit.yml']
+permissions:
+  contents: read
+concurrency:
+  group: zen-core-intake-runner
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Inspect existing financial ledger and hold without writes
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+          ZEN_CORE_CONTROL_ENDPOINT: https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/control
+        run: |
+          python - <<'PY'
+          import json,os
+          from src.editorial_zen_cloud import CloudCore,GitHubStore
+          from src.editorial_zen_control import configured_account
+          from src.editorial_zen_finance_recovery import inspect
+          from src.editorial_zen_core import CoreBlocked
+          try:
+              result=inspect(CloudCore(GitHubStore(os.getenv("EDITORIAL_PRIVATE_TOKEN"))),configured_account())
+              # Public workflow log: aggregate amounts and status only, no operation identifiers.
+              print(json.dumps({"entries":result["entries"],"settledRub":result["settledRub"],"pendingCount":len(result["pending"]),"pendingReservedRub":[r["reservedRub"] for r in result["pending"]],"productionRecovery":result["productionRecovery"],"confirmedRub":result.get("confirmedRub"),"executionEnabled":result["executionEnabled"],"publicationAuthorized":False}))
+          except CoreBlocked as exc:
+              print("AUDIT_BLOCKED_"+str(exc))
+              raise SystemExit(2)
+          PY
