@@ -94,7 +94,7 @@ export async function accountView(storage,d,now=Date.now(),executionEnabled=fals
 }
 export async function bridgeRequest(request,env){
  const path=new URL(request.url).pathname;
- if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control","/internal/zen-core/queue","/internal/zen-core/account","/internal/zen-core/probe"].includes(path))return null;
+ if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control","/internal/zen-core/queue","/internal/zen-core/account","/internal/zen-core/probe","/internal/zen-core/executor-settings"].includes(path))return null;
  const receipt=path.endsWith("/receipt"),route=path.split("/").pop();
  const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"};
  if(request.method!=="POST")return Response.json({error:"method_not_allowed"},{status:405,headers});
@@ -104,5 +104,5 @@ export async function bridgeRequest(request,env){
  const namespace=route==="probe"?"zen-core-probe-v1:"+d.run:"zen-core-scheduler-v1";
  const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName(namespace));
  if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
- try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt||route==="account"||route==="probe"?d:route==="queue"?{cursor:d?.cursor??null}:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
+ try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt||route==="account"||route==="probe"||route==="executor-settings"?d:route==="queue"?{cursor:d?.cursor??null}:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
 }
