@@ -16,6 +16,10 @@ on:
         description: Active Worker version verified by preflight
         type: string
         required: false
+      rolled_back_version:
+        description: Verified inactive version from the immediately preceding rollback
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -26,7 +30,8 @@ jobs:
     if: >-
       github.repository == 'kaokshi/kaokshi.github.io' &&
       (github.ref == 'refs/heads/main' ||
-       (github.ref == 'refs/heads/development/zen-analytics-foundation-20261126' && inputs.mode != 'deploy'))
+       ((github.ref == 'refs/heads/development/zen-analytics-foundation-20261126' ||
+         github.ref == 'refs/heads/development/zen-studio-deploy-retry-20261126') && inputs.mode != 'deploy'))
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -47,4 +52,5 @@ jobs:
           TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
           ZEN_STUDIO_DEPLOY_MODE: ${{ inputs.mode || 'preflight' }}
           ZEN_STUDIO_EXPECTED_VERSION: ${{ inputs.expected_version }}
+          ZEN_STUDIO_ROLLED_BACK_VERSION: ${{ inputs.rolled_back_version }}
         run: node telegram-control/deploy-studio.mjs
