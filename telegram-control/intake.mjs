@@ -3,6 +3,7 @@ import {validateJob} from "./production.mjs";
 import {opsState} from "./ops.mjs";
 import {pendingStage} from "./stage-intent.mjs";
 import {claimProduction,closeProduction,accountStatus} from "./account.mjs";
+import {settingsForPinIn} from "./settings-sync.mjs";
 const encoder=new TextEncoder();
 async function matches(secret,header){
  if(typeof secret!=="string"||! /^[a-fA-F0-9]{64}$/.test(secret)||typeof header!=="string"||!/^Bearer [a-fA-F0-9]{64}$/.test(header))return false;
@@ -51,7 +52,12 @@ export async function intakeView(storage,id){
   if((await tx.get("ops:state"))?.stopped===true)return {status:409,body:{error:"emergency_paused"}};
   const ops=await opsState(tx);
   const job=await tx.get("production:job:"+id),intent=deliverable(job,ops,await tx.get("core:settings"));
-  return intent?{status:200,body:{schema:"zen-core/intake-v1",mode:"intents_only",intent,...(pendingStage(job,ops)?{stageIntent:pendingStage(job,ops)}:{}),...(transitionFor(ops)?{modeTransition:transitionFor(ops)}:{}),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
+  // Opt-in versioned settings transport; legacy orders keep their existing contract.
+  let settingsEnvelope={};
+  if(intent&&job.settingsPin){
+   try{settingsEnvelope={editorialSettings:await settingsForPinIn(tx,job.settingsPin)};}catch{return {status:409,body:{error:"order_settings_history_mismatch"}};}
+  }
+  return intent?{status:200,body:{...settingsEnvelope,schema:"zen-core/intake-v1",mode:"intents_only",intent,...(pendingStage(job,ops)?{stageIntent:pendingStage(job,ops)}:{}),...(transitionFor(ops)?{modeTransition:transitionFor(ops)}:{}),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
  });
 }
 // Fresh control observation, not an execution permit.
