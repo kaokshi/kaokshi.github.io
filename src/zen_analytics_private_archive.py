@@ -118,11 +118,11 @@ def verify_seed_and_archive_latest(req,seed_path):
         status, entries=req("/contents/zen-analytics/studio/owner-seeds?ref="+branch)
         if status!=200 or not isinstance(entries,list):
             raise ValueError("seed_listing_failed")
-        candidates=[e.get("path","") for e in entries if e.get("type")=="file" and re.fullmatch(r"zen-analytics/studio/owner-seeds/[0-9a-f]{64}\\.json",e.get("path",""))]
+        candidates=[e.get("path","") for e in entries if e.get("type")=="file" and re.fullmatch(r"zen-analytics/studio/owner-seeds/[0-9a-f]{64}\.json",e.get("path",""))]
         if len(candidates)!=1:
             raise ValueError("seed_selection_ambiguous")
         seed_path=candidates[0]
-    if not re.fullmatch(r"zen-analytics/studio/owner-seeds/[0-9a-f]{64}\\.json",seed_path):
+    if not re.fullmatch(r"zen-analytics/studio/owner-seeds/[0-9a-f]{64}\.json",seed_path):
         raise ValueError("invalid_seed_path")
     branch=private_branch(req)
     raw,_=fetch_content(req,seed_path,branch)

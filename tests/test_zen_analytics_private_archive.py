@@ -53,3 +53,21 @@ class ArchiveTest(unittest.TestCase):
         f.files[path]=b"bad"
         with self.assertRaises(ValueError): archive(f,report(),update_latest=True)
         self.assertNotIn(LATEST,f.files)
+
+    def test_seed_discovery(self):
+        from src.zen_analytics_private_archive import verify_seed_and_archive_latest
+        from test_zen_studio_seed import seed, envelope
+        raw=envelope(seed())
+        digest=json.loads(raw)["sha256"]
+        path="zen-analytics/studio/owner-seeds/"+digest+".json"
+        class Listing(Fake):
+            def __call__(self,p,body=None):
+                if p=="/contents/zen-analytics/studio/owner-seeds?ref=main":
+                    return 200,[{"type":"file","path":path}]
+                return super().__call__(p,body)
+        f=Listing()
+        f.files[path]=raw
+        f.files[LATEST]=report()
+        self.assertEqual(verify_seed_and_archive_latest(f,"discover"),
+            {"seed_channels":3,"metrika_archive_created":True})
+        self.assertFalse(verify_seed_and_archive_latest(f,path)["metrika_archive_created"])

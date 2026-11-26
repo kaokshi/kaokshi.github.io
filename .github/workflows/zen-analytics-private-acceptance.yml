@@ -1,4 +1,4 @@
-name: ZEN Analytics private acceptance
+name: ZEN Analytics private acceptance v2
 on:
   push:
     branches: [development/zen-analytics-foundation-20261126]
