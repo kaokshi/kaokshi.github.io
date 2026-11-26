@@ -1,7 +1,7 @@
 name: ZEN Studio Worker deployment
 on:
   push:
-    branches: [development/zen-analytics-foundation-20261126, development/zen-studio-deploy-retry-20261126]
+    branches: [development/zen-analytics-foundation-20261126]
     paths:
       - '.github/workflows/zen-studio-deploy.yml'
       - 'telegram-control/deploy-studio*'
