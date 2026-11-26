@@ -38,28 +38,10 @@ async function admit(count){
   console.log('BROWSER_SESSION_USAGE_MS='+used);
   if(used+allowance*count>daily||now+allowance*count>=day.getTime()+86400000)throw Error('BUDGET_STOP');
 }
+const {confirmClose}=require('./zen_browser_close.cjs');
 async function closeSession(sid){
-  // Explicit DELETE, then independently verify closure reason using session history.
-  let requested=false;
-  for(let i=0;i<3;i++){
-    try{
-      const result=await call(root+'/'+sid,'DELETE');
-      const state=(result.result||result).status;
-      if(!['closed','closing'].includes(state))throw Error('UNKNOWN_CLOSE_STATE');
-      requested=true;break;
-    }catch(e){if(i===2)throw e;await pause(300);}
-  }
-  if(!requested)throw Error('CLOSE_NOT_REQUESTED');
-  for(let i=0;i<5;i++){
-    const row=(await history()).find(r=>r.sessionId===sid);
-    if(row&&Number.isFinite(row.endTime)&&row.endTime>=row.startTime){
-      if(row.closeReason!==1&&row.closeReasonText!=='NormalClosure')throw Error('NOT_NORMAL_CLOSURE');
-      console.log('EXPLICIT_CLOSE_CONFIRMED');
-      return;
-    }
-    await pause(600);
-  }
-  throw Error('CLOSE_UNCONFIRMED');
+  await confirmClose({sid,root,call,pause});
+  console.log('EXPLICIT_CLOSE_CONFIRMED');
 }
 async function session(state,first){
   let sid,browser,watchdog,emergency=false,closing;
