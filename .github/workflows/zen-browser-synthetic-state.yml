@@ -1,4 +1,4 @@
-name: ZEN Browser close verification offline
+name: ZEN Browser synthetic state persistence retry
 on:
   push:
     branches: [development/zen-analytics-foundation-20261126]
@@ -24,3 +24,12 @@ jobs:
         run: |
           node --check scripts/zen_browser_synthetic_state.cjs
           node --test scripts/zen_browser_close.test.cjs
+      - name: Install CDP client
+        working-directory: ${{ runner.temp }}
+        run: npm install --no-audit --no-fund --ignore-scripts --save-exact playwright-core@1.56.1
+      - name: Verify synthetic state across explicitly closed sessions
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_BROWSER_TOKEN }}
+          NODE_PATH: ${{ runner.temp }}/node_modules
+        run: node scripts/zen_browser_synthetic_state.cjs
