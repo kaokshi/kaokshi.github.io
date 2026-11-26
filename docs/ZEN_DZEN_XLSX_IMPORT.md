@@ -1,0 +1,2 @@
+# Dzen Studio XLSX import
+Observed three owner-provided reports privately. Two sheets (Статистика, Дзен), event-time window, publication rows and explicit totals. Do not sum sheets or overlapping windows. Preserve discrepancy between totals and row sums. Channel title and internal IDs validated; production requires independent expected channel binding. CTR and revenue unavailable. Synthetic fixtures only in public repository. No raw owner data, IDs, article titles or values committed. Offline parser only; private durable storage and scheduled acquisition remain to implement.
