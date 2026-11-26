@@ -66,6 +66,17 @@ export function relevantSettings(settings) {
  });
 }
 
+export async function verifyPrivateEndpoints(probe, {attempts = 8, pause = () => new Promise(r => setTimeout(r, 2500))} = {}) {
+ const endpoints = ["status", "refresh", "bridge"];
+ for (let attempt = 0; attempt < attempts; attempt++) {
+  const statuses = await Promise.all(endpoints.map(probe));
+  if (statuses.every(status => status === 401)) return;
+  if (attempt + 1 === attempts || statuses.some(status => ![401, 404, 429, 502, 503, 504].includes(status)))
+   throw Error("studio_auth_http_" + statuses.join("_"));
+  await pause();
+ }
+}
+
 function telegramInit(owner, token) {
  verify(/^[1-9]\d{0,15}$/.test(owner || "") && Number.isSafeInteger(Number(owner)) &&
   /^\d+:[A-Za-z0-9_-]+$/.test(token || ""), "owner_probe_config_missing");
@@ -103,50 +114,68 @@ export async function main(env, fetcher = fetch) {
   verify(!deploy || uuid(env.ZEN_STUDIO_EXPECTED_VERSION), "expected_version_required");
   stage = "read_current_deployment";
   const current = activeDeployment(await cf(deploymentPath));
-  verify(latestVersion(await cf(versionsPath)) === current.version, "active_version_is_not_latest");
+  const latest = latestVersion(await cf(versionsPath));
+  console.log("STUDIO_ACTIVE_VERSION=" + current.version);
+  console.log("STUDIO_LATEST_VERSION=" + latest);
   verify(!deploy || current.version === env.ZEN_STUDIO_EXPECTED_VERSION, "active_version_changed");
   const configs = relevantSettings(await cf(script + "/settings"));
   const sub = await cf("/subdomain");
   verify(/^[a-z0-9][a-z0-9-]{0,62}$/.test(sub?.subdomain || ""), "worker_subdomain_unverified");
   const endpoint = "https://" + SCRIPT + "." + sub.subdomain + ".workers.dev";
-  const readApp = (path, initData) => request(endpoint + path, {method: "POST",
+  let probeVersion = current.version;
+  const readApp = (path, initData) => request(endpoint + path + "?studio_probe=" + probeVersion, {method: "POST",
    headers: {"Content-Type": "application/json"}, body: JSON.stringify({initData})});
   const owner = telegramInit(env.TELEGRAM_OWNER_ID, env.TELEGRAM_BOT_TOKEN);
   const release = body => body?.product === "ZEN CONTROL" && body.publicationAuthorized === false && body.rssEnabled === false;
   stage = "verify_existing_release";
   const beforeRelease = await readBridgeProbe(() => readApp("/api/release", owner), release);
   stage = "compare_live_modules";
-  const live = await readModules(await cloud(script + "/content/v2"));
+  const content = await cloud(script + "/content/v2");
+  const live = await readModules(content);
   const base = new Map(CHANGED.map(name => [name, execFileSync("git", ["show", BASE + ":telegram-control/" + name], {encoding: "utf8"})]));
   const candidate = new Map(await Promise.all([...CHANGED, ...ADDED].map(async name =>
    [name, await readFile(new URL("./" + name, import.meta.url), "utf8")])));
+  if (latest !== current.version) {
+   const [activeMeta, inactiveMeta] = await Promise.all([current.version, latest].map(version => cf(script + "/versions/" + version)));
+   const etag = content.headers.get("etag")?.replace(/^\"|\"$/g, "");
+   const activeTag = activeMeta.resources?.script?.etag;
+   const inactiveTag = inactiveMeta.resources?.script?.etag;
+   console.log("STUDIO_CONTENT_MATCHES_ACTIVE=" + Boolean(etag && etag === activeTag));
+   console.log("STUDIO_CONTENT_MATCHES_LATEST=" + Boolean(etag && etag === inactiveTag));
+   console.log("STUDIO_CONTENT_HAS_STUDIO=" + ADDED.every(name => live.has(name)));
+   console.log("STUDIO_INACTIVE_IMMEDIATE=" + (inactiveMeta.number === activeMeta.number + 1));
+   verify(env.ZEN_STUDIO_ROLLED_BACK_VERSION === latest && inactiveMeta.number === activeMeta.number + 1 &&
+    !!etag && etag === activeTag && etag !== inactiveTag, "active_worker_content_version_unverified");
+  }
   const upload = await studioUpload(live, base, candidate);
   console.log("STUDIO_BASE_VERIFIED=" + current.version);
   if (!deploy) return;
   stage = "upload_studio_modules";
   const before = activeDeployment(await cf(deploymentPath));
   verify(before.version === current.version && before.id === current.id &&
-   latestVersion(await cf(versionsPath)) === current.version &&
+   latestVersion(await cf(versionsPath)) === latest &&
    configs === relevantSettings(await cf(script + "/settings")), "deployment_changed_after_preflight");
   await cf(script + "/content", {method: "PUT", body: upload,
    headers: {"CF-WORKER-MAIN-MODULE-PART": MAIN}});
   const updated = activeDeployment(await cf(deploymentPath));
   verify(updated.id !== current.id && updated.version !== current.version, "studio_deployment_unverified");
   rollback = {current, updated};
+  probeVersion = updated.version;
   stage = "verify_studio_deployment";
   await verifyDeployedAssets(path => request(endpoint + path + "?deploy=" + updated.version, {cache: "no-store"}),
    {"/app": HTML, "/app.css": CSS, "/app.js": JS});
   verify(configs === relevantSettings(await cf(script + "/settings")), "worker_settings_changed");
   const afterRelease = await readBridgeProbe(() => readApp("/api/release", owner), release);
   verify(JSON.stringify(beforeRelease) === JSON.stringify(afterRelease), "existing_release_changed");
-  for (const path of ["/api/analytics", "/api/analytics/refresh"])
-   verify((await readApp(path, "invalid")).status === 401, "studio_owner_gate_failed");
+  await verifyPrivateEndpoints(async name => {
+   if (name === "bridge") return (await request(endpoint + "/internal/zen-studio/claim?studio_probe=" + updated.version,
+    {method: "POST", body: "{}"})).status;
+   return (await readApp(name === "status" ? "/api/analytics" : "/api/analytics/refresh", "invalid")).status;
+  });
   const studio = await readBridgeProbe(() => readApp("/api/analytics", owner), value =>
    ["missing", "ready", "expired", "challenge", "invalid"].includes(value?.authorization) &&
    value.manualAvailable === false && value.quota?.limitMs === 480000 &&
    value.channels?.map(row => row.channel).join(",") === "science,legends,cinema");
-  const privateRoute = await request(endpoint + "/internal/zen-studio/claim", {method: "POST", body: "{}"});
-  verify(privateRoute.status === 401, "studio_bridge_gate_failed");
   rollback = undefined;
   console.log("STUDIO_DEPLOYED=" + updated.version);
   console.log("STUDIO_EXISTING_SETTINGS_VERIFIED");

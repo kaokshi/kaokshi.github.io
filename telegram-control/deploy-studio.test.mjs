@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {readModules, relevantSettings, studioUpload} from "./deploy-studio.mjs";
+import {readModules, relevantSettings, studioUpload, verifyPrivateEndpoints} from "./deploy-studio.mjs";
 
 const shared = ["entry.mjs", "worker.mjs", "miniapp.mjs", "ui.mjs"];
 const add = ["studio-analytics.mjs", "studio-auth.mjs"];
@@ -34,4 +34,13 @@ test("settings verification tracks the executor and namespace including all bind
  assert.equal(relevantSettings({bindings}), relevantSettings({bindings: [...bindings].reverse()}));
  assert.notEqual(relevantSettings({bindings}), relevantSettings({bindings: [bindings[0], {...bindings[1], text: "false"}]}));
  assert.throws(() => relevantSettings({bindings: []}), /worker_namespace_unverified/);
+});
+
+test("security probes wait for edge convergence and reject unexpected successful access", async () => {
+ let retry = 0;
+ await verifyPrivateEndpoints(async name => name === "refresh" && !retry ? 404 : 401,
+  {pause: async () => { retry++; }});
+ assert.equal(retry, 1);
+ await assert.rejects(verifyPrivateEndpoints(async name => name === "status" ? 200 : 401),
+  /studio_auth_http_200_401_401/);
 });
