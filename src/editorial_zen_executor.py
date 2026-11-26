@@ -81,21 +81,53 @@ class MeteredRouter(Spend):
             raise CoreBlocked("routerai_api_key_missing")
         self.session, self.token, self.transport, self.balance = session, token, transport, balance
         self.report = {"calls": []}
+        self.models = dict(MODELS)
+        spec = getattr(session, "plan", {}).get("editorialSettings")
+        if spec is not None:
+            from .editorial_zen_core import validate_editorial_settings
+            from .editorial_routerai import WRITE_MODELS
+            selected = validate_editorial_settings(spec)["models"]["value"]
+            # The shared pipeline currently uses one brain for planning and visual review.
+            # Do not silently ignore a distinct visual model or bypass the transport allowlist.
+            if selected["visual_plan"] != selected["plan"] or selected["images"] != MODELS["image"]:
+                raise CoreBlocked("unsupported_pinned_model_route")
+            self.models.update(brain=selected["plan"], draft=selected["draft"], edit=selected["edit"])
+            if any(self.models[r] not in WRITE_MODELS["/chat/completions"] for r in ("brain", "draft", "edit")):
+                raise CoreBlocked("routerai_model_not_allowlisted")
         catalog = transport("/models", token, limit=8_000_000, exact_numbers=True).get("data", [])
-        self.prices = {row["id"]: row for row in catalog if row.get("id") in MODELS.values()}
-        required = set(MODELS.values()) if use_seedream else set(MODELS.values()) - {MODELS["image"]}
+        required = set(self.models.values()) if use_seedream else set(self.models.values()) - {self.models["image"]}
+        self.prices = {}
+        for row in catalog:
+            if row.get("id") in required:
+                if row["id"] in self.prices:
+                    raise CoreBlocked("duplicate_model_in_catalog")
+                self.prices[row["id"]] = row
         if not required <= self.prices.keys():
             raise CoreBlocked("required_model_missing_in_catalog")
         self.image_price = self.price("image", "image_output", "image") if use_seedream else 0
         if use_seedream and self.image_price <= 0:
             raise CoreBlocked("seedream_price_unverified")
 
+    def price(self, role, name, unit):
+        row = self.prices[self.models[role]]
+        if row.get("pricing_units", {}).get(name) != unit:
+            raise CoreBlocked("routerai_pricing_unit_unverified")
+        return money(row.get("pricing", {}).get(name))
+
+    def text_bound(self, role, input_tokens, output_tokens):
+        row = self.prices[self.models[role]]
+        prompt = self.price(role, "prompt", "token")
+        for field in ("input_cache_write", "input_cache_write_1h"):
+            if field in row["pricing"]:
+                prompt = max(prompt, self.price(role, field, "token"))
+        return input_tokens * prompt + output_tokens * self.price(role, "completion", "token")
+
     def request(self, channel, stage, role, path, payload, bound, *, reserve=0, retain_image=None):
         if role == "image" and not self.image_price:
             raise CoreBlocked("paid_image_generation_disabled")
         phase, reason, slot = classify(stage, role)
         operation = self.session.article + "/" + stage
-        body = {"model": MODELS[role], **payload}
+        body = {**payload, "model": self.models[role]}
         fingerprint = digest(json_bytes({"path": path, "body": body}))
         name = f"requests/{stage}.json"
         response = self.session.read(name)
@@ -151,7 +183,7 @@ class MeteredRouter(Spend):
         self.session.core.access(lambda core: core.settle(operation, actual), change=True)
         # A saved response can be settled and closed again without another provider call.
         self.session.account_call("close", operation, "settled")
-        self.report["calls"].append({"operation": operation, "model": MODELS[role],
+        self.report["calls"].append({"operation": operation, "model": self.models[role],
                                      "cost_rub": str(actual), "replayed": response is not None})
         return answer
 
