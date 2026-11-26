@@ -1,0 +1,50 @@
+name: ZEN Studio Worker deployment
+on:
+  push:
+    branches: [development/zen-analytics-foundation-20261126]
+    paths:
+      - '.github/workflows/zen-studio-deploy.yml'
+      - 'telegram-control/deploy-studio*'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Verify or deploy only the Studio modules
+        type: choice
+        options: [preflight, deploy]
+        default: preflight
+      expected_version:
+        description: Active Worker version verified by preflight
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: telegram-control-deploy
+  cancel-in-progress: false
+jobs:
+  studio:
+    if: >-
+      github.repository == 'kaokshi/kaokshi.github.io' &&
+      (github.ref == 'refs/heads/main' ||
+       (github.ref == 'refs/heads/development/zen-analytics-foundation-20261126' && inputs.mode != 'deploy'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify restricted deployment contract
+        run: node --test telegram-control/deploy-studio.test.mjs
+      - name: Verify or update Worker code only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+          ZEN_STUDIO_DEPLOY_MODE: ${{ inputs.mode || 'preflight' }}
+          ZEN_STUDIO_EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: node telegram-control/deploy-studio.mjs
