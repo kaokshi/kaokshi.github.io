@@ -32,10 +32,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Validate closure contract without browser allocation
+      - name: Validate budget, closure and state without browser allocation
         run: |
           node --check scripts/zen_browser_synthetic_state.cjs
-          node --test scripts/zen_browser_close.test.cjs scripts/zen_browser_synthetic_state.test.cjs
+          node --check scripts/zen_browser_usage_readonly.cjs
+          node --test scripts/zen_browser_close.test.cjs scripts/zen_browser_synthetic_state.test.cjs scripts/zen_browser_usage_readonly.test.cjs
       - name: Install CDP client
         if: inputs.usage_only != true
         working-directory: ${{ runner.temp }}
