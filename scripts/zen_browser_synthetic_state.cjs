@@ -45,36 +45,52 @@ async function closeSession(sid){
 }
 async function session(state,first){
   let sid,browser,watchdog,emergency=false,closing;
+  let stage='ACQUIRE';
+  const mark=value=>{stage=value;console.log('SYNTHETIC_STAGE_'+(first?'SAVE_':'RESTORE_')+value);};
   const close=()=>closing||(closing=closeSession(sid));
   try{
+    mark('ACQUIRE');
     const data=await call(root+'?keep_alive=10000','POST',15000);
     const result=data.result||data;
     if(!/^[a-f0-9-]{36}$/i.test(result.sessionId||''))throw Error('SESSION_ID_MISSING');
     sid=result.sessionId;
     watchdog=setTimeout(()=>{emergency=true;close().catch(()=>{});},60000);
     watchdog.unref();
+    mark('CONNECT');
     browser=await chromium.connectOverCDP(root.replace('https:','wss:')+'/'+sid,{headers,timeout:15000});
+    mark('CONTEXT');
     const ctx=await browser.newContext(first?{}:{storageState:state});
+    mark('PAGE');
     const page=await ctx.newPage();
     await page.route('**/*',r=>r.request().url()===origin+'/'?r.fulfill({status:200,contentType:'text/html',body:'<!doctype html><title>Synthetic test</title>'}):r.abort());
+    mark('NAVIGATE');
     await page.goto(origin+'/',{waitUntil:'domcontentloaded',timeout:5000});
     if(first){
+      mark('COOKIE_WRITE');
       await ctx.addCookies([{name:'synthetic_state',value:'test-only',url:origin}]);
+      mark('LOCAL_WRITE');
       await page.evaluate(()=>localStorage.setItem('synthetic_state','test-only'));
-      const saved=await ctx.storageState();
+      mark('CAPTURE');
+      const saved=await ctx.storageState({indexedDB:true});
       // Reject unexpected state before keeping it in memory.
       if(saved.cookies.length!==1||saved.cookies[0].name!=='synthetic_state'||saved.cookies[0].domain!=='example.invalid'||saved.origins.length!==1||saved.origins[0].origin!==origin)throw Error('UNEXPECTED_STATE');
       if(emergency)throw Error('WATCHDOG');
       return saved;
     }
+    mark('VERIFY');
     const cookies=await ctx.cookies(origin);
     const local=await page.evaluate(()=>localStorage.getItem('synthetic_state'));
     if(!cookies.some(c=>c.name==='synthetic_state'&&c.value==='test-only')||local!=='test-only'||emergency)throw Error('RESTORE_FAILED');
     console.log('SYNTHETIC_COOKIE_AND_LOCAL_STORAGE_RESTORED');
+  }catch(e){
+    console.error('SYNTHETIC_OPERATION_FAILED_'+stage+'_'+(/^[A-Z0-9_]+$/.test(e.message)?e.message:'UNEXPECTED'));
+    throw e;
   }finally{
     if(watchdog)clearTimeout(watchdog);
-    if(sid)await close();
-    if(browser)await browser.close().catch(()=>{});
+    try { if(sid){mark('CLOSE');await close();} } catch(e) {
+      console.error('SYNTHETIC_CLOSE_FAILED_'+(/^[A-Z0-9_]+$/.test(e.message)?e.message:'UNEXPECTED'));
+      throw e;
+    } finally { if(browser)await browser.close().catch(()=>{}); }
     if(emergency)throw Error('WATCHDOG');
   }
 }
