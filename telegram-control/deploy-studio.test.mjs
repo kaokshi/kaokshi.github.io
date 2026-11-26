@@ -44,3 +44,13 @@ test("security probes wait for edge convergence and reject unexpected successful
  await assert.rejects(verifyPrivateEndpoints(async name => name === "status" ? 200 : 401),
   /studio_auth_http_200_401_401/);
 });
+
+test("recovery requires the exact rolled-back candidate and copies other modules unchanged", async () => {
+ const candidate = new Map([...shared, ...add].map(name => [name, "expected " + name]));
+ const live = new Map([...candidate].map(([name, value]) => [name, new Blob([value])]));
+ live.set("production.mjs", new Blob(["original executor"]));
+ const upload = await studioUpload(live, new Map(), candidate, true);
+ assert.equal(await upload.get("production.mjs").text(), "original executor");
+ live.set("studio-auth.mjs", new Blob(["drift"]));
+ await assert.rejects(studioUpload(live, new Map(), candidate, true), /worker_base_mismatch_studio_auth/);
+});

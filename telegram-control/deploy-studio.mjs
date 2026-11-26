@@ -29,16 +29,17 @@ export async function readModules(response) {
  return modules;
 }
 
-export async function studioUpload(live, base, candidate) {
+export async function studioUpload(live, base, candidate, recovery = false) {
  const upload = new FormData();
  upload.set("metadata", JSON.stringify({main_module: MAIN}));
  for (const [name, body] of live) {
-  verify(!ADDED.includes(name), "studio_modules_already_present");
+  verify(recovery || !ADDED.includes(name), "studio_modules_already_present");
   upload.set(name, body, name);
  }
- for (const name of CHANGED) {
+ for (const name of recovery ? [...CHANGED, ...ADDED] : CHANGED) {
   const deployed = live.get(name);
-  verify(deployed && (await deployed.text()) === base.get(name), "worker_base_mismatch_" + name.replace(".mjs", ""));
+  verify(deployed && (await deployed.text()) === (recovery ? candidate : base).get(name),
+   "worker_base_mismatch_" + name.replace(".mjs", "").replaceAll("-", "_"));
  }
  for (const name of [...CHANGED, ...ADDED]) {
   const source = candidate.get(name);
@@ -135,6 +136,7 @@ export async function main(env, fetcher = fetch) {
   const base = new Map(CHANGED.map(name => [name, execFileSync("git", ["show", BASE + ":telegram-control/" + name], {encoding: "utf8"})]));
   const candidate = new Map(await Promise.all([...CHANGED, ...ADDED].map(async name =>
    [name, await readFile(new URL("./" + name, import.meta.url), "utf8")])));
+  let recovery = false;
   if (latest !== current.version) {
    const [activeMeta, inactiveMeta] = await Promise.all([current.version, latest].map(version => cf(script + "/versions/" + version)));
    const etag = content.headers.get("etag")?.replace(/^\"|\"$/g, "");
@@ -144,10 +146,15 @@ export async function main(env, fetcher = fetch) {
    console.log("STUDIO_CONTENT_MATCHES_LATEST=" + Boolean(etag && etag === inactiveTag));
    console.log("STUDIO_CONTENT_HAS_STUDIO=" + ADDED.every(name => live.has(name)));
    console.log("STUDIO_INACTIVE_IMMEDIATE=" + (inactiveMeta.number === activeMeta.number + 1));
-   verify(env.ZEN_STUDIO_ROLLED_BACK_VERSION === latest && inactiveMeta.number === activeMeta.number + 1 &&
-    !!etag && etag === activeTag && etag !== inactiveTag, "active_worker_content_version_unverified");
+   // The prior code-only upload copied every non-Studio part from the active
+   // Worker. Accept it again only by exact ETag and module byte comparison.
+   verify(uuid(env.ZEN_STUDIO_EXPECTED_VERSION) && current.version === env.ZEN_STUDIO_EXPECTED_VERSION &&
+    uuid(env.ZEN_STUDIO_ROLLED_BACK_VERSION) && env.ZEN_STUDIO_ROLLED_BACK_VERSION === latest &&
+    inactiveMeta.number === activeMeta.number + 1 && !!etag && etag === inactiveTag && etag !== activeTag,
+   "active_worker_content_version_unverified");
+   recovery = true;
   }
-  const upload = await studioUpload(live, base, candidate);
+  const upload = await studioUpload(live, base, candidate, recovery);
   console.log("STUDIO_BASE_VERIFIED=" + current.version);
   if (!deploy) return;
   stage = "upload_studio_modules";
