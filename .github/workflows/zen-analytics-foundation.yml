@@ -1,0 +1,17 @@
+name: ZEN Analytics foundation offline tests
+on:
+  push:
+    branches: [development/zen-analytics-foundation-20261126]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p 'test_zen_*.py' -v

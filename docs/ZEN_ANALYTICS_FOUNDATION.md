@@ -1,0 +1,4 @@
+# ZEN ANALYTICS — first offline foundation
+Based on Opus report artifact 15104424939, run 45797225172.
+Phase 1: source-separated immutable snapshots, per-channel namespace, exact replay deduplication, timestamps, no promotion of unverified Metrika proxy.
+This is an offline adapter, not yet connected to hourly private storage. It does not sum overlapping windows or calculate native metrics. Actual Studio XLSX was not available in current files; no column mapping invented. Next: inspect genuine XLSX, confirm channel binding and report windows, build importer, durable private storage adapter with atomic writes and concurrency tests, then integrate scheduled sync and Telegram. No browser session, no provider calls, no production or financial changes. Browser export remains unverified. Tests use synthetic data only.
