@@ -11,7 +11,7 @@ from urllib.error import HTTPError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from document_delivery import deliver_documents
 from intake_client import build_receipt, drain, push_receipt
-from settings_client import synchronize
+from settings_client import synchronize, publish_catalogue
 from intake_runner import CHECKPOINT, CURSOR, validate_checkpoint
 from src.editorial_memory import digest
 from src.editorial_zen_cloud import CloudCore, GitHubStore, STATE
@@ -169,6 +169,10 @@ def main():
         raise CoreBlocked("execution_gate_mismatch")
     # Enable only after the matching Worker and executor have passed integration review.
     if os.getenv("ZEN_CORE_SETTINGS_SYNC_ENABLED") == "true":
+        token = os.getenv("ROUTERAI_API_KEY")
+        if not token:
+            raise CoreBlocked("routerai_api_key_missing")
+        publish_catalogue(endpoint, secret, token)
         synchronize(core, endpoint, secret)
     intake = accept_cycle(core, endpoint, secret, production)
     pilot = os.getenv("ZEN_CORE_PILOT_JOB", "")
