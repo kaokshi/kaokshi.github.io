@@ -1,0 +1,39 @@
+name: Stage verified dual theme
+on:
+  push:
+    branches: [integration/dual-theme-20261126]
+    paths: ['.github/workflows/dual-theme-integrate.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  stage:
+    if: github.run_attempt == 1 && github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dual-theme-repaired
+          run-id: 45708707041
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/candidate
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore exact candidate and verify allowed files
+        run: |
+          git apply --check "$RUNNER_TEMP/candidate/tracked.patch" "$RUNNER_TEMP/candidate/new-files.patch"
+          git apply "$RUNNER_TEMP/candidate/tracked.patch" "$RUNNER_TEMP/candidate/new-files.patch"
+          git add -- telegram-control/ui.mjs telegram-control/ui_theme.test.mjs docs/OPUS_DUAL_THEME_REPORT.md
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 3
+          test -z "$(git diff --name-only)"
+          test -z "$(git ls-files --others --exclude-standard)"
+          node --check telegram-control/ui.mjs
+          node --test telegram-control/*.test.mjs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Stage independently tested dual theme UI and regression tests'
+          git push origin HEAD:refs/heads/integration/dual-theme-20261126
