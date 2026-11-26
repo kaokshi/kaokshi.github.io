@@ -1,4 +1,4 @@
-name: Opus ZEN CONTROL integration candidate
+name: Opus ZEN CONTROL executor settings synchronization
 on:
   push:
     branches: [development/opus-control-settings-20261126]
@@ -28,7 +28,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/previous"
-          gh run download 45838873612 --repo "$GITHUB_REPOSITORY" --name opus-control-settings --dir "$RUNNER_TEMP/previous"
+          gh run download 45841695910 --repo "$GITHUB_REPOSITORY" --name opus-control-settings --dir "$RUNNER_TEMP/previous"
           if test -s "$RUNNER_TEMP/previous/tracked.patch"; then git apply "$RUNNER_TEMP/previous/tracked.patch"; fi
           if test -s "$RUNNER_TEMP/previous/new-files.patch"; then git apply "$RUNNER_TEMP/previous/new-files.patch"; fi
       - name: Continue bounded development session
@@ -47,7 +47,7 @@ jobs:
           test -n "$ANTHROPIC_AUTH_TOKEN" || { echo "::error::developer_key_missing"; exit 1; }
           mkdir -p "$RUNNER_TEMP/opus-report"
           claude --version
-          claude -p "Read AGENTS.md and docs/OPUS_CONTROL_SETTINGS_TASK.md. Owner authorized integration after successful tests. Work from the restored verified candidate, do not rebuild completed features. Inspect compatibility with existing project and identify conflicts with current main, complete missing wiring and tests, preserve existing design, owner authorization, financial holds, effective settings propagation, rollback and disabled publication/RSS. Prepare a narrow integration-ready patch and report exact remaining blockers and deployment steps. Do not deploy or merge from this read-only development job. Independent regression follows." --model anthropic/claude-opus-5.5 --effort low --max-turns 25 --max-budget-usd 2 --allowedTools "Read,Glob,Grep,Edit,Write" --disallowedTools "Bash,WebFetch,WebSearch,Task,Agent" --output-format json > "$RUNNER_TEMP/opus-report/session.json"
+          claude -p "Read AGENTS.md and docs/OPUS_CONTROL_SETTINGS_TASK.md. Owner narrowed this session to connecting the existing validated settings to the actual executor agent. Restore the verified candidate; implement end-to-end versioned effective settings synchronization, owner authorization, executor acknowledgment, fail-closed mismatch behavior, existing order pinning, financial holds, rollback and offline integration tests. Preserve current UI design, defaults and publication/RSS guards. Do not work on price feeds, Opus spend monitoring or Opus launch limits; those are separate tasks. No live paid production calls, deployment or merge. Record exact changes and unresolved blockers. Independent regression follows." --model anthropic/claude-opus-5.5 --effort low --max-turns 25 --max-budget-usd 2 --allowedTools "Read,Glob,Grep,Edit,Write" --disallowedTools "Bash,WebFetch,WebSearch,Task,Agent" --output-format json > "$RUNNER_TEMP/opus-report/session.json"
       - name: Preserve changes even on failure
         if: always()
         run: |
