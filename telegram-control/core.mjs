@@ -4,7 +4,9 @@ import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from 
 import {previewJob} from "./adapter.mjs";
 import {intakeView,controlView,queueView,accountView} from "./intake.mjs";
 import {recordReceipt} from "./receipt.mjs";
-import {requestedSettingsIn,acknowledgeSettingsIn,settingsSyncView} from "./settings-sync.mjs";
+import {requestedSettingsIn,acknowledgeSettingsIn} from "./settings-sync.mjs";
+import {defaultCatalogue} from "./model-settings.mjs";
+import {verifiedCatalogue} from "./model-prices.mjs";
 import {runProbe} from "./probe.mjs";
 import {requestStage} from "./stage-intent.mjs";
 import {notifyReceipt} from "./notifications.mjs";
@@ -119,6 +121,17 @@ export class CoreHandler {
   if(url.pathname==="/core/executor-settings"){
    const r=await this.storage.transaction(async tx=>{
     if(d.action==="read")return {status:200,body:{schema:"zen-core/settings-v1",settings:await requestedSettingsIn(tx),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
+    if(d.action==="catalogue"){
+     const snapshot=d.snapshot;
+     if(!snapshot||snapshot.source!=="routerai:/models"||!Number.isSafeInteger(snapshot.observedAt)||snapshot.observedAt>now||now-snapshot.observedAt>300000||!Array.isArray(snapshot.data)||snapshot.data.length>16)return {status:400,body:{error:"invalid_catalogue_snapshot"}};
+     const allowed=new Set(defaultCatalogue().map(m=>m.id));
+     if(snapshot.data.some(row=>!row||!allowed.has(row.id)))return {status:400,body:{error:"invalid_catalogue_model"}};
+     const old=await tx.get("models:verified-catalogue");
+     if(old&&old.observedAt>snapshot.observedAt)return {status:409,body:{error:"stale_catalogue_snapshot"}};
+     const checked=verifiedCatalogue(defaultCatalogue(),snapshot,now);
+     await tx.put("models:verified-catalogue",snapshot);
+     return {status:200,body:{ok:true,verified:checked.filter(m=>m.priceVerified).length}};
+    }
     if(d.action==="ack"){const a=await acknowledgeSettingsIn(tx,d.report,now);return {status:a.ok?200:409,body:a};}
     return {status:400,body:{error:"invalid_settings_action"}};
    });return Response.json(r.body,{status:r.status});
