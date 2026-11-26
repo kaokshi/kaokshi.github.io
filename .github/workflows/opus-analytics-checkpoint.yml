@@ -1,0 +1,56 @@
+name: Opus three-channel analytics checkpoint audit
+on:
+  push:
+    branches: [development/opus-analytics-20261126]
+    paths: ['.github/workflows/opus-analytics-checkpoint.yml']
+permissions:
+  contents: read
+concurrency:
+  group: opus-developer
+  cancel-in-progress: false
+jobs:
+  develop:
+    if: github.run_attempt == 1 && github.repository == 'kaokshi/kaokshi.github.io'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Claude Code
+        run: npm install --global @anthropic-ai/claude-code@2.1.316
+      - name: First bounded development session
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPUS_ROUTERAI_API_KEY }}
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_BASE_URL: https://routerai.ru/api
+          ANTHROPIC_DEFAULT_OPUS_MODEL: anthropic/claude-opus-5.5
+          ANTHROPIC_DEFAULT_SONNET_MODEL: anthropic/claude-opus-5.5
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: anthropic/claude-opus-5.5
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+          DISABLE_TELEMETRY: '1'
+          DISABLE_AUTOUPDATER: '1'
+          CLAUDE_CODE_EFFORT_LEVEL: medium
+        run: |
+          test -n "$ANTHROPIC_AUTH_TOKEN" || { echo "::error::developer_key_missing"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/opus-report"
+          claude --version
+          claude -p "Read docs/OPUS_ANALYTICS_TASK.md and AGENTS.md first. FIRST create docs/OPUS_ANALYTICS_AUDIT.md with section headings and known constraints before further reading. Then read src/zen_metrika_collector.py, tests/test_zen_metrika_collector.py, .github/workflows/zen-analytics-hourly.yml, representative browser diagnostics and Telegram integration. After every 3-4 reads immediately update the report with verified findings and exact file references. Prioritize comparison of native Dzen XLSX, Metrika, authorized browser export, local automation and external public metrics, separating real metrics from proxies. Cover three channels, history and dedup, cost and auth, existing gaps, recommended architecture, staged acceptance and unknowns. Do not exhaust turns exploring every workflow. Finish concise actionable report by turn 24. No implementation, provider calls, private data, browser sessions, workflow edits, publishing or RSS. Use Read Glob Grep Edit Write only. No external research tools available; mark external facts as needing independent verification." --model anthropic/claude-opus-5.5 --effort medium --max-turns 30 --max-budget-usd 2 --allowedTools "Read,Glob,Grep,Edit,Write" --disallowedTools "Bash,WebFetch,WebSearch,Task,Agent" --output-format json > "$RUNNER_TEMP/opus-report/session.json"
+      - name: Preserve changes even on failure
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/opus-report"
+          git diff --binary HEAD > "$RUNNER_TEMP/opus-report/tracked.patch"
+          git ls-files --others --exclude-standard -z | while IFS= read -r -d '' f; do
+            case "$f" in docs/OPUS_ANALYTICS_AUDIT.md) git diff --no-index --binary /dev/null "$f" >> "$RUNNER_TEMP/opus-report/new-files.patch" || test "$?" = 1 ;; esac
+          done
+          git status --short > "$RUNNER_TEMP/opus-report/status.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opus-analytics-checkpoint
+          path: ${{ runner.temp }}/opus-report/
+          retention-days: 7
