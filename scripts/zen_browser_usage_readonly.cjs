@@ -34,6 +34,10 @@ async function analytics(token) {
         browserRenderingBrowserTimeUsageAdaptiveGroups(limit: 1, filter: {date: $day}) {
           count
           sum { totalSessionDurationMs }
+          confidence(level: 0.95) {
+            count { estimate lower upper sampleSize }
+            sum { totalSessionDurationMs { estimate lower upper sampleSize } }
+          }
         }
       }
     }
@@ -59,6 +63,12 @@ async function analytics(token) {
   if (Number.isSafeInteger(usage?.count) && Number.isSafeInteger(usage?.sum?.totalSessionDurationMs)) {
     result.sessionCount = usage.count;
     result.reportedUsageMs = usage.sum.totalSessionDurationMs;
+    result.unsampled = usage.confidence?.count?.sampleSize === usage.count
+      && usage.confidence?.sum?.totalSessionDurationMs?.sampleSize === usage.count
+      && usage.confidence?.sum?.totalSessionDurationMs?.upper === result.reportedUsageMs
+      && usage.confidence?.sum?.totalSessionDurationMs?.lower === result.reportedUsageMs;
+    result.confidenceSampleSizes = [usage.confidence?.count?.sampleSize,
+      usage.confidence?.sum?.totalSessionDurationMs?.sampleSize].map(value => Number.isSafeInteger(value) ? value : null);
   }
   return result;
 }
