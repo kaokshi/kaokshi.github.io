@@ -33,6 +33,9 @@ def accept(core, envelope, expected_id, *, production=False):
             or transition["mode"] not in ("manual", "semi_autonomous", "autonomous")
             or type(transition["revision"]) is not int or not 0 < transition["revision"] <= 2**53-1):
         raise ValueError("invalid_mode_transition")
+    if "editorialSettings" in envelope:
+        from src.editorial_zen_core import validate_editorial_settings
+        intent = {**intent, "editorialSettings": validate_editorial_settings(envelope["editorialSettings"])}
     job_id = core.submit(intent)
     if transition is not None:
         core.apply_mode(job_id, transition["mode"], transition["revision"])
