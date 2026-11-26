@@ -2,6 +2,7 @@
 import {exportIntent} from "./intake.mjs";
 import {STAGES} from "./production.mjs";
 import {reportEvents} from "./notifications.mjs";
+import {checkReportAgainstPin} from "./settings-sync.mjs";
 const stages=STAGES.filter(s=>s.id!=="rss").map(s=>s.id);
 const statuses=new Set(["not_started","passed","failed","blocked"]);
 const money=v=>typeof v==="string"&&/^\d{1,9}(?:\.\d{1,28})?$/.test(v)&&Number.isFinite(Number(v));
@@ -54,6 +55,11 @@ export async function recordReceipt(storage,d,now=Date.now()){
   if(!job)return bad(404,"job_missing");
   const receipt=cleanReport(d,job,now);
   if(!receipt)return bad(409,"invalid_or_stale_receipt");
+  if(job.settingsPin){
+   const verified=await checkReportAgainstPin(tx,d.editorialSettingsReport,job.settingsPin,now);
+   if(!verified.ok)return bad(409,verified.error);
+   receipt.editorialSettingsReport={models:{revision:verified.acks.models.revision,hash:verified.acks.models.hash}};
+  }else if(d.editorialSettingsReport!==undefined)return bad(409,"unexpected_settings_report");
   const old=job.executorReceipt;
   const ops=await tx.get("ops:state");
   if(Number.isSafeInteger(ops?.modeRevision)&&ops.modeRevision>0&&(receipt.modeRevision!==ops.modeRevision||receipt.effectiveMode!==(ops.requestedMode==="assisted"?"semi_autonomous":ops.requestedMode)))return bad(409,"mode_sync_pending");
