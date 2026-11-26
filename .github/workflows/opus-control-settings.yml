@@ -1,4 +1,4 @@
-name: Opus ZEN CONTROL settings continuation and developer limits
+name: Opus ZEN CONTROL design polish and integration readiness
 on:
   push:
     branches: [development/opus-control-settings-20261126]
@@ -28,7 +28,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/previous"
-          gh run download 45826735944 --repo "$GITHUB_REPOSITORY" --name opus-control-settings --dir "$RUNNER_TEMP/previous"
+          gh run download 45834900543 --repo "$GITHUB_REPOSITORY" --name opus-control-settings --dir "$RUNNER_TEMP/previous"
           if test -s "$RUNNER_TEMP/previous/tracked.patch"; then git apply "$RUNNER_TEMP/previous/tracked.patch"; fi
           if test -s "$RUNNER_TEMP/previous/new-files.patch"; then git apply "$RUNNER_TEMP/previous/new-files.patch"; fi
       - name: Continue bounded development session
@@ -42,12 +42,12 @@ jobs:
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_TELEMETRY: '1'
           DISABLE_AUTOUPDATER: '1'
-          CLAUDE_CODE_EFFORT_LEVEL: medium
+          CLAUDE_CODE_EFFORT_LEVEL: low
         run: |
           test -n "$ANTHROPIC_AUTH_TOKEN" || { echo "::error::developer_key_missing"; exit 1; }
           mkdir -p "$RUNNER_TEMP/opus-report"
           claude --version
-          claude -p "Read AGENTS.md and docs/OPUS_CONTROL_SETTINGS_TASK.md. Continue from restored previous candidate; inspect and update its report, fix remaining regression first. Add the developer limits panel as specified in the updated task. Save checkpoint early. Inspect existing Mini App, owner authentication, budget policy, stage model registry, private executor and versioning. Implement owner-only model selection per production role and budget settings inside Telegram Mini App, with server validation, explicit confirmation, audit trail, effective versus requested settings and fail-closed executor synchronization. Prefer a narrow complete tested change, no hardcoded unverified prices or models. Preserve active order configuration and financial holds, no live paid calls or deployment, no publication or RSS changes. Add offline positive and negative tests and report remaining integration limitations. Only src, tests, telegram-control and report. Read Glob Grep Edit Write only. Independent tests follow." --model anthropic/claude-opus-5.5 --effort medium --max-turns 25 --max-budget-usd 2 --allowedTools "Read,Glob,Grep,Edit,Write" --disallowedTools "Bash,WebFetch,WebSearch,Task,Agent" --output-format json > "$RUNNER_TEMP/opus-report/session.json"
+          claude -p "Read AGENTS.md and docs/OPUS_CONTROL_SETTINGS_TASK.md. Continue from the successful restored candidate. Inspect and update its report, finish missing functions and match existing ZEN CONTROL design exactly using existing components, theme tokens and Russian labels. Check integration readiness and document blockers; do not deploy in this isolated phase. Save checkpoint early. Inspect existing Mini App, owner authentication, budget policy, stage model registry, private executor and versioning. Implement owner-only model selection per production role and budget settings inside Telegram Mini App, with server validation, explicit confirmation, audit trail, effective versus requested settings and fail-closed executor synchronization. Prefer a narrow complete tested change, no hardcoded unverified prices or models. Preserve active order configuration and financial holds, no live paid calls or deployment, no publication or RSS changes. Add offline positive and negative tests and report remaining integration limitations. Only src, tests, telegram-control and report. Read Glob Grep Edit Write only. Independent tests follow." --model anthropic/claude-opus-5.5 --effort low --max-turns 25 --max-budget-usd 2 --allowedTools "Read,Glob,Grep,Edit,Write" --disallowedTools "Bash,WebFetch,WebSearch,Task,Agent" --output-format json > "$RUNNER_TEMP/opus-report/session.json"
       - name: Preserve changes even on failure
         if: always()
         run: |
