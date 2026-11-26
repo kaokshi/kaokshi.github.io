@@ -4,6 +4,7 @@ import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from 
 import {previewJob} from "./adapter.mjs";
 import {intakeView,controlView,queueView,accountView} from "./intake.mjs";
 import {recordReceipt} from "./receipt.mjs";
+import {requestedSettingsIn,acknowledgeSettingsIn,settingsSyncView} from "./settings-sync.mjs";
 import {runProbe} from "./probe.mjs";
 import {requestStage} from "./stage-intent.mjs";
 import {notifyReceipt} from "./notifications.mjs";
@@ -115,6 +116,13 @@ export class CoreHandler {
   if(url.pathname==="/core/account"){const r=await accountView(this.storage,d,now,this.env?.ZEN_CORE_EXECUTION_ENABLED==="true");return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/queue"){const r=await queueView(this.storage,d.cursor??null);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/control"){const r=await controlView(this.storage,d.id,now,this.env?.ZEN_CORE_EXECUTION_ENABLED==="true");return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/executor-settings"){
+   const r=await this.storage.transaction(async tx=>{
+    if(d.action==="read")return {status:200,body:{schema:"zen-core/settings-v1",settings:await requestedSettingsIn(tx),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
+    if(d.action==="ack"){const a=await acknowledgeSettingsIn(tx,d.report,now);return {status:a.ok?200:409,body:a};}
+    return {status:400,body:{error:"invalid_settings_action"}};
+   });return Response.json(r.body,{status:r.status});
+  }
   if(url.pathname==="/core/intake"){const r=await intakeView(this.storage,d.id);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/stage"){const r=await requestStage(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/preview"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const r=await previewJob(this.storage,d.id,now,validateJob,STAGES);return Response.json(r.body,{status:r.status});}
