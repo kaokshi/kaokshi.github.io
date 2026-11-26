@@ -4,6 +4,7 @@ const {confirmClose} = require("./zen_browser_close.cjs");
 
 const LIMITS = Object.freeze({
   dailyMs: 480000, sessionMs: 60000, keepAliveMs: 10000, admissionMs: 90000,
+  acquisitionIntervalMs: 20000,
 });
 const ORIGIN = "https://example.invalid";
 const KEY = "synthetic_state";
@@ -71,7 +72,7 @@ async function admit(list, count, now, report) {
   if (!admitted) throw Error("BUDGET_STOP");
 }
 
-async function session({state, first, root, call, connect, list, now, wait, report, workMs}) {
+async function session({state, first, root, call, connect, list, isActive, now, wait, report, workMs}) {
   const started = now();
   const deadline = started + LIMITS.sessionMs;
   const workDeadline = started + workMs;
@@ -127,7 +128,7 @@ async function session({state, first, root, call, connect, list, now, wait, repo
       try {
         await confirmClose({
           sid, root, call, pause: wait, now, expiresAt: deadline - 1500,
-          latest: timeout => list(0, timeout),
+          latest: timeout => list(0, timeout), isActive,
           observe: event => { result.cleanup[event] = (result.cleanup[event] || 0) + 1; },
           onDuration: duration => { result.browserDurationMs = duration; },
         });
@@ -156,7 +157,7 @@ async function session({state, first, root, call, connect, list, now, wait, repo
   }
 }
 
-async function runProbe({root, call, connect, listHistory, now = Date.now, wait = pause, workMs = 33000} = {}) {
+async function runProbe({root, call, connect, listHistory, isActive, now = Date.now, wait = pause, workMs = 33000} = {}) {
   const report = {schema: "zen-browser-synthetic-diagnostics/v1", limits: LIMITS,
                   status: "failed", stage: "configuration", admission: [], sessions: []};
   try {
@@ -165,11 +166,12 @@ async function runProbe({root, call, connect, listHistory, now = Date.now, wait 
       if (!listHistory) throw Error("ACCOUNT_USAGE_UNAVAILABLE");
       return sessionList(await listHistory(offset, timeout));
     };
-    const config = {root, call, connect, list, now, wait, workMs};
+    const config = {root, call, connect, list, isActive, now, wait, workMs};
     report.stage = "save_admission";
     await admit(list, 2, now, report);
     report.stage = "save";
     const state = await session({...config, first: true, report});
+    await wait(LIMITS.acquisitionIntervalMs);
     report.stage = "restore_admission";
     await admit(list, 1, now, report);
     report.stage = "restore";
@@ -199,6 +201,15 @@ async function main() {
       }
     };
     config.connect = url => require("playwright-core").chromium.connectOverCDP(url, {headers, timeout: 14000});
+    config.isActive = async (sid, timeout) => {
+      const rows = sessionList(await config.call(
+        config.root.replace(/\/browser$/, "/session") + "?limit=100", "GET", timeout));
+      if (rows.some(row => row.sessionId === sid)) return true;
+      if (rows.length >= 100 || rows.some(row => typeof row.sessionId !== "string")) {
+        throw Error("INVALID_HISTORY");
+      }
+      return false;
+    };
   }
   const report = await runProbe(config);
   const encoded = JSON.stringify(report, null, 2);

@@ -42,3 +42,20 @@ test('history can prove a closed browser when detail has no record', async () =>
                                   observe: value => observed.push(value)}), true);
   assert.deepEqual(observed, ['delete_acknowledged', 'detail_empty', 'history_terminal']);
 });
+
+test('accepted deletion and two independent active-list reads confirm removal', async () => {
+  const f = fake([new Error('HTTP_404')]);
+  const observed = [];
+  let activeReads = 0;
+  assert.equal(await confirmClose({...f.opts, isActive: async id => {
+    assert.equal(id, sid);
+    return ++activeReads <= 1;
+  }, observe: value => observed.push(value)}), true);
+  assert.equal(activeReads, 3);
+  assert.equal(observed.at(-1), 'removed_from_active_list');
+});
+
+test('a 404 and an incomplete active list cannot confirm removal', async () => {
+  const f = fake([new Error('HTTP_404')]);
+  await assert.rejects(confirmClose({...f.opts, isActive: async () => undefined}), /CLOSE_UNCONFIRMED/);
+});

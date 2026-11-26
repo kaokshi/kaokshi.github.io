@@ -8,7 +8,7 @@ function terminal(row, sid) {
 
 async function confirmClose({
   sid, root, call, pause, now = Date.now, expiresAt = now() + 25000,
-  latest, observe = () => {}, onDuration = () => {},
+  latest, isActive, observe = () => {}, onDuration = () => {},
 }) {
   const detail = root.replace(/\/browser$/, "/session") + "/" + sid;
   const timeout = cap => Math.max(1, Math.min(cap, expiresAt - now()));
@@ -33,15 +33,18 @@ async function confirmClose({
     return true;
   }
 
+  let absent = 0;
   for (let attempt = 0; attempt < 12 && now() < expiresAt; attempt++) {
     let row;
+    let detailMissing = false;
     try {
       const data = await call(detail, "GET", timeout(1500));
       row = Object.hasOwn(data, "result") ? data.result : data;
       if (!terminal(row, sid)) observe(row ? "detail_nonterminal" : "detail_empty");
     } catch (error) {
       if (!TRANSIENT.has(error.message)) throw error;
-      observe(error.message === "HTTP_404" ? "detail_not_found" : "detail_transient");
+      detailMissing = error.message === "HTTP_404";
+      observe(detailMissing ? "detail_not_found" : "detail_transient");
     }
     if (check(row, "detail_terminal")) return true;
     // A deletion can become visible in session history before the detail endpoint.
@@ -55,6 +58,21 @@ async function confirmClose({
       }
       if (check(recent?.find(row => row.sessionId === sid), "history_terminal")) return true;
     }
+    // The REST detail record can disappear after DELETE. A separately fetched
+    // active-session list confirms removal even when no close reason is available.
+    if (detailMissing && isActive && now() < expiresAt) {
+      try {
+        absent = await isActive(sid, timeout(1500)) === false ? absent + 1 : 0;
+      } catch (error) {
+        if (!TRANSIENT.has(error.message)) throw error;
+        absent = 0;
+        observe("active_list_transient");
+      }
+      if (absent === 2) {
+        observe("removed_from_active_list");
+        return true;
+      }
+    } else absent = 0;
     if (now() < expiresAt) await pause(timeout(1200));
   }
   throw Error("CLOSE_UNCONFIRMED");
