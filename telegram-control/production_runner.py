@@ -11,6 +11,7 @@ from urllib.error import HTTPError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from document_delivery import deliver_documents
 from intake_client import build_receipt, drain, push_receipt
+from settings_client import synchronize
 from intake_runner import CHECKPOINT, CURSOR, validate_checkpoint
 from src.editorial_memory import digest
 from src.editorial_zen_cloud import CloudCore, GitHubStore, STATE
@@ -166,6 +167,9 @@ def main():
     if (snapshot["publicationAuthorized"] is not False or snapshot["rssEnabled"] is not False
             or snapshot["executionEnabled"] is not production):
         raise CoreBlocked("execution_gate_mismatch")
+    # Enable only after the matching Worker and executor have passed integration review.
+    if os.getenv("ZEN_CORE_SETTINGS_SYNC_ENABLED") == "true":
+        synchronize(core, endpoint, secret)
     intake = accept_cycle(core, endpoint, secret, production)
     pilot = os.getenv("ZEN_CORE_PILOT_JOB", "")
     if pilot:
