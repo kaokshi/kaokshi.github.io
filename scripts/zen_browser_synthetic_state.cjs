@@ -9,7 +9,7 @@ const ORIGIN = "https://example.invalid";
 const KEY = "synthetic_state";
 const VALUE = "test-only";
 const ERROR_CODES = new Set([
-  "CONFIG_MISSING", "INVALID_HISTORY", "HISTORY_INCOMPLETE", "INVALID_START",
+  "CONFIG_MISSING", "ACCOUNT_USAGE_UNAVAILABLE", "INVALID_HISTORY", "HISTORY_INCOMPLETE", "INVALID_START",
   "ACTIVE_OR_INVALID_SESSION", "BUDGET_STOP", "SESSION_ID_MISSING",
   "UNEXPECTED_STATE", "RESTORE_FAILED", "WATCHDOG", "CLOSE_UNCONFIRMED",
   "UNKNOWN_CLOSE_STATE", "NOT_NORMAL_CLOSURE", "HTTP_TIMEOUT",
@@ -156,13 +156,15 @@ async function session({state, first, root, call, connect, list, now, wait, repo
   }
 }
 
-async function runProbe({root, call, connect, now = Date.now, wait = pause, workMs = 33000} = {}) {
+async function runProbe({root, call, connect, listHistory, now = Date.now, wait = pause, workMs = 33000} = {}) {
   const report = {schema: "zen-browser-synthetic-diagnostics/v1", limits: LIMITS,
                   status: "failed", stage: "configuration", admission: [], sessions: []};
   try {
     if (!root || !call || !connect) throw Error("CONFIG_MISSING");
-    const list = async (offset, timeout) => sessionList(await call(
-      root.replace(/\/browser$/, "/session") + "?limit=100&offset=" + offset, "GET", timeout));
+    const list = async (offset, timeout) => {
+      if (!listHistory) throw Error("ACCOUNT_USAGE_UNAVAILABLE");
+      return sessionList(await listHistory(offset, timeout));
+    };
     const config = {root, call, connect, list, now, wait, workMs};
     report.stage = "save_admission";
     await admit(list, 2, now, report);

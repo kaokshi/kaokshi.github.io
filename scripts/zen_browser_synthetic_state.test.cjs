@@ -28,12 +28,12 @@ function fixture({failure, previous = 0, unconfirmed = false} = {}) {
       actions.push("delete");
       return {status: "closing"};
     }
-    if (url.includes("?limit=100")) {
-      const rows = [...alive.values(), ...closed.values()];
-      if (previous) rows.push({sessionId: "old", startTime: start - previous, endTime: start});
-      return {result: rows};
-    }
     return {result: null};
+  };
+  const listHistory = async () => {
+    const rows = [...alive.values(), ...closed.values()];
+    if (previous) rows.push({sessionId: "old", startTime: start - previous, endTime: start});
+    return rows;
   };
   const connect = async () => {
     assert.equal(alive.size, 1);
@@ -64,7 +64,7 @@ function fixture({failure, previous = 0, unconfirmed = false} = {}) {
       close: async () => { disconnected++; },
     };
   };
-  return {options: {root, call, connect, now: () => start, wait: async () => {}},
+  return {options: {root, call, connect, listHistory, now: () => start, wait: async () => {}},
           actions, counts: () => ({acquired, disconnected})};
 }
 
@@ -113,6 +113,13 @@ test("the two-session reservation is rejected before cloud allocation", async ()
   const f = fixture({previous: LIMITS.dailyMs - 2 * LIMITS.admissionMs + 1});
   const report = await runProbe(f.options);
   assert.equal(report.error, "BUDGET_STOP");
+  assert.deepEqual(f.actions, []);
+});
+
+test("an active-only session list cannot substitute for account usage", async () => {
+  const f = fixture();
+  const report = await runProbe({...f.options, listHistory: undefined});
+  assert.equal(report.error, "ACCOUNT_USAGE_UNAVAILABLE");
   assert.deepEqual(f.actions, []);
 });
 
