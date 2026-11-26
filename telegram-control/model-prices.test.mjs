@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {verifiedCatalogue} from './model-prices.mjs';
+const defaults=[{id:'text-a',capability:'text',available:true},{id:'image-a',capability:'image',available:true}];
+const data=[{id:'text-a',pricing:{prompt:'0.000001',completion:'0.00002'},pricing_units:{prompt:'token',completion:'token'}},{id:'image-a',pricing:{image_output:'2.5'},pricing_units:{image_output:'image'}}];
+const now=123456789;
+const snap=(rows=data,at=now)=>({source:'routerai:/models',observedAt:at,data:rows});
+test('verified prices retain decimals and units',()=>{const r=verifiedCatalogue(defaults,snap(),now);assert.equal(r[0].priceVerified,true);assert.equal(r[0].pricing.prompt.value,'0.000001');assert.equal(r[1].pricing.image_output.unit,'image');});
+test('stale and future snapshots never verify',()=>{for(const at of [now-300001,now+1])assert.ok(verifiedCatalogue(defaults,snap(data,at),now).every(r=>!r.priceVerified));});
+test('unknown source is rejected',()=>assert.ok(verifiedCatalogue(defaults,{...snap(),source:'other'},now).every(r=>!r.priceVerified)));
+test('missing and duplicate ids cannot be selected',()=>{const r=verifiedCatalogue(defaults,snap([data[0],data[0]]),now);assert.ok(r.every(x=>!x.available&&!x.priceVerified));});
+test('wrong units and missing prices fail closed',()=>{const rows=[{...data[0],pricing_units:{prompt:'million_tokens',completion:'token'}},{...data[1],pricing:{}}];assert.ok(verifiedCatalogue(defaults,snap(rows),now).every(r=>!r.priceVerified));});
+test('negative and nonfinite prices rejected',()=>{for(const value of [-1,Infinity,'NaN','',null])assert.equal(verifiedCatalogue(defaults,snap([{...data[0],pricing:{prompt:value,completion:1}}]),now)[0].priceVerified,false);});
+test('cache write price needs verified token unit',()=>{const row={...data[0],pricing:{...data[0].pricing,input_cache_write:'0.0001'}};assert.equal(verifiedCatalogue(defaults,snap([row]),now)[0].priceVerified,false);row.pricing_units={...row.pricing_units,input_cache_write:'token'};assert.equal(verifiedCatalogue(defaults,snap([row]),now)[0].pricing.input_cache_write.value,'0.0001');});
+test('zero image price is unverified',()=>assert.equal(verifiedCatalogue(defaults,snap([{...data[1],pricing:{image_output:0}}]),now)[1].priceVerified,false));
