@@ -34,3 +34,11 @@ test('invalid delete response fails closed',async()=>{
   const f=fake([ended],'unknown');
   await assert.rejects(confirmClose(f.opts),/UNKNOWN_CLOSE_STATE/);
 });
+
+test('history can prove a closed browser when detail has no record', async () => {
+  const f = fake([null]);
+  const observed = [];
+  assert.equal(await confirmClose({...f.opts, latest: async () => [ended],
+                                  observe: value => observed.push(value)}), true);
+  assert.deepEqual(observed, ['delete_acknowledged', 'detail_empty', 'history_terminal']);
+});

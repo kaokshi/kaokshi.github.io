@@ -1,5 +1,6 @@
-name: ZEN Browser synthetic state persistence retry
+name: ZEN Browser synthetic state persistence
 on:
+  workflow_dispatch:
   push:
     branches: [development/zen-analytics-foundation-20261126]
     paths: ['.github/workflows/zen-browser-synthetic-state.yml']
@@ -10,10 +11,16 @@ concurrency:
   cancel-in-progress: false
 jobs:
   probe:
-    if: github.repository == 'kaokshi/kaokshi.github.io' && github.run_attempt == 1
+    if: >-
+      github.repository == 'kaokshi/kaokshi.github.io' &&
+      github.ref == 'refs/heads/development/zen-analytics-foundation-20261126' &&
+      github.run_attempt == 1 &&
+      (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[zen-synthetic-cloud]'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Initialize redacted diagnostic
+        run: printf '%s\n' '{"schema":"zen-browser-synthetic-diagnostics/v1","status":"not_started"}' > "$RUNNER_TEMP/zen-browser-synthetic.json"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -23,7 +30,7 @@ jobs:
       - name: Validate closure contract without browser allocation
         run: |
           node --check scripts/zen_browser_synthetic_state.cjs
-          node --test scripts/zen_browser_close.test.cjs
+          node --test scripts/zen_browser_close.test.cjs scripts/zen_browser_synthetic_state.test.cjs
       - name: Install CDP client
         working-directory: ${{ runner.temp }}
         run: npm install --no-audit --no-fund --ignore-scripts --save-exact playwright-core@1.56.1
@@ -32,4 +39,13 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_BROWSER_TOKEN }}
           NODE_PATH: ${{ runner.temp }}/node_modules
+          ZEN_BROWSER_DIAGNOSTIC_PATH: ${{ runner.temp }}/zen-browser-synthetic.json
         run: node scripts/zen_browser_synthetic_state.cjs
+      - name: Save redacted diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zen-browser-synthetic-diagnostics
+          path: ${{ runner.temp }}/zen-browser-synthetic.json
+          if-no-files-found: error
+          retention-days: 7

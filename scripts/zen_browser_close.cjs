@@ -1,34 +1,63 @@
-// No credentials, session identifiers or raw provider responses in logs.
-async function confirmClose({sid,root,call,pause,now=Date.now}){
-  const deadline=now()+25000;
-  const detail=root.replace(/\/browser$/,'/session')+'/'+sid;
-  let accepted=false;
-  let status;
-  for(let i=0;i<3;i++){
-    try{
-      const data=await call(root+'/'+sid,'DELETE',3000);
-      status=(data.result||data).status;
-      if(!['closing','closed'].includes(status))throw Error('UNKNOWN_CLOSE_STATE');
-      accepted=true;break;
-    }catch(e){if(i===2)throw e;await pause(250);}
+// Only bounded status codes and booleans may leave this module.
+const TRANSIENT = new Set(["HTTP_404", "HTTP_429", "HTTP_502", "HTTP_503", "HTTP_504", "HTTP_TIMEOUT"]);
+
+function terminal(row, sid) {
+  return row?.sessionId === sid && Number.isFinite(row.startTime)
+    && Number.isFinite(row.endTime) && row.endTime >= row.startTime && row.endTime > 0;
+}
+
+async function confirmClose({
+  sid, root, call, pause, now = Date.now, expiresAt = now() + 25000,
+  latest, observe = () => {}, onDuration = () => {},
+}) {
+  const detail = root.replace(/\/browser$/, "/session") + "/" + sid;
+  const timeout = cap => Math.max(1, Math.min(cap, expiresAt - now()));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (now() >= expiresAt) throw Error("CLOSE_UNCONFIRMED");
+    try {
+      const data = await call(root + "/" + sid, "DELETE", timeout(3000));
+      if (!["closing", "closed"].includes((data.result || data).status)) throw Error("UNKNOWN_CLOSE_STATE");
+      observe("delete_acknowledged");
+      break;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await pause(timeout(250));
+    }
   }
-  if(!accepted)throw Error('CLOSE_NOT_REQUESTED');
-  for(let i=0;i<12 && now()<deadline;i++){
+
+  function check(row, source) {
+    if (!terminal(row, sid)) return false;
+    observe(source);
+    onDuration(row.endTime - row.startTime);
+    if (row.closeReason !== 1 && row.closeReasonText !== "NormalClosure") throw Error("NOT_NORMAL_CLOSURE");
+    return true;
+  }
+
+  for (let attempt = 0; attempt < 12 && now() < expiresAt; attempt++) {
     let row;
     try {
-      const data=await call(detail,'GET',2000);
-      row=Object.hasOwn(data,'result')?data.result:data;
-    }catch(e){
-      if(!['HTTP_404','HTTP_429','HTTP_502','HTTP_503','HTTP_504'].includes(e.message))throw e;
+      const data = await call(detail, "GET", timeout(1500));
+      row = Object.hasOwn(data, "result") ? data.result : data;
+      if (!terminal(row, sid)) observe(row ? "detail_nonterminal" : "detail_empty");
+    } catch (error) {
+      if (!TRANSIENT.has(error.message)) throw error;
+      observe(error.message === "HTTP_404" ? "detail_not_found" : "detail_transient");
     }
-    if(row&&row.sessionId===sid&&Number.isFinite(row.startTime)&&Number.isFinite(row.endTime)&&row.endTime>=row.startTime&&row.endTime>0){
-      if(row.closeReason!==1&&row.closeReasonText!=='NormalClosure')throw Error('NOT_NORMAL_CLOSURE');
-      return true;
+    if (check(row, "detail_terminal")) return true;
+    // A deletion can become visible in session history before the detail endpoint.
+    if (latest && now() < expiresAt) {
+      let recent;
+      try {
+        recent = await latest(timeout(1500));
+      } catch (error) {
+        if (!TRANSIENT.has(error.message)) throw error;
+        observe("history_transient");
+      }
+      if (check(recent?.find(row => row.sessionId === sid), "history_terminal")) return true;
     }
-    // The explicit terminal response is useful, but is not a substitute for
-    // provider end-time evidence in this acceptance test.
-    await pause(1500);
+    if (now() < expiresAt) await pause(timeout(1200));
   }
-  throw Error('CLOSE_UNCONFIRMED');
+  throw Error("CLOSE_UNCONFIRMED");
 }
-module.exports={confirmClose};
+
+module.exports = {confirmClose};
