@@ -167,13 +167,18 @@ def main():
     if (snapshot["publicationAuthorized"] is not False or snapshot["rssEnabled"] is not False
             or snapshot["executionEnabled"] is not production):
         raise CoreBlocked("execution_gate_mismatch")
-    # Enable only after the matching Worker and executor have passed integration review.
-    if os.getenv("ZEN_CORE_SETTINGS_SYNC_ENABLED") == "true":
+    settings_only = os.getenv("ZEN_CORE_SETTINGS_ONLY") == "true"
+    if settings_only and (production or os.getenv("ZEN_CORE_PILOT_JOB") or os.getenv("ZEN_CORE_PILOT_PASSES", "1") != "1"):
+        raise CoreBlocked("settings_only_requires_execution_disabled")
+    if settings_only or os.getenv("ZEN_CORE_SETTINGS_SYNC_ENABLED") == "true":
         token = os.getenv("ROUTERAI_API_KEY")
         if not token:
             raise CoreBlocked("routerai_api_key_missing")
         publish_catalogue(endpoint, secret, token)
         synchronize(core, endpoint, secret)
+        if settings_only:
+            print(json.dumps({"settings": "acknowledged", "paidRequests": 0}))
+            return
     intake = accept_cycle(core, endpoint, secret, production)
     pilot = os.getenv("ZEN_CORE_PILOT_JOB", "")
     if pilot:
