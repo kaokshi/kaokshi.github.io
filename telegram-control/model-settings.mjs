@@ -56,7 +56,7 @@ export async function readModels(storage,catalogue){
  const effective=await effectiveModels(storage);
  const history=[];
  for(let r=requested.revision;r>=1&&history.length<10&&r>requested.revision-10;r--){const h=await storage.get(key(r));if(h)history.push(h);}
- return {roles:ROLES,catalogue,requested,effective,pendingSync:requested.revision!==effective.revision||requested.hash!==await policyHash(effective.models),executorSync:effective.source==="executor_ack"?"acknowledged":"not_connected",history,executionEnabled:false,note:"Active orders keep their pinned revision."};
+ return {roles:ROLES,catalogue,requested,effective,pendingSync:requested.revision!==effective.revision||requested.hash!==await policyHash(effective.models),executorSync:effective.source==="executor_ack"?"acknowledged":"not_connected",history,executionEnabled:false,publicationAuthorized:false,rssEnabled:false,note:"Active orders keep their pinned revision."};
 }
 export async function writeModels(storage,data,now=Date.now(),catalogue){
  if(data?.confirm!==true)return {status:400,body:{error:"confirmation_required"}};

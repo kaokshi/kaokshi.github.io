@@ -5,7 +5,7 @@ import {previewJob} from "./adapter.mjs";
 import {intakeView,controlView,queueView,accountView} from "./intake.mjs";
 import {recordReceipt} from "./receipt.mjs";
 import {requestedSettingsIn,acknowledgeSettingsIn} from "./settings-sync.mjs";
-import {defaultCatalogue} from "./model-settings.mjs";
+import {defaultCatalogue,writeModels,readModels} from "./model-settings.mjs";
 import {verifiedCatalogue} from "./model-prices.mjs";
 import {runProbe} from "./probe.mjs";
 import {requestStage} from "./stage-intent.mjs";
@@ -94,6 +94,7 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
+  if(request.method==="GET"&&url.pathname=="/core/models")return Response.json(await readModels(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/jobs"){
    const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),
     readBudget(this.storage,now),opsState(this.storage),this.state()]);
@@ -109,6 +110,11 @@ export class CoreHandler {
   }
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname=="/core/models/settings"){
+   // The owner changes the requested model policy; existing orders keep their own pin.
+   const r=await writeModels(this.storage,d,now);
+   return Response.json(r.body,{status:r.status});
+  }
   if(url.pathname==="/core/probe"){const r=await runProbe(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/watchdog")return Response.json(await this.watchdog(now));
   if(url.pathname==="/core/memory/settings"){const r=await writeMemory(this.storage,d,now);return Response.json(r.body,{status:r.status});}
