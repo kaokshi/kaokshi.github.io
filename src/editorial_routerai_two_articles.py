@@ -561,6 +561,21 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                 issues.append(str(exc) if type(exc) is ValueError and
                               str(exc).startswith("image_") else "image_decode_or_match_failed")
 
+            if (checkpoints and scene["kind"] in {"photo", "diagram"} and issues
+                    and checkpoints.read(f"requests/{stage}-qas.json") is None):
+                # A local rejection cannot be overridden by paid QA. Keep the
+                # historical request path for attempts that already have a reply.
+                save(f"{channel}/attempts/{stage}-qa.json", json_bytes({
+                    **record, "status": "rejected", "local_checks": pixels, "local_issues": issues,
+                    "reason": "image_local_check_failed",
+                }))
+                candidate.unlink(missing_ok=True)
+                candidate.with_suffix(".json").unlink(missing_ok=True)
+                if attempt == 3 or (scene["kind"] == "diagram" and (not diagram_alternative or attempt == 2)):
+                    failed.append(slot)
+                    break
+                continue
+
             section = title if not slot else article["sections"][slot - 1]["heading"]
             section_text = (" ".join(article["intro"]) if not slot else
                             "\n".join(article["sections"][slot - 1]["paragraphs"]))

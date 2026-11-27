@@ -119,6 +119,27 @@ class ExecutorTest(unittest.TestCase):
         session.save(name + ".source", b"fixture")
         self.assertEqual(session.read_attempt_asset(name + ".source", name + ".json"), (b"fixture", metadata))
 
+    def test_recover_registered_image_after_manifest_write_interruption(self):
+        from src.editorial_memory import digest
+
+        session = Session(self.cloud, self.article)
+        for stage in ("plan", "draft", "edit", "visual_plan"):
+            session.pass_stage(stage)
+        raw = b"synthetic image bytes"
+        sha = digest(raw)
+        row = {"file": "image-00.jpg", "sha256": sha, "original_sha256": sha,
+               "perceptual_hash": "1" * 16, "match_model": "fixture", "image_embedding": []}
+        sidecar = json.dumps(row).encode()
+        session.save("legends/images/image-00.jpg", raw)
+        session.save("legends/images/image-00.json", sidecar)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            self.assertIsNone(session.image(0, path))
+            self.cloud.access(lambda c: c.register_image(self.article, 0, row), change=True)
+            self.assertEqual(session.image(0, path), (row, raw))
+            self.assertEqual(session.read("accepted/0.json"), sidecar)
+            self.assertEqual((path / row["file"]).read_bytes(), raw)
+
     def test_image_plan_correction_is_a_metered_visual_check(self):
         self.assertEqual(classify("image-plan-correction", "brain"), ("visual_plan", "required_check", None))
 
