@@ -122,6 +122,34 @@ class ExecutorTest(unittest.TestCase):
     def test_image_plan_correction_is_a_metered_visual_check(self):
         self.assertEqual(classify("image-plan-correction", "brain"), ("visual_plan", "required_check", None))
 
+    def test_pinned_plan_and_visual_models_send_distinct_reasoning(self):
+        import hashlib
+        from types import SimpleNamespace
+
+        models = {"plan": MODELS["edit"], "draft": MODELS["draft"], "edit": MODELS["edit"],
+                  "visual_plan": MODELS["brain"], "images": MODELS["image"]}
+        reasoning = {"plan": "high", "draft": "low", "edit": "low", "visual_plan": "medium", "images": "off"}
+        canonical = json.dumps([[role, model, reasoning[role]] for role, model in models.items()],
+                               separators=(",", ":"))
+        session = SimpleNamespace(plan={"editorialSettings": {
+            "models": {"revision": 1, "hash": hashlib.sha256(canonical.encode()).hexdigest(), "value": models},
+            "reasoning": reasoning,
+        }})
+        router = MeteredRouter(session, "fixture", transport=self.transport, balance=lambda _: 100)
+
+        def reply(*args, **kwargs):
+            router.report["calls"].append({})
+            return {"choices": [{"message": {"content": "synthetic"}, "finish_reason": "stop"}]}
+
+        with patch.object(router, "text_bound", return_value=2), patch.object(router, "request", side_effect=reply) as send:
+            router.chat("legends", "plan", "brain", "Synthetic fixture", 100)
+            router.chat("legends", "editorial_and_image_plan", "brain", "Synthetic fixture", 100)
+        planning, visual = [call.args for call in send.call_args_list]
+        self.assertEqual((router.models[planning[2]], planning[4]["reasoning"]),
+                         (models["plan"], {"effort": "high"}))
+        self.assertEqual((router.models[visual[2]], visual[4]["reasoning"]),
+                         (models["visual_plan"], {"effort": "medium"}))
+
     def test_deadline_blocks_new_charge_but_replays_saved_response(self):
         router = self.router()
         router.session.paid_call_cutoff = 0

@@ -19,9 +19,20 @@ test("isolated synthetic queue and receipt lifecycle, no paid actions",async()=>
  const stages=["plan","draft","edit","visual_plan","images","qa","package"].map(id=>({id,status:"not_started"}));
  const day=new Date(now+10800000).toISOString().slice(0,10);
  const receipt={schema:"zen-core/receipt-v1",jobId:id,observedAt:now,modeRevision:0,effectiveMode:"manual",executionEnabled:false,publicationAuthorized:false,rssEnabled:false,articles:["legends","science"].map(c=>({id:id+"/"+c+"/1",meteredRub:"0",stages})),budget:{day,timezone:"Europe/Moscow",mainDailyRub:"300",reserveDailyRub:"50",mainRemainingRub:"300",reserveRemainingRub:"50",meteredRub:"0",unsettledRequest:false}};
+ // The order pins the model revision; the executor must report exactly that revision.
+ const job=await s.get("production:job:"+id);
+ assert.ok(job.settingsPin,"order must pin a model revision");
+ const pin={models:{revision:job.settingsPin.models.revision,hash:job.settingsPin.models.hash}};
  assert.equal((await call("receipt",{receipt:{...receipt,budget:{...receipt.budget,meteredRub:"1"}}})).status,400);
- assert.equal((await call("receipt",{receipt})).body.accepted,true);
- assert.equal((await call("receipt",{receipt})).body.replay,true);
+ // A receipt without the pinned revision, or with a foreign one, is refused.
+ assert.equal((await call("receipt",{receipt})).status,409);
+ assert.equal((await call("receipt",{receipt:{...receipt,editorialSettingsReport:pin}})).status,200);
+ // A malformed report and a report for another revision are both refused.
+ assert.equal((await call("receipt",{receipt:{...receipt,editorialSettingsReport:{...pin,extra:true}}})).status,409);
+ assert.equal((await call("receipt",{receipt:{...receipt,editorialSettingsReport:{models:{...pin.models,revision:pin.models.revision+1}}}})).status,409);
+ assert.equal((await call("receipt",{receipt:{...receipt,editorialSettingsReport:{models:{...pin.models,hash:"0".repeat(64)}}}})).status,409);
+ assert.equal((await call("receipt",{receipt:{...receipt,editorialSettingsReport:pin}})).body.accepted,true);
+ assert.equal((await call("receipt",{receipt:{...receipt,editorialSettingsReport:pin}})).body.replay,true);
  assert.deepEqual((await call("queue")).body.ids,[]);
  assert.equal((await call("verify")).body.articles,2);
  assert.equal((await runProbe(s,{run:"123456-2",action:"cleanup"},now)).status,409);

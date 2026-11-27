@@ -27,6 +27,9 @@ export async function saveJob(tx,id,plan,now,origin="owner",releaseAt=null){
  const old=await tx.get(key);
  if(old)return JSON.stringify(old.plan)===JSON.stringify(plan)?old:null;
  const job=makeJob(id,plan,now,origin,releaseAt);
+ // Only confirmed effective settings may be pinned; never rewrite existing orders.
+ const {pinFor}=await import("./settings-sync.mjs");
+ job.settingsPin=await pinFor(tx);
  // An owner-confirmed agent order or enabled schedule can prepare an intake-only preview automatically.
  const mode=(await tx.get("ops:state"))?.requestedMode;
  if(["agent","schedule"].includes(origin)&&["assisted","autonomous"].includes(mode)){

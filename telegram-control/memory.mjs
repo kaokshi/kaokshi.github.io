@@ -1,5 +1,5 @@
 // Persistent owner-confirmed editorial context; never grants execution authority.
-// Keep notes small enough for the existing Qwen request cost estimator.
+// Keep notes small enough for the RouterAI request cost estimator.
 export const emptyMemory=()=>({version:0,notes:[],updatedAt:null});
 const kinds=new Set(["style","editorial","illustrations","workflow"]);
 export async function readMemory(storage){return await storage.get("agent:memory")||emptyMemory();}

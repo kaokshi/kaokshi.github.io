@@ -1,5 +1,6 @@
 """Local durable ZEN CORE contract. No model transport or release side effects."""
 import argparse
+import hashlib
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 import json
@@ -21,6 +22,34 @@ RESERVE_REASONS = {"images": {"missing_image", "image_correction", "required_che
 
 class CoreBlocked(ValueError):
     pass
+
+
+MODEL_ROLES = ("plan", "draft", "edit", "visual_plan", "images")
+REASONING_LEVELS = ("off", "low", "medium", "high")
+
+
+def validate_editorial_settings(settings):
+    if not isinstance(settings, dict) or set(settings) != {"models", "reasoning"}:
+        raise CoreBlocked("invalid_editorial_settings")
+    spec = settings["models"]
+    if not isinstance(spec, dict) or set(spec) != {"revision", "hash", "value"}:
+        raise CoreBlocked("invalid_editorial_settings")
+    revision, sha, models = spec["revision"], spec["hash"], spec["value"]
+    reasoning = settings["reasoning"]
+    if (type(revision) is not int or not 0 <= revision <= 2**53-1
+            or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)
+            or not isinstance(models, dict) or set(models) != set(MODEL_ROLES)
+            or any(not isinstance(v, str) or not re.fullmatch(r"[a-zA-Z0-9._:/-]{1,180}", v) for v in models.values())
+            or models["draft"] == models["edit"]
+            or not isinstance(reasoning, dict) or set(reasoning) != set(MODEL_ROLES)
+            or any(level not in REASONING_LEVELS for level in reasoning.values())
+            or reasoning["images"] != "off"):
+        raise CoreBlocked("invalid_editorial_settings")
+    canonical = json.dumps([[r, models[r], reasoning[r]] for r in MODEL_ROLES], separators=(",", ":"), ensure_ascii=False)
+    if hashlib.sha256(canonical.encode()).hexdigest() != sha:
+        raise CoreBlocked("editorial_settings_hash_mismatch")
+    return {"models": {"revision": revision, "hash": sha, "value": dict(models)},
+            "reasoning": dict(reasoning)}
 
 
 def amount(value):
@@ -111,6 +140,8 @@ class Core:
             raise CoreBlocked("invalid_execution_mode")
         if mode != "manual":
             intent["mode"] = mode
+        if "editorialSettings" in job:
+            intent["editorialSettings"] = validate_editorial_settings(job["editorialSettings"])
         encoded = json.dumps(intent, sort_keys=True, ensure_ascii=False)
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO jobs VALUES (?, ?)", (job_id, encoded))

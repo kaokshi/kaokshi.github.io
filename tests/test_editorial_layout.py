@@ -73,6 +73,42 @@ class LayoutTests(unittest.TestCase):
             validate_plan({"subject": "Тема городской истории", "images": rows},
                           6, "legends", settings)
 
+    def test_image_plan_matches_the_production_media_rules(self):
+        """The offline check must accept and reject exactly what the paid route does."""
+        settings = {"minimum_images": 7, "maximum_images": 8}
+        photos = [{"section": 1 if i <= 2 else i - 1, "kind": "photo",
+                   "subject": "Реальная сцена номер " + str(i),
+                   "brief": "Проверяемый кадр номер " + str(i),
+                   "query": "сцена номер " + str(i)}
+                  for i in range(1, 8)]
+        plan = {"subject": "Тема городской истории", "images": photos}
+        # Licensed photos serve photographs, never generated illustrations.
+        validate_plan(plan, 6, "legends", settings, licensed_photos=True)
+        # Without licensed photos a mystery story is illustrated, not photographed.
+        with self.assertRaisesRegex(Blocked, "image_plan_kind_invalid"):
+            validate_plan(plan, 6, "legends", settings)
+
+    def test_science_requires_a_mix_of_photographs_and_schematics(self):
+        settings = {"minimum_images": 7, "maximum_images": 8}
+        photos = [{"section": 1 if i <= 2 else i - 1, "kind": "photo",
+                   "subject": "Реальная сцена номер " + str(i),
+                   "brief": "Проверяемый кадр номер " + str(i),
+                   "query": "сцена номер " + str(i)}
+                  for i in range(1, 8)]
+        plan = {"subject": "Тема научного разбора", "images": photos}
+        with self.assertRaisesRegex(Blocked, "science_visual_mix_required"):
+            validate_plan(plan, 6, "science", settings, licensed_photos=True)
+
+    def test_cinema_requires_photographs_only(self):
+        settings = {"minimum_images": 7, "maximum_images": 8}
+        rows = [{"section": 1 if i <= 2 else i - 1, "kind": "illustration",
+                 "subject": "Реальная сцена номер " + str(i),
+                 "brief": "Кинематографический эпизод номер " + str(i)}
+                for i in range(1, 8)]
+        with self.assertRaisesRegex(Blocked, "image_plan_kind_invalid"):
+            validate_plan({"subject": "Тема киноразбора", "images": rows},
+                          6, "cinema", settings, licensed_photos=True)
+
     def test_html_docx_and_markdown_have_correct_order_without_empty_blocks(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)

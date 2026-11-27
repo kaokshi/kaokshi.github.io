@@ -508,3 +508,24 @@ test("responsive mode controls are available in both Core and Settings without b
  assert.match(JS,/selected===saved/);
  assert.doesNotThrow(()=>new Function(JS));
 });
+
+test("agent settings proxy separates authenticated reads and writes",async()=>{
+ const calls=[];
+ const stub={fetch:async(url,options)=>{
+  calls.push({url,method:options.method,body:options.body?JSON.parse(options.body):null});
+  return Response.json({ok:true});
+ }};
+ const local={...env,REVIEW_JOURNAL:{idFromName:()=>1,get:()=>stub}};
+ const send=(path,initData,body={})=>worker.fetch(new Request("https://example.test"+path,{
+  method:"POST",body:JSON.stringify({...body,initData})
+ }),local);
+ const settings={confirm:true,version:0,model:"anthropic/claude-sonnet-5.5",reasoning:"low",dailyRub:10,perCallRub:2,opusDailyRub:1};
+ assert.equal((await send("/api/core/agent/settings/write",signed(124),settings)).status,401);
+ assert.equal(calls.length,0);
+ assert.equal((await send("/api/core/agent/settings",signed())).status,200);
+ assert.equal((await send("/api/core/agent/settings/write",signed(),settings)).status,200);
+ assert.deepEqual(calls,[
+  {url:"https://core.internal/core/agent/settings",method:"GET",body:null},
+  {url:"https://core.internal/core/agent/settings",method:"POST",body:settings}
+ ]);
+});

@@ -1,9 +1,11 @@
 """Offline regression tests for the fifteen-minute production cycle."""
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 from src.editorial_memory import digest
 from src.editorial_zen_cloud import CloudCore
@@ -23,6 +25,28 @@ class TestCycle(unittest.TestCase):
         self.cloud.access(lambda c: c.submit({"id": self.job, "plan": {
             "items": [{"channel": "legends", "count": 1}], "day": None,
             "instructions": "Synthetic fixture"}}), change=True)
+
+    def test_settings_only_synchronizes_without_touching_orders(self):
+        env = {"ZEN_CORE_INTAKE_ENDPOINT": runner.ENDPOINT, "ZEN_CORE_INTAKE_SECRET": "a" * 64,
+               "EDITORIAL_PRIVATE_TOKEN": "fixture", "ROUTERAI_API_KEY": "fixture",
+               "ZEN_CORE_SETTINGS_ONLY": "true"}
+        with (patch.dict(os.environ, env, clear=True),
+              patch.object(runner, "GitHubStore", return_value=self.store),
+              patch.object(runner, "publish_catalogue") as catalogue,
+              patch.object(runner, "synchronize") as synchronize,
+              patch.object(runner, "accept_cycle") as intake,
+              patch.object(runner, "dispatch_cycle") as dispatch,
+              patch.object(runner, "deliver_documents") as delivery):
+            runner.main()
+            catalogue.assert_called_once()
+            synchronize.assert_called_once()
+            intake.assert_not_called()
+            dispatch.assert_not_called()
+            delivery.assert_not_called()
+            os.environ["ZEN_CORE_PILOT_JOB"] = self.job
+            with self.assertRaisesRegex(CoreBlocked, "settings_only_requires_execution_disabled"):
+                runner.main()
+            synchronize.assert_called_once()
 
     def test_saved_response_settles_without_transport(self):
         operation = self.article + "/plan"

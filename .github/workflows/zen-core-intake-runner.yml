@@ -5,6 +5,10 @@ on:
     paths: ['.github/workflows/zen-core-intake-runner.yml']
   workflow_dispatch:
     inputs:
+      settings_only:
+        description: Synchronize RouterAI tariffs and model settings without processing orders or calling inference.
+        type: boolean
+        default: false
       pilot_job:
         description: Confirmed Telegram agent job ID, with two articles per channel. Empty runs intake only.
         type: string
@@ -27,6 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
+      - name: Reject conflicting settings and pilot inputs
+        if: inputs.settings_only && (inputs.pilot_job != '' || inputs.pilot_passes != '1')
+        run: exit 1
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -36,12 +43,12 @@ jobs:
       - name: Check safety and cursor contract
         run: python -m unittest tests.test_editorial_zen_intake_runner tests.test_editorial_zen_control -q
       - name: Install production checks only for an explicitly enabled private executor
-        if: github.ref == 'refs/heads/main' && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true'))
+        if: github.ref == 'refs/heads/main' && !inputs.settings_only && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true'))
         run: |
           python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.11.0' 'torchvision==0.26.0'
           python -m pip install -r requirements-production.txt 'sentencepiece==0.2.1' ruts
       - name: Refresh the private cinema catalogue for production
-        if: github.ref == 'refs/heads/main' && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true'))
+        if: github.ref == 'refs/heads/main' && !inputs.settings_only && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true'))
         env:
           EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
         run: python -m src.editorial_cinema_catalogue
@@ -52,7 +59,9 @@ jobs:
           EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
           ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
           ZEN_CORE_CONTROL_ENDPOINT: 'https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/control'
-          ZEN_CORE_PRODUCTION_ENABLED: ${{ github.ref == 'refs/heads/main' && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true')) }}
+          ZEN_CORE_PRODUCTION_ENABLED: ${{ github.ref == 'refs/heads/main' && !inputs.settings_only && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true')) }}
+          ZEN_CORE_SETTINGS_ONLY: ${{ github.ref == 'refs/heads/main' && inputs.settings_only == true }}
+          ZEN_CORE_SETTINGS_SYNC_ENABLED: ${{ github.ref == 'refs/heads/main' && vars.ZEN_CORE_SETTINGS_SYNC_ENABLED == 'true' }}
           ZEN_CORE_PILOT_JOB: ${{ github.ref == 'refs/heads/main' && inputs.pilot_job || '' }}
           ZEN_CORE_PILOT_PASSES: ${{ inputs.pilot_passes || '1' }}
           OMP_NUM_THREADS: '2'

@@ -13,9 +13,18 @@ MODELS = {
     "edit": "deepseek/deepseek-v4-pro-0813",
     "image": "bytedance-seed/seedream-5-0-flash",
 }
+# Candidates the owner may choose between. Only a model whose price the live
+# /models snapshot verified may be used, and the snapshot itself is the gate.
+TEXT_CANDIDATES = {
+    "qwen/qwen3.6-plus",
+    "anthropic/claude-haiku-5.5",
+    "anthropic/claude-sonnet-5.5",
+    "anthropic/claude-opus-5.5",
+    "deepseek/deepseek-v4-pro-0813",
+}
 READ_PATHS = {"/models", "/credits", "/models/" + MODELS["image"] + "/endpoints"}
 WRITE_MODELS = {
-    "/chat/completions": {MODELS[role] for role in ("brain", "draft", "edit")},
+    "/chat/completions": set(TEXT_CANDIDATES),
     "/images": {MODELS["image"]},
 }
 

@@ -4,10 +4,14 @@ import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from 
 import {previewJob} from "./adapter.mjs";
 import {intakeView,controlView,queueView,accountView} from "./intake.mjs";
 import {recordReceipt} from "./receipt.mjs";
+import {requestedSettingsIn,acknowledgeSettingsIn} from "./settings-sync.mjs";
+import {defaultCatalogue,writeModels,readModels} from "./model-settings.mjs";
+import {verifiedCatalogue} from "./model-prices.mjs";
 import {runProbe} from "./probe.mjs";
 import {requestStage} from "./stage-intent.mjs";
 import {notifyReceipt} from "./notifications.mjs";
 import {readMemory,writeMemory} from "./memory.mjs";
+import {readAgentSettings,writeAgentSettings,agentSettingsHistory,AGENT_MODELS,AGENT_REASONING} from "./agent-settings.mjs";
 import {diagnose} from "./diagnostics.mjs";
 import {recoverTimer,recoverInterrupted} from "./recovery.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
@@ -90,7 +94,13 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core/diagnostics")return Response.json(await this.diagnostics(now,true));
   if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
+  if(request.method==="GET"&&url.pathname==="/core/agent/settings"){
+   const settings=await readAgentSettings(this.storage);
+   return Response.json({settings,models:AGENT_MODELS,reasoningLevels:AGENT_REASONING,history:await agentSettingsHistory(this.storage),executionEnabled:false,publicationAuthorized:false,rssEnabled:false});
+  }
+
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
+  if(request.method==="GET"&&url.pathname=="/core/models")return Response.json(await readModels(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/jobs"){
    const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),
     readBudget(this.storage,now),opsState(this.storage),this.state()]);
@@ -106,15 +116,39 @@ export class CoreHandler {
   }
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname=="/core/models/settings"){
+   // The owner changes the requested model policy; existing orders keep their own pin.
+   const r=await writeModels(this.storage,d,now);
+   return Response.json(r.body,{status:r.status});
+  }
   if(url.pathname==="/core/probe"){const r=await runProbe(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/watchdog")return Response.json(await this.watchdog(now));
   if(url.pathname==="/core/memory/settings"){const r=await writeMemory(this.storage,d,now);return Response.json(r.body,{status:r.status});}
+  if(url.pathname=="/core/agent/settings"){const r=await writeAgentSettings(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/receipt"){const r=await recordReceipt(this.storage,d,now);if(r.receipt&&r.events?.length){try{await notifyReceipt(this.storage,this.env,r.receipt,r.events,now);}catch{}}return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/account"){const r=await accountView(this.storage,d,now,this.env?.ZEN_CORE_EXECUTION_ENABLED==="true");return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/queue"){const r=await queueView(this.storage,d.cursor??null);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/control"){const r=await controlView(this.storage,d.id,now,this.env?.ZEN_CORE_EXECUTION_ENABLED==="true");return Response.json(r.body,{status:r.status});}
+  if(url.pathname==="/core/executor-settings"){
+   const r=await this.storage.transaction(async tx=>{
+    if(d.action==="read")return {status:200,body:{schema:"zen-core/settings-v1",settings:await requestedSettingsIn(tx),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}};
+    if(d.action==="catalogue"){
+     const snapshot=d.snapshot;
+     if(!snapshot||snapshot.source!=="routerai:/models"||!Number.isSafeInteger(snapshot.observedAt)||snapshot.observedAt>now||now-snapshot.observedAt>300000||!Array.isArray(snapshot.data)||snapshot.data.length>16)return {status:400,body:{error:"invalid_catalogue_snapshot"}};
+     const allowed=new Set(defaultCatalogue().map(m=>m.id));
+     if(snapshot.data.some(row=>!row||!allowed.has(row.id)))return {status:400,body:{error:"invalid_catalogue_model"}};
+     const old=await tx.get("models:verified-catalogue");
+     if(old&&old.observedAt>snapshot.observedAt)return {status:409,body:{error:"stale_catalogue_snapshot"}};
+     const checked=verifiedCatalogue(defaultCatalogue(),snapshot,now);
+     await tx.put("models:verified-catalogue",snapshot);
+     return {status:200,body:{ok:true,verified:checked.filter(m=>m.priceVerified).length}};
+    }
+    if(d.action==="ack"){const a=await acknowledgeSettingsIn(tx,d.report,now);return {status:a.ok?200:409,body:a};}
+    return {status:400,body:{error:"invalid_settings_action"}};
+   });return Response.json(r.body,{status:r.status});
+  }
   if(url.pathname==="/core/intake"){const r=await intakeView(this.storage,d.id);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/stage"){const r=await requestStage(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/jobs/preview"){if(d.confirm!==true)return Response.json({error:"invalid_confirmation"},{status:400});const r=await previewJob(this.storage,d.id,now,validateJob,STAGES);return Response.json(r.body,{status:r.status});}

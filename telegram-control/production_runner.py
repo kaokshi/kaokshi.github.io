@@ -11,6 +11,7 @@ from urllib.error import HTTPError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from document_delivery import deliver_documents
 from intake_client import build_receipt, drain, push_receipt
+from settings_client import synchronize, publish_catalogue
 from intake_runner import CHECKPOINT, CURSOR, validate_checkpoint
 from src.editorial_memory import digest
 from src.editorial_zen_cloud import CloudCore, GitHubStore, STATE
@@ -166,6 +167,18 @@ def main():
     if (snapshot["publicationAuthorized"] is not False or snapshot["rssEnabled"] is not False
             or snapshot["executionEnabled"] is not production):
         raise CoreBlocked("execution_gate_mismatch")
+    settings_only = os.getenv("ZEN_CORE_SETTINGS_ONLY") == "true"
+    if settings_only and (production or os.getenv("ZEN_CORE_PILOT_JOB") or os.getenv("ZEN_CORE_PILOT_PASSES", "1") != "1"):
+        raise CoreBlocked("settings_only_requires_execution_disabled")
+    if settings_only or os.getenv("ZEN_CORE_SETTINGS_SYNC_ENABLED") == "true":
+        token = os.getenv("ROUTERAI_API_KEY")
+        if not token:
+            raise CoreBlocked("routerai_api_key_missing")
+        publish_catalogue(endpoint, secret, token)
+        synchronize(core, endpoint, secret)
+        if settings_only:
+            print(json.dumps({"settings": "acknowledged", "paidRequests": 0}))
+            return
     intake = accept_cycle(core, endpoint, secret, production)
     pilot = os.getenv("ZEN_CORE_PILOT_JOB", "")
     if pilot:
