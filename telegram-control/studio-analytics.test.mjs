@@ -13,6 +13,8 @@ const routes = Object.fromEntries(STUDIO_CHANNELS.map(channel => [channel,
  "https://dzen.ru/profile/editor/id/" + ids[channel] + "/publications-stat"]));
 const key = "ab".repeat(32);
 const mockSecret = "synthetic-cookie-secret";
+// Ciphertext and session ids are random; escape them so a stray "+" or "." cannot break the pattern.
+const escapeRe = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const raw = {cookies: [
  {domain: ".dzen.ru", name: "dzen", value: mockSecret, httpOnly: true, secure: true, expires: -1},
  {domain: "other.invalid", name: "other", value: "off-domain", httpOnly: true, secure: true, expires: -1},
@@ -124,7 +126,7 @@ test("three-channel acceptance gates hourly sync, stores history, and deduplicat
  assert.equal(status.channels[2].history.length, 2);
  assert.equal(status.channels[0].latest.dzen.impressions, 6);
  assert.ok(status.lastSuccess && status.manualAvailable);
- assert.doesNotMatch(JSON.stringify(status), new RegExp(mockSecret + "|" + saved.ciphertext.slice(0, 24) + "|" + ids.science));
+ assert.doesNotMatch(JSON.stringify(status), new RegExp([mockSecret, saved.ciphertext.slice(0, 24), ids.science].map(escapeRe).join("|")));
  assert.equal((await f.call("refresh", {})).status, 202);
  assert.equal((await f.call("refresh", {})).status, 409);
  assert.deepEqual(f.requests[0].body, {ref: "main", inputs: {mode: "hourly"}});
@@ -215,7 +217,7 @@ test("all cloud stages use the approved session and emit only safe diagnostics",
  assert.equal(d.status, "passed");
  assert.ok(d.closed);
  assert.deepEqual(calls, ["POST", "DELETE"]);
- assert.doesNotMatch(JSON.stringify(d), new RegExp(mockSecret + "|" + sid + "|" + ids.science));
+ assert.doesNotMatch(JSON.stringify(d), new RegExp([mockSecret, sid, ids.science].map(escapeRe).join("|")));
 });
 
 test("unknown allocation remains unconfirmed and never starts a second browser", async () => {
