@@ -93,17 +93,17 @@ export async function writeModels(storage,data,now=Date.now(),catalogue){
   const blocked=await guards(tx);if(blocked)return {status:423,body:{error:blocked}};
   const current=await resolve(tx,await tx.get(POLICY_KEY)||await initialPolicy());
   if(current.revision!==data.revision||current.revision===Number.MAX_SAFE_INTEGER)return {status:409,body:{error:"stale_revision"}};
-  let target,rollbackOf=null;
+  let target,reasoning=data.reasoning,rollbackOf=null;
   if(data.action==="set")target=data.models;
   else if(data.action==="rollback"){
    if(!revisionOK(data.targetRevision))return {status:400,body:{error:"invalid_rollback_target"}};
    const h=data.targetRevision===0?await initialPolicy():await tx.get(key(data.targetRevision));
    if(!h)return {status:404,body:{error:"unknown_revision"}};
-   target=(await resolve(tx,h)).models;rollbackOf=data.targetRevision;
+   const prior=await resolve(tx,h);
+   target=prior.models;reasoning=prior.reasoning;rollbackOf=data.targetRevision;
   }else return {status:400,body:{error:"invalid_action"}};
   const v=validateModels(target,catalogue??await readCatalogue(tx,now));
   if(!v.ok)return {status:400,body:{error:v.error,role:v.role??null}};
-  const reasoning=data.action==="rollback"?current.reasoning:data.reasoning;
   const rv=validateReasoning(reasoning??current.reasoning);
   if(!rv.ok)return {status:400,body:{error:rv.error,role:rv.role??null}};
   const revision=current.revision+1;if(await tx.get(key(revision)))return {status:409,body:{error:"stale_revision"}};

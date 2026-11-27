@@ -77,12 +77,13 @@ test("a stale revision never overwrites a newer policy", async () => {
 test("a rollback restores an earlier revision and keeps the history", async () => {
  const {storage} = fixture();
  const target = {...DEFAULT_MODELS, draft: "anthropic/claude-sonnet-5.5"};
- assert.equal((await post(storage, "/models/settings", {confirm: true, revision: 0, action: "set", models: target})).status, 200);
+ assert.equal((await post(storage, "/models/settings", {confirm: true, revision: 0, action: "set", models: target, reasoning: {...DEFAULT_REASONING_POLICY, plan: "high"}})).status, 200);
  const r = await post(storage, "/models/settings", {confirm: true, revision: 1, action: "rollback", targetRevision: 0});
  assert.equal(r.status, 200);
  const body = await r.json();
  assert.equal(body.requested.revision, 2);
  assert.deepEqual(body.requested.models, {...DEFAULT_MODELS});
+ assert.deepEqual(body.requested.reasoning, DEFAULT_REASONING_POLICY);
  assert.equal(body.history[0].rollbackOf, 0);
  // An unknown rollback target is refused.
  const bad = await post(storage, "/models/settings", {confirm: true, revision: 2, action: "rollback", targetRevision: 99});
