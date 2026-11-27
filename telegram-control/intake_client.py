@@ -33,6 +33,9 @@ def accept(core, envelope, expected_id, *, production=False):
             or transition["mode"] not in ("manual", "semi_autonomous", "autonomous")
             or type(transition["revision"]) is not int or not 0 < transition["revision"] <= 2**53-1):
         raise ValueError("invalid_mode_transition")
+    if "editorialSettings" in envelope:
+        from src.editorial_zen_core import validate_editorial_settings
+        intent = {**intent, "editorialSettings": validate_editorial_settings(envelope["editorialSettings"])}
     job_id = core.submit(intent)
     if transition is not None:
         core.apply_mode(job_id, transition["mode"], transition["revision"])
@@ -73,7 +76,15 @@ def build_receipt(core, job_id, observed_at=None, command_id=None, *, production
     for item in snapshot["budget"]["reserveUses"]:
         reason = item["reason"]
         reserve_by_reason[reason] = reserve_by_reason.get(reason, Decimal(0)) + Decimal(item["rub"])
-    return {**({"stageAcknowledgment": core.stage_acknowledgment(job_id, command_id)} if command_id else {}),
+    stored = core.db.execute("SELECT intent FROM jobs WHERE id=?", (job_id,)).fetchone()
+    pinned = json.loads(stored[0]).get("editorialSettings") if stored else None
+    settings_report = {}
+    if pinned is not None:
+        from src.editorial_zen_core import validate_editorial_settings
+        spec = validate_editorial_settings(pinned)["models"]
+        settings_report = {"editorialSettingsReport": {"models": {
+            "revision": spec["revision"], "hash": spec["hash"]}}}
+    return {**settings_report, **({"stageAcknowledgment": core.stage_acknowledgment(job_id, command_id)} if command_id else {}),
             "schema": "zen-core/receipt-v1", "jobId": job_id,
             "observedAt": int(time.time() * 1000) if observed_at is None else observed_at,
             "modeRevision": jobs[0]["modeRevision"], "effectiveMode": jobs[0]["mode"],

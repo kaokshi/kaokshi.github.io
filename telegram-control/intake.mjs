@@ -3,6 +3,7 @@ import {validateJob} from "./production.mjs";
 import {opsState} from "./ops.mjs";
 import {pendingStage} from "./stage-intent.mjs";
 import {claimProduction,closeProduction,accountStatus} from "./account.mjs";
+import {settingsForPinIn} from "./settings-sync.mjs";
 const encoder=new TextEncoder();
 async function matches(secret,header){
  if(typeof secret!=="string"||! /^[a-fA-F0-9]{64}$/.test(secret)||typeof header!=="string"||!/^Bearer [a-fA-F0-9]{64}$/.test(header))return false;
@@ -51,7 +52,12 @@ export async function intakeView(storage,id){
   if((await tx.get("ops:state"))?.stopped===true)return {status:409,body:{error:"emergency_paused"}};
   const ops=await opsState(tx);
   const job=await tx.get("production:job:"+id),intent=deliverable(job,ops,await tx.get("core:settings"));
-  return intent?{status:200,body:{schema:"zen-core/intake-v1",mode:"intents_only",intent,...(pendingStage(job,ops)?{stageIntent:pendingStage(job,ops)}:{}),...(transitionFor(ops)?{modeTransition:transitionFor(ops)}:{}),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
+  // Opt-in versioned settings transport; legacy orders keep their existing contract.
+  let settingsEnvelope={};
+  if(intent&&job.settingsPin){
+   try{settingsEnvelope={editorialSettings:await settingsForPinIn(tx,job.settingsPin)};}catch{return {status:409,body:{error:"order_settings_history_mismatch"}};}
+  }
+  return intent?{status:200,body:{...settingsEnvelope,schema:"zen-core/intake-v1",mode:"intents_only",intent,...(pendingStage(job,ops)?{stageIntent:pendingStage(job,ops)}:{}),...(transitionFor(ops)?{modeTransition:transitionFor(ops)}:{}),executionEnabled:false,publicationAuthorized:false,rssEnabled:false}}:{status:404,body:{error:"intent_not_available"}};
  });
 }
 // Fresh control observation, not an execution permit.
@@ -65,7 +71,15 @@ async function controlSnapshot(tx,id,now,executionEnabled=false){
   const effective=transition?job?.executorReceipt?.effectiveMode:intent?.mode;
   const policy=await tx.get("budget:policy");
   const mismatch=Boolean(policy&&(policy.mainKop!==30000||policy.reserveKop!==5000));
-  const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":job.origin==="schedule"&&settings?.paused!==false?"schedule_paused":transition&&job.executorReceipt?.modeRevision!==transition.revision?"mode_sync_pending":effective!==mode?"mode_changed":mismatch?"budget_policy_mismatch":null;
+  let settingsBlocked=false;
+  if(job?.settingsPin){
+   try{
+    const pinned=(await settingsForPinIn(tx,job.settingsPin)).models;
+    const reported=job.executorReceipt?.editorialSettingsReport?.models;
+    settingsBlocked=!reported||reported.revision!==pinned.revision||reported.hash!==pinned.hash;
+   }catch{settingsBlocked=true;}
+  }
+  const reason=ops.stopped?"emergency_paused":job?.status==="cancelled"?"job_cancelled":!intent?"job_unavailable":job.origin==="schedule"&&settings?.paused!==false?"schedule_paused":transition&&job.executorReceipt?.modeRevision!==transition.revision?"mode_sync_pending":effective!==mode?"mode_changed":mismatch?"budget_policy_mismatch":settingsBlocked?"model_settings_sync_pending":null;
   return {status:200,body:{schema:"zen-core/control-v1",jobId:id,observedAt:now,version:ops.version,mode,jobMode:effective??null,modeRevision:transition?.revision??0,stopped:ops.stopped,controlClear:reason===null,reason,executionEnabled:executionEnabled===true,publicationAuthorized:false,rssEnabled:false}};
 }
 export async function accountView(storage,d,now=Date.now(),executionEnabled=false){
@@ -80,15 +94,15 @@ export async function accountView(storage,d,now=Date.now(),executionEnabled=fals
 }
 export async function bridgeRequest(request,env){
  const path=new URL(request.url).pathname;
- if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control","/internal/zen-core/queue","/internal/zen-core/account","/internal/zen-core/probe"].includes(path))return null;
+ if(!["/internal/zen-core/intake","/internal/zen-core/receipt","/internal/zen-core/control","/internal/zen-core/queue","/internal/zen-core/account","/internal/zen-core/probe","/internal/zen-core/executor-settings"].includes(path))return null;
  const receipt=path.endsWith("/receipt"),route=path.split("/").pop();
  const headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"};
  if(request.method!=="POST")return Response.json({error:"method_not_allowed"},{status:405,headers});
  if(!await matches(env.ZEN_CORE_INTAKE_SECRET,request.headers.get("Authorization")))return Response.json({error:"unauthorized"},{status:401,headers});
- let d;try{const raw=await request.text();if(raw.length>(receipt||route==="probe"?16384:512))throw Error();d=JSON.parse(raw);}catch{return Response.json({error:"invalid_request"},{status:400,headers});}
+ let d;try{const raw=await request.text();if(raw.length>(receipt||route==="probe"||route==="executor-settings"?16384:512))throw Error();d=JSON.parse(raw);}catch{return Response.json({error:"invalid_request"},{status:400,headers});}
  if(route==="probe"&&(typeof d?.run!=="string"||! /^[0-9]{1,20}-[0-9]{1,3}$/.test(d.run)))return Response.json({error:"invalid_probe"},{status:400,headers});
  const namespace=route==="probe"?"zen-core-probe-v1:"+d.run:"zen-core-scheduler-v1";
  const stub=env.REVIEW_JOURNAL?.get(env.REVIEW_JOURNAL.idFromName(namespace));
  if(!stub)return Response.json({error:"core_unavailable"},{status:503,headers});
- try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt||route==="account"||route==="probe"?d:route==="queue"?{cursor:d?.cursor??null}:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
+ try{const r=await stub.fetch("https://core.internal/core/"+route,{method:"POST",body:JSON.stringify(receipt||route==="account"||route==="probe"||route==="executor-settings"?d:route==="queue"?{cursor:d?.cursor??null}:{id:d?.id})});return Response.json(await r.json(),{status:r.status,headers});}catch{return Response.json({error:"core_unavailable"},{status:503,headers});}
 }
