@@ -11,6 +11,7 @@ import {runProbe} from "./probe.mjs";
 import {requestStage} from "./stage-intent.mjs";
 import {notifyReceipt} from "./notifications.mjs";
 import {readMemory,writeMemory} from "./memory.mjs";
+import {readAgentSettings,writeAgentSettings,agentSettingsHistory,AGENT_MODELS,AGENT_REASONING} from "./agent-settings.mjs";
 import {diagnose} from "./diagnostics.mjs";
 import {recoverTimer,recoverInterrupted} from "./recovery.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
@@ -93,6 +94,11 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core/diagnostics")return Response.json(await this.diagnostics(now,true));
   if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
+  if(request.method==="GET"&&url.pathname==="/core/agent/settings"){
+   const settings=await readAgentSettings(this.storage);
+   return Response.json({settings,models:AGENT_MODELS,reasoningLevels:AGENT_REASONING,history:await agentSettingsHistory(this.storage),executionEnabled:false,publicationAuthorized:false,rssEnabled:false});
+  }
+
   if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
   if(request.method==="GET"&&url.pathname=="/core/models")return Response.json(await readModels(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/jobs"){
@@ -118,6 +124,7 @@ export class CoreHandler {
   if(url.pathname==="/core/probe"){const r=await runProbe(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/watchdog")return Response.json(await this.watchdog(now));
   if(url.pathname==="/core/memory/settings"){const r=await writeMemory(this.storage,d,now);return Response.json(r.body,{status:r.status});}
+  if(url.pathname=="/core/agent/settings"){const r=await writeAgentSettings(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/ops/settings"){const r=await updateOps(this.storage,d,now,initial);if(r.status===200)await this.scheduleAlarm(now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/budget/settings"){const r=await writeBudget(this.storage,d,now);return Response.json(r.body,{status:r.status});}
   if(url.pathname==="/core/receipt"){const r=await recordReceipt(this.storage,d,now);if(r.receipt&&r.events?.length){try{await notifyReceipt(this.storage,this.env,r.receipt,r.events,now);}catch{}}return Response.json(r.body,{status:r.status});}
