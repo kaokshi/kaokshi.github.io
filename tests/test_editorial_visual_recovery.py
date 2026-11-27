@@ -111,6 +111,28 @@ class DiagramIllustrationTest(unittest.TestCase):
         self.assertIn("science/attempts/image-00-attempt-1-qa.json", saved)
         self.assertIn("science/attempts/image-00-attempt-2-qa.json", saved)
 
+    def test_locally_rejected_photo_does_not_call_paid_qa(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        spend = SimpleNamespace(image_price=Decimal(0), chat=Mock())
+        checkpoints = SimpleNamespace(image=lambda *_: None, read_attempt_asset=lambda *_: None,
+                                      read=lambda *_: None)
+        records = []
+        scene = {"kind": "photo", "subject": "Synthetic scene", "brief": "Synthetic brief"}
+        article = {"intro": ["Synthetic fixture."], "sections": []}
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(two, "science_asset", return_value=(b"corrupt", {})), \
+                patch.object(two, "decode_candidate", side_effect=ValueError("corrupt")):
+            rows, _, failed = two.illustrate(spend, lambda name, data: records.append((name, data)),
+                                             {}, "legends", article, "Fixture", "Fixture", [scene],
+                                             None, Path(directory), 0, [], checkpoints=checkpoints)
+        self.assertEqual((rows, failed), ([], [0]))
+        spend.chat.assert_not_called()
+        qa_rows = [data for name, data in records if name.endswith("-qa.json")]
+        self.assertEqual(len(qa_rows), 3)
+        self.assertTrue(all(b"image_local_check_failed" in data for data in qa_rows))
+
     def test_replay_uses_identical_stage_keys_so_no_extra_charge_is_created(self):
         first = self.run_illustration()
         second = self.run_illustration()

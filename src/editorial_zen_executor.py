@@ -381,9 +381,19 @@ class Session:
         return raw, record["asset"]
 
     def image(self, slot, path):
-        prior = self.read(f"accepted/{slot}.json")
-        if prior is None:
-            return None
+        name = f"accepted/{slot}.json"
+        prior = self.read(name)
+        recovering = prior is None
+        if recovering:
+            registered = self.core.access(lambda c: c.db.execute(
+                "SELECT 1 FROM images WHERE article=? AND slot=?", (self.article, slot)).fetchone() is not None)
+            if not registered:
+                return None
+            # The bytes and sidecar are written before the ledger registration.
+            # A crash before writing the accepted manifest must not rerun QA.
+            prior = self.read(f"{self.channel}/images/image-{slot:02d}.json")
+            if prior is None:
+                raise CoreBlocked("accepted_image_manifest_missing")
         row = json.loads(prior)
         if row["file"] != f"image-{slot:02d}.jpg":
             raise CoreBlocked("accepted_image_filename_invalid")
@@ -391,6 +401,8 @@ class Session:
         if raw is None or digest(raw) != row["sha256"]:
             raise CoreBlocked("accepted_image_integrity_failed")
         self.core.access(lambda c: c.register_image(self.article, slot, row), change=True)
+        if recovering:
+            self.save(name, prior)
         path.mkdir(parents=True, exist_ok=True)
         (path / row["file"]).write_bytes(raw)
         (path / row["file"]).with_suffix(".json").write_bytes(prior)
