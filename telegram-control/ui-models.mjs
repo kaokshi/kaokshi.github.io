@@ -2,7 +2,14 @@
 // bundle by ui.mjs. The source holds no backtick and no template interpolation,
 // so it is carried as a raw template literal without hand-escaping.
 export const MODELS_JS = String.raw`
-async function loadModels(){\n const policyRoot=by("modelpanel"),agentRoot=by("agentpanel"),hint=by("modelshint");if(!policyRoot)return;\n try{await renderModelPolicy(policyRoot);if(agentRoot)await renderAgentSettings(agentRoot);}\n catch(err){if(hint)hint.textContent="Политика моделей недоступна. Обновите приложение.";}\n}\nfunction modelName(id){
+async function loadModels(){
+ const policyRoot=by("modelpanel"),agentRoot=by("agentpanel"),hint=by("modelshint");
+ if(!policyRoot||!agentRoot)return;
+ if(hint)hint.textContent="Загрузка настроек…";
+ const results=await Promise.allSettled([renderModelPolicy(policyRoot),renderAgentSettings(agentRoot)]);
+ if(hint)hint.textContent=results.some(r=>r.status==="rejected")?"Часть настроек недоступна. Обновите приложение.":"Настройки редакции и управляющего агента";
+}
+function modelName(id){
  return String(id||"").replace(/^[a-z]+\//,"").replace(/-/g," ").replace(/\b\w/g,c=>c.toUpperCase());
 }
 function money2(value){
@@ -16,7 +23,7 @@ async function renderModelPolicy(root){
  root.replaceChildren();
  const head=e("div",null,root);head.className="costrow";
  e("h3","Политика редакции · ревизия "+d.requested.revision,head);
- e("p",d.pendingSync?"Исполнитель ещё не подтвердил эту ревизию.":"Исполнитель работает на подтверждённой ревизии "+d.effective.revision+".",head);
+ e("p",d.pendingSync||d.executorSync!=="acknowledged"?"Исполнитель ещё не подтвердил эту ревизию.":"Исполнитель работает на подтверждённой ревизии "+d.effective.revision+".",head);
  const note=e("p",null,root);note.className="muted";
  note.textContent="Модель для роли меняется в ревизии. Уже созданные заказы сохраняют свою ревизию.";
  const roles=e("div",null,root);roles.className="core-row";
@@ -33,7 +40,7 @@ async function renderModelPolicy(root){
    const option=e("option",null,pick);
    option.value=id;
    option.textContent=modelName(id)+(model&&model.priceVerified?"":" — цена не подтверждена");
-   option.disabled=!model||model.priceVerified!==true;
+   option.disabled=id!==current&&(!model||model.available!==true||model.priceVerified!==true);
    if(id===current)option.selected=true;
   }
   const level=e("select",null,block);level.className="review-input";level.setAttribute("aria-label","Уровень мышления роли "+role.role);
@@ -49,6 +56,7 @@ async function renderModelPolicy(root){
   apply.addEventListener("click",async()=>{
    const models={...d.requested.models},reasoning={...d.requested.reasoning};
    models[role.id]=pick.value;reasoning[role.id]=level.value;
+   if(!window.confirm("Сохранить выбранную модель и уровень мышления для новых заказов?"))return;
    apply.disabled=true;
    try{
     await coreRequest("/api/core/models/settings",{confirm:true,revision:d.requested.revision,action:"set",models,reasoning});
@@ -67,8 +75,8 @@ async function renderModelPolicy(root){
   }
   const pricing=model.pricing||{};
   const parts=[];
-  if(pricing.prompt)parts.push("ввод "+money2(pricing.prompt.value)+"/тыс. токенов");
-  if(pricing.completion)parts.push("вывод "+money2(pricing.completion.value)+"/тыс. токенов");
+  if(pricing.prompt)parts.push("ввод "+money2(Number(pricing.prompt.value)*1000)+"/тыс. токенов");
+  if(pricing.completion)parts.push("вывод "+money2(Number(pricing.completion.value)*1000)+"/тыс. токенов");
   if(pricing.image_output)parts.push("изображение "+money2(pricing.image_output.value));
   line.textContent=modelName(model.id)+": "+(parts.join(" · ")||"тариф не указан");
  }
@@ -114,7 +122,7 @@ async function renderAgentSettings(root){
    perCallRub:Number(perCall.value),dailyRub:Number(daily.value)};
   if(!window.confirm("Сменить модель управляющего агента и его лимиты? История и память сохранятся."))return;
   save.disabled=true;
-  try{await coreRequest("/api/core/agent/settings",body);await renderAgentSettings(root);}
+  try{await coreRequest("/api/core/agent/settings/write",body);await renderAgentSettings(root);await loadAgent();}
   catch(err){save.disabled=false;window.alert(err.message);}
  });
  const hist=e("div",null,root);hist.className="core-row";
