@@ -27,7 +27,14 @@ LICENSES = {
 }
 
 
-def validate_plan(plan, section_count, channel, settings):
+def validate_plan(plan, section_count, channel, settings, *, licensed_photos=False):
+    """Check a visual plan against the same contract the production route applies.
+
+    The production plan lives in editorial_routerai_two_articles.plan_images and
+    is enforced before any paid stage. This function is the offline twin of that
+    check: it verifies the same layout, the same per-channel media rules and the
+    same limits, so a plan accepted offline cannot fail later in the paid route.
+    """
     blocks = plan.get("images")
     # Each story has one independent cover immediately after the contents, then
     # exactly one distinct illustration immediately below every section heading.
@@ -40,19 +47,30 @@ def validate_plan(plan, section_count, channel, settings):
     if not isinstance(subject, str) or not subject.strip() or len(subject) > 240:
         raise Blocked("image_plan_subject")
     sections, descriptions, kinds = set(), set(), set()
+    # Mirror the media rules the production route applies in plan_images.
+    if channel == "cinema":
+        allowed, required = {"photo"}, {"photo"}
+    elif licensed_photos and channel == "science":
+        allowed, required = {"photo", "diagram"}, {"photo", "diagram"}
+    elif licensed_photos:
+        allowed, required = {"photo"}, {"photo"}
+    elif channel == "science":
+        allowed, required = {"illustration", "photo", "diagram"}, {"illustration", "photo", "diagram"}
+    else:
+        allowed, required = {"illustration"}, {"illustration"}
     for row in blocks:
         if not isinstance(row, dict):
             raise Blocked("image_plan_entry_invalid")
         section, kind = row.get("section"), row.get("kind")
         if type(section) != int or section not in range(1, section_count + 1):
             raise Blocked("image_plan_section_invalid")
-        if kind not in {"photo", "illustration"} or (channel == "legends" and kind != "illustration") or (channel == "cinema" and kind != "photo"):
+        if kind not in allowed:
             raise Blocked("image_plan_kind_invalid")
         if any(not isinstance(row.get(k), str) or not 5 <= len(row[k].strip()) <= limit
-               for k, limit in (("subject", 180), ("brief", 950))):
+               for k, limit in (("subject", 180), ("brief", 900))):
             raise Blocked("image_plan_brief_invalid")
         if kind == "photo" and (not isinstance(row.get("query"), str)
-                                or not 2 <= len(row["query"].strip()) <= 150):
+                                or not 2 <= len(row["query"].strip()) <= 130):
             raise Blocked("image_plan_query_invalid")
         brief = row["brief"].casefold().strip()
         if brief in descriptions:
@@ -63,8 +81,11 @@ def validate_plan(plan, section_count, channel, settings):
     distribution = Counter(row["section"] for row in blocks)
     if distribution[1] != 2 or any(distribution[i] != 1 for i in range(2, section_count + 1)):
         raise Blocked("image_plan_layout_distribution")
-    if len(sections) != section_count or (channel == "science" and len(kinds) != 2):
+    if len(sections) != section_count:
         raise Blocked("image_plan_missing_section_or_medium")
+    if kinds != required:
+        raise Blocked("licensed_photos_required" if required == {"photo"} and channel != "science"
+                      else "science_visual_mix_required")
 
 
 def commons_photos(query):
