@@ -2,17 +2,19 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
 import {readFileSync} from "node:fs";
+import {fileURLToPath} from "node:url";
 const script=new URL("./deploy.mjs",import.meta.url);
+const scriptPath=fileURLToPath(script);
 test("deployment requires explicit confirmation before contacting any service",()=>{
- const run=spawnSync(process.execPath,[script.pathname],{env:{PATH:process.env.PATH},encoding:"utf8",timeout:5000});
+ const run=spawnSync(process.execPath,[scriptPath],{env:{PATH:process.env.PATH},encoding:"utf8",timeout:5000});
  assert.equal(run.status,1);assert.match(run.stdout+run.stderr,/explicit_update_confirmation_required/);
 });
 test("confirmed upgrade without dedicated bridge secret fails before network",()=>{
- const run=spawnSync(process.execPath,[script.pathname],{env:{PATH:process.env.PATH,ZEN_CONTROL_CONFIRM_UPDATE:"true"},encoding:"utf8",timeout:5000});
+ const run=spawnSync(process.execPath,[scriptPath],{env:{PATH:process.env.PATH,ZEN_CONTROL_CONFIRM_UPDATE:"true"},encoding:"utf8",timeout:5000});
  assert.equal(run.status,1);assert.match(run.stdout+run.stderr,/intake_secret_required/);
 });
 test("upgrade rejects malformed supplied webhook secret before network",()=>{
- const run=spawnSync(process.execPath,[script.pathname],{env:{PATH:process.env.PATH,ZEN_CONTROL_CONFIRM_UPDATE:"true",ZEN_CORE_INTAKE_SECRET:"a".repeat(64),TELEGRAM_WEBHOOK_SECRET:"bad"},encoding:"utf8",timeout:5000});
+ const run=spawnSync(process.execPath,[scriptPath],{env:{PATH:process.env.PATH,ZEN_CONTROL_CONFIRM_UPDATE:"true",ZEN_CORE_INTAKE_SECRET:"a".repeat(64),TELEGRAM_WEBHOOK_SECRET:"bad"},encoding:"utf8",timeout:5000});
  assert.equal(run.status,1);assert.match(run.stdout+run.stderr,/existing_webhook_secret_invalid/);
 });
 test("deployment is manual and carries all imported modules",()=>{
@@ -33,7 +35,7 @@ test("rollback refuses unknown history, split traffic or an intervening deployme
  assert.deepEqual(rollbackBody(prior,next,next),{strategy:"percentage",versions:[{version_id:prior.version,percentage:100}]});
 });
 test("rollback requires explicit confirmation before network",()=>{
- const run=spawnSync(process.execPath,[new URL("./rollback.mjs",import.meta.url).pathname],{env:{PATH:process.env.PATH},encoding:"utf8",timeout:5000});
+ const run=spawnSync(process.execPath,[fileURLToPath(new URL("./rollback.mjs",import.meta.url))],{env:{PATH:process.env.PATH},encoding:"utf8",timeout:5000});
  assert.equal(run.status,1);assert.match(run.stdout,/explicit_rollback_confirmation_required/);
 });
 
