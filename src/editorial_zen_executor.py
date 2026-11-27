@@ -82,17 +82,21 @@ class MeteredRouter(Spend):
         self.session, self.token, self.transport, self.balance = session, token, transport, balance
         self.report = {"calls": []}
         self.models = dict(MODELS)
+        self.reasoning = {"brain": "off", "draft": "low", "edit": "low", "visual_plan": "low"}
         spec = getattr(session, "plan", {}).get("editorialSettings")
         if spec is not None:
             from .editorial_zen_core import validate_editorial_settings
             from .editorial_routerai import WRITE_MODELS
-            selected = validate_editorial_settings(spec)["models"]["value"]
-            # The shared pipeline currently uses one brain for planning and visual review.
-            # Do not silently ignore a distinct visual model or bypass the transport allowlist.
-            if selected["visual_plan"] != selected["plan"] or selected["images"] != MODELS["image"]:
+            checked = validate_editorial_settings(spec)
+            selected = checked["models"]["value"]
+            self.reasoning = dict(checked["reasoning"])
+            # The visual plan and the image stage use their own pinned models;
+            # a distinct visual model is allowed as long as the transport allows it.
+            if selected["images"] != MODELS["image"]:
                 raise CoreBlocked("unsupported_pinned_model_route")
-            self.models.update(brain=selected["plan"], draft=selected["draft"], edit=selected["edit"])
-            if any(self.models[r] not in WRITE_MODELS["/chat/completions"] for r in ("brain", "draft", "edit")):
+            self.models.update(brain=selected["plan"], draft=selected["draft"], edit=selected["edit"],
+                                visual_plan=selected["visual_plan"])
+            if any(self.models[r] not in WRITE_MODELS["/chat/completions"] for r in ("brain", "draft", "edit", "visual_plan")):
                 raise CoreBlocked("routerai_model_not_allowlisted")
         catalog = transport("/models", token, limit=8_000_000, exact_numbers=True).get("data", [])
         required = set(self.models.values()) if use_seedream else set(self.models.values()) - {self.models["image"]}

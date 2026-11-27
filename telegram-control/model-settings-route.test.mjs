@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {CoreHandler} from "./core.mjs";
-import {DEFAULT_MODELS,ROLES,policyHash} from "./model-settings.mjs";
+import {DEFAULT_MODELS,DEFAULT_REASONING_POLICY,ROLES,policyHash} from "./model-settings.mjs";
 
 const now = Date.parse("2026-11-27T09:00:00Z");
 function fixture() {
@@ -20,7 +20,7 @@ test("the model policy is readable and starts on the default revision", async ()
  assert.equal(r.status, 200);
  const body = await r.json();
  assert.equal(body.requested.revision, 0);
- assert.equal(body.requested.hash, await policyHash(DEFAULT_MODELS));
+ assert.equal(body.requested.hash, await policyHash(DEFAULT_MODELS, DEFAULT_REASONING_POLICY));
  assert.deepEqual(body.requested.models, {...DEFAULT_MODELS});
  assert.equal(body.pendingSync, false);
  assert.equal(body.executorSync, "not_connected");
@@ -38,7 +38,7 @@ test("the owner writes a new model revision that is recorded in history", async 
  const body = await r.json();
  assert.equal(body.requested.revision, 1);
  assert.equal(body.requested.models.draft, "anthropic/claude-sonnet-5.5");
- assert.equal(body.requested.hash, await policyHash(target));
+ assert.equal(body.requested.hash, await policyHash(target, DEFAULT_REASONING_POLICY));
  assert.equal(body.pendingSync, true, "a new revision is not yet acknowledged by the executor");
  assert.equal(body.history.length, 1);
  assert.equal(body.history[0].revision, 1);
@@ -111,10 +111,10 @@ test("an order keeps its own pinned revision after the policy changes", async ()
  const pinned = await import("./settings-sync.mjs");
  // The executor has acknowledged revision 0; a new order must pin that revision,
  // not the requested revision 1 that the executor has not acknowledged yet.
- await store.set("models:executor-ack", {revision: 0, hash: await policyHash(DEFAULT_MODELS), acknowledgedAt: new Date(now).toISOString()});
+ await store.set("models:executor-ack", {revision: 0, hash: await policyHash(DEFAULT_MODELS, DEFAULT_REASONING_POLICY), acknowledgedAt: new Date(now).toISOString()});
  const pin = await pinned.pinFor(storage);
  assert.equal(pin.models.revision, 0, "a new order pins the revision the executor actually runs");
- assert.equal(pin.models.hash, await policyHash(DEFAULT_MODELS));
+ assert.equal(pin.models.hash, await policyHash(DEFAULT_MODELS, DEFAULT_REASONING_POLICY));
  const effective = await pinned.effectiveSettingsIn(storage);
  assert.equal(effective.models.revision, 0, "the executor still runs the revision it acknowledged");
  assert.equal(effective.models.source, "executor_ack");

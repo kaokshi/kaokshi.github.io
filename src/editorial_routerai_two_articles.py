@@ -117,10 +117,21 @@ def money(value):
     return amount
 
 
+def reasoning_payload(level):
+    """Translate a policy reasoning level into the provider request field."""
+    if level == "off":
+        return {"enabled": False}
+    if level in ("low", "medium", "high"):
+        return {"effort": level}
+    raise UnsafeToTest("unsupported_reasoning_level")
+
+
 class Spend:
     def __init__(self, token, report):
         self.token = token
         self.report = report
+        # Reasoning level per role; the pinned policy overrides it when present.
+        self.reasoning = {"brain": "off", "draft": "low", "edit": "low", "visual_plan": "low"}
         self.total = sum((money(row["cost_rub"]) for row in report["calls"]), Decimal(0))
         self.initial = credits(token) + self.total
         catalog = call("/models", token, limit=8_000_000, exact_numbers=True).get("data", [])
@@ -232,7 +243,7 @@ class Spend:
         answer = self.request(channel, stage, role, "/chat/completions", {
             "messages": [{"role": "system", "content": SYSTEM},
                          {"role": "user", "content": content}],
-            "max_tokens": cap, "reasoning": {"enabled": False} if role == "brain" else {"effort": "low"},
+            "max_tokens": cap, "reasoning": reasoning_payload(self.reasoning.get(role, "off")),
         }, self.text_bound(role, tokens, cap), reserve=reserve)
         try:
             choice = answer["choices"][0]

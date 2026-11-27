@@ -1,5 +1,5 @@
 // Versioned editorial executor synchronization. Opus limits are separate.
-import {POLICY_KEY,ACK_KEY,HISTORY_PREFIX,ROLES,policyHash,initialPolicy} from "./model-settings.mjs";
+import {POLICY_KEY,ACK_KEY,HISTORY_PREFIX,ROLES,policyHash,initialPolicy,validateReasoning} from "./model-settings.mjs";
 export const SETTINGS_SCHEMA="zen-core/settings-v1";
 export const SYNC_KINDS=Object.freeze(["models"]);
 export const isHash=v=>typeof v==="string"&&/^[0-9a-f]{64}$/.test(v);
@@ -11,18 +11,18 @@ export function validateSettingsReport(report){
 async function resolveIn(tx,spec){
  if(!valid(spec))return null;
  const entry=spec.revision===0?await initialPolicy():await tx.get(HISTORY_PREFIX+String(spec.revision).padStart(12,"0"));
- if(!entry||entry.revision!==spec.revision||entry.hash!==spec.hash||!entry.models||Object.keys(entry.models).length!==ROLES.length||ROLES.some(r=>typeof entry.models[r.id]!=="string")||await policyHash(entry.models)!==spec.hash)return null;
- return {revision:spec.revision,hash:spec.hash,value:Object.fromEntries(ROLES.map(r=>[r.id,entry.models[r.id]]))};
+ if(!entry||entry.revision!==spec.revision||entry.hash!==spec.hash||!entry.models||Object.keys(entry.models).length!==ROLES.length||ROLES.some(r=>typeof entry.models[r.id]!=="string")||!entry.reasoning||await policyHash(entry.models,entry.reasoning)!==spec.hash)return null;
+ return {revision:spec.revision,hash:spec.hash,value:Object.fromEntries(ROLES.map(r=>[r.id,entry.models[r.id]])),reasoning:{...entry.reasoning}};
 }
 export async function effectiveSettingsIn(tx){
  const ack=await tx.get(ACK_KEY),resolved=await resolveIn(tx,ack||await initialPolicy());
  if(!resolved)throw Error("executor_settings_history_mismatch");
- return {models:{...resolved,source:ack?"executor_ack":"defaults_executor_not_connected",acknowledgedAt:ack?.acknowledgedAt??null}};
+ return {models:{...resolved,source:ack?"executor_ack":"defaults_executor_not_connected",acknowledgedAt:ack?.acknowledgedAt??null},reasoning:resolved.reasoning};
 }
 export async function requestedSettingsIn(tx){
  const resolved=await resolveIn(tx,await tx.get(POLICY_KEY)||await initialPolicy());
  if(!resolved)throw Error("requested_settings_history_mismatch");
- return {models:resolved};
+ return {models:resolved,reasoning:resolved.reasoning};
 }
 export async function financialHoldIn(tx){
  if(await tx.get("agent:charge-hold")||await tx.get("account:production-hold"))return "financial_hold";
@@ -47,10 +47,12 @@ export async function acknowledgeSettingsIn(tx,report,now,{jobId=null,pin=null}=
  return {ok:true,acks:{models:ack}};
 }
 export async function pinFor(tx){
- const {models}=await effectiveSettingsIn(tx);return {models:{revision:models.revision,hash:models.hash}};
+ const {models,reasoning}=await effectiveSettingsIn(tx);
+ return {models:{revision:models.revision,hash:models.hash},reasoning:{...reasoning}};
 }
 export async function settingsForPinIn(tx,pin){
- const resolved=await resolveIn(tx,pin?.models);if(!resolved)throw Error("order_settings_history_mismatch");return {models:resolved};
+ const resolved=await resolveIn(tx,pin?.models);if(!resolved)throw Error("order_settings_history_mismatch");
+ return {models:resolved,reasoning:resolved.reasoning};
 }
 export async function checkReportAgainstPin(tx,report,pin,now){
  if(!pin)return {ok:false,error:"order_settings_pin_missing"};
