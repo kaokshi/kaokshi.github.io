@@ -1,7 +1,7 @@
 name: ZEN CORE offline tests
 on:
   push:
-    branches: [integration/zen-core-routerai-20261124]
+    branches: [main, integration/zen-core-routerai-20261124]
     paths: ['telegram-control/**', 'src/**', 'tests/**', 'config/zen_core.json', '.github/workflows/telegram-control-deploy.yml', '.github/workflows/zen-core-offline-tests.yml']
   pull_request:
     branches: [main, feature/telegram-control-mvp, integration/zen-core-routerai-20261124, codex/zen-control-1-integration]
