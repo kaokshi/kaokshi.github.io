@@ -53,6 +53,7 @@ jobs:
           ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
           ZEN_CORE_CONTROL_ENDPOINT: 'https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/control'
           ZEN_CORE_PRODUCTION_ENABLED: ${{ github.ref == 'refs/heads/main' && (inputs.pilot_job != '' || (github.event_name == 'schedule' && vars.ZEN_CORE_PRODUCTION_ENABLED == 'true')) }}
+          ZEN_CORE_SETTINGS_SYNC_ENABLED: ${{ github.ref == 'refs/heads/main' && vars.ZEN_CORE_SETTINGS_SYNC_ENABLED == 'true' }}
           ZEN_CORE_PILOT_JOB: ${{ github.ref == 'refs/heads/main' && inputs.pilot_job || '' }}
           ZEN_CORE_PILOT_PASSES: ${{ inputs.pilot_passes || '1' }}
           OMP_NUM_THREADS: '2'

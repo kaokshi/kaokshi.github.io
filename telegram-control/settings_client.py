@@ -38,9 +38,9 @@ def synchronize(core, endpoint, secret, *, transport=exchange):
     settings = validate_editorial_settings(envelope.get("settings"))
     spec = settings["models"]
     selected = spec["value"]
-    if (selected["plan"] != selected["visual_plan"] or selected["images"] != MODELS["image"]
+    if (selected["images"] != MODELS["image"]
             or any(selected[r] not in WRITE_MODELS["/chat/completions"]
-                   for r in ("plan", "draft", "edit"))):
+                   for r in ("plan", "draft", "edit", "visual_plan"))):
         raise CoreBlocked("unsupported_pinned_model_route")
     # Persist before acknowledging; compare-and-set prevents concurrent revision loss.
     name = "editorial-model-settings.json"

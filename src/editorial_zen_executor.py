@@ -89,7 +89,7 @@ class MeteredRouter(Spend):
             from .editorial_routerai import WRITE_MODELS
             checked = validate_editorial_settings(spec)
             selected = checked["models"]["value"]
-            self.reasoning = dict(checked["reasoning"])
+            self.reasoning = {**checked["reasoning"], "brain": checked["reasoning"]["plan"]}
             # The visual plan and the image stage use their own pinned models;
             # a distinct visual model is allowed as long as the transport allows it.
             if selected["images"] != MODELS["image"]:
@@ -112,6 +112,11 @@ class MeteredRouter(Spend):
         if use_seedream and self.image_price <= 0:
             raise CoreBlocked("seedream_price_unverified")
 
+    def chat(self, channel, stage, role, prompt, cap, **kwargs):
+        if role == "brain" and "visual_plan" in self.models and classify(stage, role)[0] != "plan":
+            role = "visual_plan"
+        return super().chat(channel, stage, role, prompt, cap, **kwargs)
+
     def price(self, role, name, unit):
         row = self.prices[self.models[role]]
         if row.get("pricing_units", {}).get(name) != unit:
@@ -129,7 +134,7 @@ class MeteredRouter(Spend):
     def request(self, channel, stage, role, path, payload, bound, *, reserve=0, retain_image=None):
         if role == "image" and not self.image_price:
             raise CoreBlocked("paid_image_generation_disabled")
-        phase, reason, slot = classify(stage, role)
+        phase, reason, slot = classify(stage, "brain" if role == "visual_plan" else role)
         operation = self.session.article + "/" + stage
         body = {**payload, "model": self.models[role]}
         fingerprint = digest(json_bytes({"path": path, "body": body}))
@@ -398,7 +403,7 @@ class Session:
         self.save(f"accepted/{slot}.json", json_bytes(row))
 
     def complete_images(self, rows):
-        if len(rows) != 7:
+        if len(rows) not in (7, 8):
             raise CoreBlocked("image_slots_incomplete")
         self.pass_stage("images", {f"slot_{n}": "passed" for n in range(len(rows))})
 

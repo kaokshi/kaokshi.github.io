@@ -949,14 +949,18 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     save(f"{channel}/qwen-visual-plan.json", json_bytes(audit))
     if status["text_qa"] != "passed":
         raise UnsafeToTest("qwen_text_or_source_qa_failed")
+    saved_scenes = audit.get("images")
+    legacy_visual = (not licensed_photos and bool(resume and "audit" in resume)
+                     and isinstance(saved_scenes, list) and bool(saved_scenes)
+                     and all(isinstance(scene, dict) and "anchor" not in scene for scene in saved_scenes))
     visual_options = {"science": channel == "science", "cinema": bool(film),
-                      "legacy": bool(resume and "audit" in resume), "licensed_photos": licensed_photos}
+                      "legacy": legacy_visual, "licensed_photos": licensed_photos}
     try:
         visual, scenes = plan_images(audit, article["sections"], **visual_options)
     except UnsafeToTest as exc:
         if not checkpoints or str(exc) not in {"image_plan_anchor_outside_section", "image_plan_count",
                                                "image_plan_duplicate_brief", "science_visual_mix_required",
-                                               "image_plan_template_invalid"}:
+                                               "image_plan_template_invalid", "licensed_photos_required"}:
             raise
         failed_rule = str(exc)
         replacement = object_response(spend.chat(channel, "image-plan-correction", "brain", (
@@ -971,7 +975,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
             f"\nТекст статьи:\n{canonical(article)}"
         ), 5000, reserve=reserve))
         save(f"{channel}/qwen-visual-plan-correction.json", json_bytes(replacement))
-        visual, scenes = plan_images(replacement, article["sections"], **visual_options)
+        visual, scenes = plan_images(replacement, article["sections"], **{**visual_options, "legacy": False})
     if checkpoints:
         checkpoints.approve_visual_plan(canonical(article))
     if checkpoints:

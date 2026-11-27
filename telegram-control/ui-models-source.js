@@ -110,12 +110,14 @@ async function renderAgentSettings(root){
  perCall.value=String(s.perCallRub);perCall.setAttribute("aria-label","Лимит на один запрос");
  const daily=e("input",null,block);daily.className="review-input";daily.type="number";daily.step="1";daily.min="1";
  daily.value=String(s.dailyRub);daily.setAttribute("aria-label","Лимит на сутки");
+ const opus=e("input",null,block);opus.className="review-input";opus.type="number";opus.step="0.01";opus.min="0";
+ opus.value=String(s.opusDailyRub??0);opus.setAttribute("aria-label","Лимит Opus на сутки");
  const labels=e("p",null,block);labels.className="muted";
- labels.textContent="Лимит на один запрос (₽) и лимит на сутки (₽). Лимит агента отдельный от бюджета производства статей.";
+ labels.textContent="Лимиты агента в ₽: на запрос, на сутки и на Opus в пределах суточного лимита агента.";
  const save=e("button","Сохранить настройки агента",block);save.className="review-action";
  save.addEventListener("click",async()=>{
   const body={confirm:true,version:s.version,model:modelPick.value,reasoning:levelPick.value,
-   perCallRub:Number(perCall.value),dailyRub:Number(daily.value)};
+   perCallRub:Number(perCall.value),dailyRub:Number(daily.value),opusDailyRub:Number(opus.value)};
   if(!window.confirm("Сменить модель управляющего агента и его лимиты? История и память сохранятся."))return;
   save.disabled=true;
   try{await coreRequest("/api/core/agent/settings/write",body);await renderAgentSettings(root);await loadAgent();}

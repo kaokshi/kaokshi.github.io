@@ -3,6 +3,7 @@ import {POLICY_KEY,ACK_KEY,HISTORY_PREFIX,ROLES,policyHash,initialPolicy,validat
 export const SETTINGS_SCHEMA="zen-core/settings-v1";
 export const SYNC_KINDS=Object.freeze(["models"]);
 export const isHash=v=>typeof v==="string"&&/^[0-9a-f]{64}$/.test(v);
+const wire=({revision,hash,value,reasoning})=>({models:{revision,hash,value},reasoning});
 const valid=s=>Number.isSafeInteger(s?.revision)&&s.revision>=0&&isHash(s.hash);
 export function validateSettingsReport(report){
  if(!report||typeof report!=="object"||Array.isArray(report)||Object.keys(report).length!==1||!valid(report.models))return {ok:false,error:"invalid_settings_report"};
@@ -22,7 +23,7 @@ export async function effectiveSettingsIn(tx){
 export async function requestedSettingsIn(tx){
  const resolved=await resolveIn(tx,await tx.get(POLICY_KEY)||await initialPolicy());
  if(!resolved)throw Error("requested_settings_history_mismatch");
- return {models:resolved,reasoning:resolved.reasoning};
+ return wire(resolved);
 }
 export async function financialHoldIn(tx){
  if(await tx.get("agent:charge-hold")||await tx.get("account:production-hold"))return "financial_hold";
@@ -52,7 +53,7 @@ export async function pinFor(tx){
 }
 export async function settingsForPinIn(tx,pin){
  const resolved=await resolveIn(tx,pin?.models);if(!resolved)throw Error("order_settings_history_mismatch");
- return {models:resolved,reasoning:resolved.reasoning};
+ return wire(resolved);
 }
 export async function checkReportAgainstPin(tx,report,pin,now){
  if(!pin)return {ok:false,error:"order_settings_pin_missing"};

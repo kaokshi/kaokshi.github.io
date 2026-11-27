@@ -5,7 +5,7 @@ import {validateSchedule} from "./core.mjs";
 import {readBudget} from "./budget.mjs";
 import {validateJob,saveJob} from "./production.mjs";
 import {buildSnapshot} from "./snapshot.mjs";
-import {readAgentSettings,AGENT_MODELS,MAX_OUTPUT,MAX_CALLS_PER_DAY} from "./agent-settings.mjs";
+import {readAgentSettings,OPUS_MODEL,MAX_OUTPUT,MAX_CALLS_PER_DAY} from "./agent-settings.mjs";
 // The managing agent model is owner-configurable; the default is Claude Sonnet 5.5.
 export const MODEL="anthropic/claude-sonnet-5.5";
 export const DAILY=10,PER_CALL=2;
@@ -46,7 +46,7 @@ export class AgentHandler{
   const rows=await this.storage.list({prefix:"agent:message:",reverse:true,limit:30});
   const ledger=await this.storage.get("agent:budget:"+dayKey(now))||{reserved:0,calls:0};
   const settings=await readAgentSettings(this.storage);
-  return {messages:[...rows.values()].reverse(),limit:settings.dailyRub,perCall:settings.perCallRub,chargedOrReserved:ledger.reserved,calls:ledger.calls,model:settings.model,reasoning:settings.reasoning,settingsVersion:settings.version,enabled:Boolean(this.env.ROUTERAI_API_KEY)&&!(await opsState(this.storage)).stopped&&!(await this.storage.get("agent:charge-hold"))&&!(await this.storage.get("account:production-hold")),chargeHold:Boolean(await this.storage.get("agent:charge-hold")),productionHold:Boolean(await this.storage.get("account:production-hold")),mode:"owner_chat_only"};
+  return {messages:[...rows.values()].reverse(),limit:settings.dailyRub,perCall:settings.perCallRub,chargedOrReserved:ledger.reserved,confirmedRub:ledger.confirmedRub??(ledger.calls?null:0),opusAccountedRub:ledger.opusAccountedRub??null,opusDailyRub:settings.opusDailyRub,calls:ledger.calls,model:settings.model,reasoning:settings.reasoning,settingsVersion:settings.version,enabled:Boolean(this.env.ROUTERAI_API_KEY)&&!(await opsState(this.storage)).stopped&&!(await this.storage.get("agent:charge-hold"))&&!(await this.storage.get("account:production-hold")),chargeHold:Boolean(await this.storage.get("agent:charge-hold")),productionHold:Boolean(await this.storage.get("account:production-hold")),mode:"owner_chat_only"};
  }
  async chat(d,now=Date.now()){
   if(d.consent!==true||typeof d.text!=="string"||!d.text.trim()||d.text.length>1200||!/^[a-f0-9-]{36}$/.test(d.id||""))return {status:400,body:{error:"invalid_chat"}};
@@ -73,11 +73,16 @@ export class AgentHandler{
   if(bound>perCall)return {status:409,body:{error:"agent_call_exceeds_limit",model:agentModel,boundRub:String(bound),perCallRub:String(perCall),suggestion:"raise_per_call_limit"}};
   if(balance<bound)return {status:409,body:{error:"budget_or_price_unavailable"}};
   const budgetKey="agent:budget:"+dayKey(now);
+  const opus=agentModel===OPUS_MODEL;
   const reserved=await this.storage.transaction(async tx=>{
-   if(await tx.get("account:production-hold")||await tx.get("agent:charge-hold")||(await readMemory(tx)).version!==memory.version||await tx.get("agent:id:"+id)||(await opsState(tx)).stopped||(await opsState(tx)).version!==ops.version)return false;
+   if(await tx.get("account:production-hold")||await tx.get("agent:charge-hold")||(await readAgentSettings(tx)).version!==settings.version||(await readMemory(tx)).version!==memory.version||await tx.get("agent:id:"+id)||(await opsState(tx)).stopped||(await opsState(tx)).version!==ops.version)return false;
    const ledger=await tx.get(budgetKey)||{reserved:0,calls:0};
    if(ledger.reserved+bound>dailyLimit||ledger.calls>=MAX_CALLS_PER_DAY)return false;
-   await tx.put(budgetKey,{reserved:ledger.reserved+bound,calls:ledger.calls+1});
+   // Older ledgers had no model breakdown. Count their total against Opus until midnight.
+   const opusAccountedRub=ledger.opusAccountedRub??ledger.reserved;
+   if(opus&&opusAccountedRub+bound>settings.opusDailyRub)return false;
+   await tx.put(budgetKey,{...ledger,reserved:ledger.reserved+bound,calls:ledger.calls+1,
+    confirmedRub:ledger.confirmedRub??(ledger.calls?null:0),opusAccountedRub:opusAccountedRub+(opus?bound:0)});
    await tx.put("agent:charge-hold",{id,startedAt:now,status:"pending"});
    const pending={id,text,status:"pending",at:new Date(now).toISOString(),reserved:bound,cost:null,proposal:null};await tx.put("agent:id:"+id,pending);await tx.put("agent:message:"+String(now).padStart(15,"0")+":"+id,pending);return true;
   });
@@ -107,7 +112,9 @@ export class AgentHandler{
    // Unknown/overrun charges keep the reservation, overrun additionally blocks new requests.
    const charged=verifiedReceipt?message.cost:Math.max(bound,message.cost??0);
    const sum=ledger.reserved-bound+charged;
-   await tx.put(budgetKey,{reserved:message.cost!==null&&message.cost>bound?Math.max(dailyLimit,sum):Math.max(0,sum),calls:ledger.calls});
+   await tx.put(budgetKey,{...ledger,reserved:message.cost!==null&&message.cost>bound?Math.max(dailyLimit,sum):Math.max(0,sum),
+    confirmedRub:ledger.confirmedRub===null?null:ledger.confirmedRub+(verifiedReceipt?message.cost:0),
+    opusAccountedRub:Math.max(0,ledger.opusAccountedRub+(opus?charged-bound:0))});
    if(verifiedReceipt)await tx.delete("agent:charge-hold");else await tx.put("agent:charge-hold",{...hold,status:"unknown"});
    await tx.put("agent:id:"+id,message);
    await tx.put("agent:message:"+String(now).padStart(15,"0")+":"+id,message);

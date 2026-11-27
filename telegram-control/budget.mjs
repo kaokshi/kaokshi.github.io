@@ -1,3 +1,4 @@
+import {readAgentSettings} from "./agent-settings.mjs";
 // Owner budget policy. Monetary arithmetic uses integer kopecks.
 // No production charges are authorized until a shared reconciled ledger is connected.
 export const RESERVE_KOP=5000;
@@ -24,15 +25,16 @@ export async function readBudget(storage,now=Date.now()){
  const latest=await storage.get("budget:executor-report");
  const fresh=Boolean(latest&&latest.budget?.day===day&&now-latest.observedAt<=300000&&latest.observedAt<=now+30000);
  const chat=await storage.get("agent:budget:"+day)||{reserved:0,calls:0};
+ const agent=await readAgentSettings(storage);
  const matched=fresh&&policy.mainKop===DEFAULT_MAIN_KOP;
  const remaining=(field)=>matched?Math.floor(Number(latest.budget[field])*100+1e-8):null;
  const mainLeft=remaining("mainRemainingRub"),reserveLeft=remaining("reserveRemainingRub");
  return {policy,day,totalKop:policy.mainKop+RESERVE_KOP,production:{
-  ledgerConnected:matched,mainSpentKop:mainLeft===null?null:policy.mainKop-mainLeft,
+  ledgerConnected:matched,meteredRub:matched?latest.budget.meteredRub:null,rollingMeteredRub:matched?latest.budget.rollingMeteredRub??null:null,mainSpentKop:mainLeft===null?null:policy.mainKop-mainLeft,
   reserveSpentKop:reserveLeft===null?null:RESERVE_KOP-reserveLeft,reserveRemainingKop:reserveLeft,
   activationReason:matched?latest.reserveReasons?.map(x=>x.reason).join(", ")||null:null,
   reported:latest?{...latest,stale:!fresh}:null,policyMismatch:policy.mainKop!==DEFAULT_MAIN_KOP
- },chat:{limitRub:10,accountedRub:chat.reserved,calls:chat.calls,chargeHold:Boolean(await storage.get("agent:charge-hold")),productionHold:Boolean(await storage.get("account:production-hold"))},executionEnabled:false};
+ },chat:{limitRub:agent.dailyRub,opusDailyRub:agent.opusDailyRub,opusAccountedRub:chat.opusAccountedRub??(chat.calls?null:0),confirmedRub:chat.confirmedRub??(chat.calls?null:0),accountedRub:chat.reserved,calls:chat.calls,chargeHold:Boolean(await storage.get("agent:charge-hold")),productionHold:Boolean(await storage.get("account:production-hold"))},executionEnabled:false};
 }
 export async function writeBudget(storage,data,now=Date.now()){
  const v=validateBudget(data?.budget);

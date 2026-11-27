@@ -26,7 +26,7 @@ function cleanReport(d,job,now){
    clean.push({id:s.id,status:s.status,...(s.reason?{reason:s.reason}:{})});
   }
   const slots=a.acceptedImageSlots;
-  if(slots!==undefined&&(!Array.isArray(slots)||slots.length>7||slots.some((x,i)=>!Number.isInteger(x)||x<0||x>6||i>0&&x<=slots[i-1])))return null;
+  if(slots!==undefined&&(!Array.isArray(slots)||slots.length>8||slots.some((x,i)=>!Number.isInteger(x)||x<0||x>7||i>0&&x<=slots[i-1])))return null;
   articles.push({id,meteredRub:a.meteredRub,stages:clean,...(slots!==undefined?{acceptedImageSlots:slots}:{})});
  }
  const b=d.budget;

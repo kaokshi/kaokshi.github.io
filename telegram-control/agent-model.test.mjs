@@ -34,13 +34,21 @@ test("the chat sends the configured model and the configured thinking level", as
  };
  try{
   assert.equal((await writeAgentSettings(storage, {confirm: true, version: 0,
-   model: "anthropic/claude-opus-5.5", reasoning: "high", dailyRub: 10, perCallRub: 2}, now)).status, 200);
+   model: "anthropic/claude-opus-5.5", reasoning: "high", dailyRub: 10, perCallRub: 2, opusDailyRub: 1}, now)).status, 200);
   const r = await agent.chat({id, text: "Привет", consent: true});
   assert.equal(r.status, 200);
   assert.equal(r.body.message.status, "complete");
   assert.equal(payload.model, "anthropic/claude-opus-5.5");
   assert.deepEqual(payload.reasoning, {effort: "high"});
   assert.equal(payload.max_tokens, 700);
+  const view = await agent.view();
+  assert.equal(view.confirmedRub, 0.01);
+  assert.ok(Math.abs(view.opusAccountedRub - 0.01) < 1e-9);
+  const blocked = await writeAgentSettings(storage, {confirm: true, version: 1,
+   model: payload.model, reasoning: "high", dailyRub: 10, perCallRub: 2, opusDailyRub: 0}, now);
+  assert.equal(blocked.status, 200);
+  const second = await agent.chat({id: "9b00a000-1111-4222-8333-444444444445", text: "Ещё", consent: true});
+  assert.equal(second.status, 409);
  }finally{globalThis.fetch = original;}
 });
 
