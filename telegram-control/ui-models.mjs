@@ -25,21 +25,26 @@ async function renderModelPolicy(root){
  e("h3","Политика редакции · ревизия "+d.requested.revision,head);
  e("p",d.pendingSync||d.executorSync!=="acknowledged"?"Исполнитель ещё не подтвердил эту ревизию.":"Исполнитель работает на подтверждённой ревизии "+d.effective.revision+".",head);
  const note=e("p",null,root);note.className="muted";
- note.textContent="Модель для роли меняется в ревизии. Уже созданные заказы сохраняют свою ревизию.";
+ note.textContent="Действующий маршрут исполнителя: RouterAI. Claude через Claudy — подготовленный маршрут, платное исполнение пока отключено. Уже созданные заказы сохраняют свою ревизию.";
+ const providers=new Map((d.providerPlan||[]).map(m=>[m.id,m]));
+ const providerName=p=>p?.targetProvider==="claudy"?"Claudy":"RouterAI";
  const roles=e("div",null,root);roles.className="core-row";
  for(const role of d.roles){
   const block=e("article",null,roles);block.className="mode-panel";
   e("h2",role.role,block);
   const current=d.requested.models[role.id];
   const line=e("p",null,block);line.className="muted";
-  line.textContent="Сейчас: "+modelName(current)+" · уровень мышления: "+(d.requested.reasoning[role.id]||"off");
+  line.textContent="Текущая настройка: "+modelName(current)+" · "+(d.requested.reasoning[role.id]||"off")+" · действующий маршрут RouterAI";
+  const target=providers.get(current);
+  if(target?.targetProvider==="claudy")e("p","Целевой маршрут: Claudy · платное исполнение отключено",block).className="muted";
   const pick=e("select",null,block);pick.className="review-input";pick.setAttribute("aria-label","Модель роли "+role.role);
   const catalogue=new Map(d.catalogue.map(m=>[m.id,m]));
   for(const id of role.candidates){
    const model=catalogue.get(id);
    const option=e("option",null,pick);
    option.value=id;
-   option.textContent=modelName(id)+(model&&model.priceVerified?"":" — цена не подтверждена");
+   const planned=providers.get(id);
+   option.textContent=modelName(id)+" · "+providerName(planned)+(planned?.targetProvider==="claudy"?" (план)":model?.priceVerified?"":" — тариф не подтверждён");
    option.disabled=id!==current&&(!model||model.available!==true||model.priceVerified!==true);
    if(id===current)option.selected=true;
   }
@@ -66,7 +71,7 @@ async function renderModelPolicy(root){
  }
  const prices=e("div",null,root);prices.className="core-row";
  const priceBlock=e("article",null,prices);priceBlock.className="mode-panel";
- e("h2","Тарифы и подтверждение",priceBlock);
+ e("h2","Тарифы действующего маршрута RouterAI",priceBlock);
  for(const model of d.catalogue){
   const line=e("p",null,priceBlock);line.className="muted";
   if(!model.priceVerified){
@@ -79,6 +84,13 @@ async function renderModelPolicy(root){
   if(pricing.completion)parts.push("вывод "+money2(Number(pricing.completion.value)*1000)+"/тыс. токенов");
   if(pricing.image_output)parts.push("изображение "+money2(pricing.image_output.value));
   line.textContent=modelName(model.id)+": "+(parts.join(" · ")||"тариф не указан");
+ }
+ const future=e("article",null,prices);future.className="mode-panel";
+ e("h2","Claudy · целевой маршрут",future);
+ e("p","Расчётные тарифы адаптера, не подтверждение фактического списания. Платный запуск ещё отключён.",future).className="muted";
+ for(const p of providers.values())if(p.targetProvider==="claudy"){
+  const rate=p.rateStatus==="configured_estimate"?"ввод "+money2(p.inputRubPerMillion)+" / млн · вывод "+money2(p.outputRubPerMillion)+" / млн":"тариф и маршрут не настроены";
+  e("p",modelName(p.id)+": "+rate,future).className="muted";
  }
  const history=e("div",null,root);history.className="core-row";
  const historyBlock=e("article",null,history);historyBlock.className="mode-panel";
@@ -100,6 +112,7 @@ async function renderAgentSettings(root){
  e("h2","Управляющий агент",block);
  const summary=e("p",null,block);summary.className="muted";
  summary.textContent="Модель: "+modelName(s.model)+" · мышление: "+s.reasoning+" · за запрос: "+money2(s.perCallRub)+" · за сутки: "+money2(s.dailyRub);
+ e("p","Действующий маршрут: RouterAI. Переход Claude на Claudy пока не активирован.",block).className="muted";
  const modelPick=e("select",null,block);modelPick.className="review-input";modelPick.setAttribute("aria-label","Модель управляющего агента");
  for(const model of d.models){
   const option=e("option",null,modelPick);option.value=model.id;option.textContent=model.label;
