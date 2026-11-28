@@ -13,6 +13,7 @@ export async function developerView(storage){
 }
 export async function developerAction(storage,d,now=Date.now()){
  if(d?.confirm!==true)return fail("confirmation_required");
+ if(d.action==="handoff")return developerHandoff(storage,d.id,d.settings?.baseSha,now);
  return storage.transaction(async tx=>{
   const policy=await tx.get(KEY)??defaults();
   if(d.action==="policy"){
