@@ -211,3 +211,19 @@ test("an affordable Sonnet request sheds optional context before reserving spend
   assert.equal((await agent.view()).messages.length,4);
  }finally{globalThis.fetch=original;}
 });
+
+test("saved jobs and stale schedules are recognized across reloads",async()=>{
+ const {storage}=fixture(),core=new CoreHandler({storage}),agent=new AgentHandler({storage},{},core);
+ const id="9b00a000-1111-4222-8333-444444444449",sid="9b00a000-1111-4222-8333-444444444448";
+ const m={id,status:"complete",reply:"Готово",job:{items:[{channel:"science",count:1}],day:null,instructions:"test"},proposal:null};
+ await storage.put("agent:id:"+id,m);await storage.put("agent:message:1:"+id,m);
+ assert.equal((await agent.apply({id,confirm:true})).status,200);
+ assert.equal((await agent.apply({id,confirm:true})).status,200);
+ assert.equal((await agent.view()).messages.find(x=>x.id===id).applicationState,"saved");
+ const sm={id:sid,status:"complete",reply:"План",proposal:plan,version:(await core.state()).version};
+ await storage.put("agent:id:"+sid,sm);await storage.put("agent:message:2:"+sid,sm);
+ assert.equal((await agent.apply({id:sid,confirm:true})).status,200);
+ assert.equal((await agent.view()).messages.find(x=>x.id===sid).applicationState,"saved");
+ await storage.delete("agent:applied:"+sid);
+ assert.equal((await agent.view()).messages.find(x=>x.id===sid).applicationState,"stale");
+});
