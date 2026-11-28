@@ -50,7 +50,9 @@ export class AgentHandler{
   const ledger=await this.storage.get("agent:budget:"+dayKey(now))||{reserved:0,calls:0};
   const settings=await readAgentSettings(this.storage);
   const {token,independent}=chatBilling(this.env);
-  const chargeHold=Boolean(await this.storage.get("agent:charge-hold"));
+  const hold=await this.storage.get("agent:charge-hold"),chargeHold=Boolean(hold);
+  // The chat message id only. The provider generation id stays private.
+  const chargeHoldId=hold?.status==="unknown"&&typeof hold.id==="string"?hold.id:null;
   const productionHold=Boolean(await this.storage.get("account:production-hold"));
   const messages=await Promise.all([...rows.values()].reverse().map(async m=>{
    if(m.status!=="complete")return m;
@@ -58,7 +60,7 @@ export class AgentHandler{
    if(m.proposal){const applied=await this.storage.get("agent:applied:"+m.id);if(applied)return {...m,applicationState:"saved"};const state=await this.core.state();if(state.version!==m.version)return {...m,applicationState:"stale"};}
    return m;
   }));
-  return {independentBalance:independent,messages,limit:settings.dailyRub,perCall:settings.perCallRub,chargedOrReserved:ledger.reserved,confirmedRub:ledger.confirmedRub??(ledger.calls?null:0),opusAccountedRub:ledger.opusAccountedRub??null,opusDailyRub:settings.opusDailyRub,calls:ledger.calls,model:settings.model,reasoning:settings.reasoning,settingsVersion:settings.version,enabled:Boolean(token)&&!(await opsState(this.storage)).stopped&&!chargeHold&&(independent||!productionHold),chargeHold,productionHold,mode:"owner_chat_only"};
+  return {independentBalance:independent,messages,limit:settings.dailyRub,perCall:settings.perCallRub,chargedOrReserved:ledger.reserved,confirmedRub:ledger.confirmedRub??(ledger.calls?null:0),opusAccountedRub:ledger.opusAccountedRub??null,opusDailyRub:settings.opusDailyRub,calls:ledger.calls,model:settings.model,reasoning:settings.reasoning,settingsVersion:settings.version,enabled:Boolean(token)&&!(await opsState(this.storage)).stopped&&!chargeHold&&(independent||!productionHold),chargeHold,chargeHoldId,productionHold,mode:"owner_chat_only"};
  }
  async chat(d,now=Date.now()){
   if(d.consent!==true||typeof d.text!=="string"||!d.text.trim()||d.text.length>1200||!/^[a-f0-9-]{36}$/.test(d.id||""))return {status:400,body:{error:"invalid_chat"}};
@@ -157,6 +159,47 @@ export class AgentHandler{
   });
   return {status:200,body:{message}};
  }
+ // Owner-confirmed settlement of an unknown chat charge from the provider's own
+ // receipt for the recorded generation id. Never resends the request, never
+ // recovers the lost reply, never uses a local estimate as a charge.
+ async reconcile(d,now=Date.now()){
+  if(d.confirm!==true||!/^[a-f0-9-]{36}$/.test(d.id||""))return {status:400,body:{error:"invalid_confirmation"}};
+  const hold=await this.storage.get("agent:charge-hold");
+  if(!hold||hold.id!==d.id)return {status:409,body:{error:"charge_hold_mismatch"}};
+  if(hold.status!=="unknown")return {status:409,body:{error:"charge_hold_not_unknown"}};
+  const receipt=await this.storage.get("agent:generation:"+hold.id);
+  const generationId=receipt?.generationId;
+  if(typeof generationId!=="string"||!/^rai-[A-Za-z0-9_-]{1,180}$/.test(generationId)||(hold.generationId!==undefined&&hold.generationId!==generationId)||typeof receipt.model!=="string")
+   return {status:409,body:{error:"generation_receipt_missing"}};
+  // Look the receipt up on the same RouterAI account that was charged.
+  const token=hold.billingLane==="verified_dedicated_chat"?this.env?.ROUTERAI_CHAT_API_KEY:this.env?.ROUTERAI_API_KEY;
+  let row;
+  try{const r=await api(token,"/generation?id="+encodeURIComponent(generationId));row=r?.data&&typeof r.data==="object"?r.data:r;}
+  catch{return {status:503,body:{error:"provider_receipt_unavailable"}};}
+  const cost=number(row?.total_cost);
+  if(row?.id!==generationId||row?.model!==receipt.model||cost===null)return {status:409,body:{error:"provider_receipt_unverified"}};
+  const budgetKey="agent:budget:"+dayKey(hold.startedAt);
+  const settled=await this.storage.transaction(async tx=>{
+   const current=await tx.get("agent:charge-hold"),m=await tx.get("agent:id:"+hold.id),ledger=await tx.get(budgetKey);
+   if(current?.id!==hold.id||current.status!=="unknown"||m?.status!=="failed"||!ledger||!Number.isFinite(m.reserved))return null;
+   const bound=m.reserved,heldRub=Math.max(bound,m.cost??0);
+   // A confirmed overrun keeps the day blocked, as in the original settlement.
+   const reserved=cost>bound?ledger.reserved:Math.max(0,ledger.reserved-heldRub+cost);
+   const opus=receipt.model===OPUS_MODEL;
+   await tx.put(budgetKey,{...ledger,reserved,
+    confirmedRub:typeof ledger.confirmedRub==="number"?ledger.confirmedRub+cost:ledger.confirmedRub??null,
+    opusAccountedRub:opus&&Number.isFinite(ledger.opusAccountedRub)?Math.max(0,ledger.opusAccountedRub-heldRub+cost):ledger.opusAccountedRub});
+   const message={...m,cost,costVerified:true,reply:"Ответ модели не получен. Списание подтверждено чеком RouterAI: "+cost.toFixed(4)+" ₽. Повтор не выполнялся.",recovery:"provider_receipt_settled"};
+   await tx.put("agent:id:"+hold.id,message);
+   const rows=await tx.list({prefix:"agent:message:"});
+   for(const [key,value] of rows)if(value?.id===hold.id)await tx.put(key,message);
+   await tx.put("agent:reconciled:"+hold.id,{schema:"zen-core/chat-reconciliation-v1",costRub:cost,overrun:cost>bound,model:receipt.model,at:now});
+   await tx.delete("agent:charge-hold");
+   return {costRub:cost,overrun:cost>bound};
+  });
+  if(!settled)return {status:409,body:{error:"charge_state_changed"}};
+  return {status:200,body:{reconciled:true,...settled,resent:false}};
+ }
  async apply(d){
   if(d.confirm!==true||!/^[a-f0-9-]{36}$/.test(d.id||""))return {status:400,body:{error:"invalid_confirmation"}};
   const m=await this.storage.get("agent:id:"+d.id);
@@ -175,7 +218,7 @@ export class AgentHandler{
   let d;try{d=await request.json();}catch{return Response.json({error:"invalid_json"},{status:400});}
   if(!d||typeof d!=="object"||Array.isArray(d))return Response.json({error:"invalid_json"},{status:400});
   try{
-   const r=path==="/core/agent/chat"?await this.chat(d):path==="/core/agent/apply"?await this.apply(d):{status:404,body:{error:"unknown"}};
+   const r=path==="/core/agent/chat"?await this.chat(d):path==="/core/agent/apply"?await this.apply(d):path==="/core/agent/reconcile"?await this.reconcile(d):{status:404,body:{error:"unknown"}};
    return Response.json(r.body,{status:r.status});
   }catch{return Response.json({error:"agent_unavailable"},{status:503});}
  }

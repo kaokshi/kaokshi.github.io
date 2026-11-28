@@ -576,6 +576,21 @@ def illustrate(spend, save, report, channel, article, title, visual, scenes, ind
                     break
                 continue
 
+            lost = getattr(checkpoints, "closed_without_response", None)
+            if lost is not None and lost(stage + "-qas"):
+                # The paid QA reply was lost and the owner closed that charge. The
+                # operation can never be resent; an unknown verdict is a rejection.
+                save(f"{channel}/attempts/{stage}-qa.json", json_bytes({
+                    **record, "status": "rejected", "local_checks": pixels, "local_issues": issues,
+                    "reason": "image_qa_reply_lost_charge_closed",
+                }))
+                candidate.unlink(missing_ok=True)
+                candidate.with_suffix(".json").unlink(missing_ok=True)
+                if attempt == 3 or (scene["kind"] == "diagram" and (not diagram_alternative or attempt == 2)):
+                    failed.append(slot)
+                    break
+                continue
+
             section = title if not slot else article["sections"][slot - 1]["heading"]
             section_text = (" ".join(article["intro"]) if not slot else
                             "\n".join(article["sections"][slot - 1]["paragraphs"]))

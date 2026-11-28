@@ -183,6 +183,41 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual(self.plan(router), saved)
         self.assertEqual(len(self.calls), 1)
 
+    def test_checkpoint_fingerprint_keeps_the_historical_key_order(self):
+        # Paid checkpoints saved since the first order hash {"model": ..., **payload}
+        # with an unsorted serializer. Reordering the keys silently invalidated every
+        # saved response and blocked all articles with paid_checkpoint_input_changed.
+        from src.editorial_memory import digest
+        from src.editorial_zen_executor import json_bytes
+        self.plan(self.router(), "synthetic fixture")
+        payload = {"prompt": "synthetic fixture"}
+        legacy = digest(json_bytes({"path": "/chat/completions", "body": {"model": MODELS["brain"], **payload}}))
+        reordered = digest(json_bytes({"path": "/chat/completions", "body": {**payload, "model": MODELS["brain"]}}))
+        self.assertNotEqual(legacy, reordered, "serializer is order-sensitive; keep the order pinned")
+        session = Session(CloudCore(self.store), self.article)
+        self.assertEqual(json.loads(session.read("requests/plan.json"))["fingerprint"], legacy)
+        self.plan(self.router(), "synthetic fixture")
+        self.assertEqual(len(self.calls), 1, "a saved response replays without another paid call")
+
+    def test_lost_reply_is_recognised_only_after_the_owner_closed_the_charge(self):
+        self.fail = True
+        with self.assertRaises(TimeoutError):
+            self.plan(self.router())
+        session = Session(CloudCore(self.store), self.article)
+        self.assertFalse(session.closed_without_response("plan"), "an open charge stays a blocker")
+        operation = self.article + "/plan"
+        self.cloud.access(lambda c: c.retain_bounded_uncertain(operation, c.db.execute(
+            "SELECT main FROM spend WHERE id=?", (operation,)).fetchone()[0], "a" * 64), change=True)
+        self.assertTrue(Session(CloudCore(self.store), self.article).closed_without_response("plan"))
+        self.assertFalse(session.closed_without_response("draft"))
+        self.assertEqual(len(self.calls), 1)
+
+    def test_payload_cannot_override_the_pinned_model(self):
+        with self.assertRaisesRegex(CoreBlocked, "payload_must_not_choose_model"):
+            self.router().request("legends", "plan", "brain", "/chat/completions",
+                                  {"model": "other/model", "prompt": "synthetic"}, 2)
+        self.assertEqual(self.calls, [])
+
     def test_unknown_response_never_calls_provider_again(self):
         self.fail = True
         with self.assertRaises(TimeoutError):
