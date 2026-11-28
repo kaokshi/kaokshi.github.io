@@ -31,12 +31,46 @@ def rpc(method, params, ident=None):
     if "error" in obj: raise SystemExit("MCP RPC rejected: "+method)
     return obj.get("result",{})
 
+def decode_result(result):
+    if result.get("isError"): raise SystemExit("MCP read rejected")
+    obj=result.get("structuredContent")
+    if obj is None:
+        for item in result.get("content",[]):
+            if item.get("type")=="text":
+                try: obj=json.loads(item.get("text",""))
+                except (ValueError,TypeError): continue
+                break
+    if not isinstance(obj,dict): raise SystemExit("Invalid statement response")
+    return obj
+
+def read_all_statement(params, call=rpc):
+    rows=[]
+    ids=set()
+    cursors=set()
+    for page in range(50):
+        obj=decode_result(call("tools/call",{"name":"get_statement","arguments":dict(params)},3+page))
+        batch=obj.get("transactions")
+        if not isinstance(batch,list) or "next_cursor" not in obj:
+            raise SystemExit("Incomplete statement schema")
+        for row in batch:
+            if not isinstance(row,dict) or not isinstance(row.get("id"),str) or row["id"] in ids:
+                raise SystemExit("Invalid or repeated transaction")
+            ids.add(row["id"])
+            rows.append(row)
+        cursor=obj["next_cursor"]
+        if cursor is None or cursor=="": return rows
+        if not isinstance(cursor,str) or cursor in cursors or not batch:
+            raise SystemExit("Invalid pagination")
+        cursors.add(cursor)
+        params={**params,"cursor":cursor}
+    raise SystemExit("Statement page limit reached")
+
 def main():
     global token, version
     import argparse
     from datetime import date
     p=argparse.ArgumentParser()
-    p.add_argument("mode", choices=["balance","statement"])
+    p.add_argument("mode", choices=["balance","statement","audit"])
     p.add_argument("--from-date", default="2026-11-25")
     p.add_argument("--to-date", default="2026-11-27")
     args=p.parse_args()
@@ -47,13 +81,17 @@ def main():
     version=init.get("protocolVersion",version)
     rpc("notifications/initialized", {})
     names={t["name"] for t in rpc("tools/list",{},2).get("tools",[])}
-    name={"balance":"get_balance","statement":"get_statement"}[args.mode]
+    name={"balance":"get_balance","statement":"get_statement","audit":"get_statement"}[args.mode]
     if name not in names: raise SystemExit("Required tool unavailable")
     params={}
-    if args.mode=="statement":
+    if args.mode in ("statement","audit"):
         start,end=date.fromisoformat(args.from_date),date.fromisoformat(args.to_date)
         if not 0 <= (end-start).days <= 7: raise SystemExit("Date range invalid")
         params={"from":start.isoformat(),"to":end.isoformat(),"limit":100}
+    if args.mode=="audit":
+        rows=read_all_statement(params)
+        print(json.dumps({"status":"complete_statement_read","pages_complete":True,"transaction_count":len(rows),"ledgerChanged":False,"billingFinal":False}))
+        return
     result=rpc("tools/call",{"name":name,"arguments":params},3)
     if result.get("isError"): raise SystemExit("MCP read rejected")
     # Only schema metadata goes to public logs. No balance, transactions or IDs.
