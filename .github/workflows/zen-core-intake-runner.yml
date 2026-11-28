@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       settings_only:
-        description: Synchronize RouterAI tariffs and model settings without processing orders or calling inference.
+        description: Synchronize settings on main or run explicit owner recovery on recovery branch.
         type: boolean
         default: false
       pilot_job:
@@ -26,6 +26,52 @@ concurrency:
   group: zen-core-intake-runner
   cancel-in-progress: false
 jobs:
+  owner-recovery:
+    if: github.ref == 'refs/heads/codex/zen-owner-recovery-run' && github.event_name == 'workflow_dispatch' && inputs.settings_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check and recover the owner-approved hold
+        env:
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+          ZEN_CORE_CONTROL_ENDPOINT: 'https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/control'
+        run: |
+          python - <<'PYCODE'
+          from datetime import datetime
+          from decimal import Decimal
+          import os
+          from src.editorial_zen_cloud import CloudCore, GitHubStore
+          from src.editorial_zen_control import configured_account
+          from src.editorial_zen_finance_recovery import inspect, recover_owner_waived
+          from src.editorial_zen_core import CoreBlocked
+          try:
+              cloud = CloudCore(GitHubStore(os.environ.get("EDITORIAL_PRIVATE_TOKEN")))
+              account = configured_account()
+              before = inspect(cloud, account)
+              hold = before["productionHold"]
+              expected = int(datetime.fromisoformat("2026-11-25T23:35:50+03:00").timestamp())
+              if (not hold or type(hold.get("startedAt")) is not int
+                      or hold["startedAt"] // 1000 != expected
+                      or Decimal(before.get("reservedRub", "-1")) != Decimal("0.531664880760")
+                      or before["chatHold"] is not None or len(before["pending"]) != 1):
+                  raise CoreBlocked("incident_does_not_match")
+              result = recover_owner_waived(cloud, account, confirm=True,
+                                            expected_reserve="0.531664880760")
+              after = inspect(cloud, account)
+              if (after["productionHold"] is not None or after["chatHold"] is not None
+                      or after["settledRub"] != before["settledRub"]
+                      or len(after["pending"]) != 1
+                      or after["pending"][0]["status"] != "bounded_uncertain"
+                      or result["confirmedRub"] is not None):
+                  raise CoreBlocked("recovery_verification_failed")
+              print("RECOVERED_AND_VERIFIED")
+          except CoreBlocked as exc:
+              raise SystemExit(str(exc)) from None
+          PYCODE
   intake:
     if: (github.ref == 'refs/heads/integration/zen-core-routerai-20261124' && github.event_name != 'schedule') || (github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.ZEN_CORE_INTAKE_SCHEDULE_ENABLED == 'true'))
     runs-on: ubuntu-latest
