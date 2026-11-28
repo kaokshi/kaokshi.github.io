@@ -4,6 +4,7 @@ import hashlib
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 import json
+from .editorial_length import CURRENT_POLICY
 import os
 from pathlib import Path
 import re
@@ -144,10 +145,15 @@ class Core:
             intent["mode"] = mode
         if "editorialSettings" in job:
             intent["editorialSettings"] = validate_editorial_settings(job["editorialSettings"])
-        encoded = json.dumps(intent, sort_keys=True, ensure_ascii=False)
+        legacy = json.dumps(intent, sort_keys=True, ensure_ascii=False)
+        # New orders pin the current length policy. A redelivered order that was
+        # stored before policies existed keeps its original (v1) intent unchanged.
+        encoded = json.dumps({**intent, "lengthPolicy": CURRENT_POLICY}, sort_keys=True, ensure_ascii=False)
         with self.db:
-            self.db.execute("INSERT OR IGNORE INTO jobs VALUES (?, ?)", (job_id, encoded))
-            if self.db.execute("SELECT intent FROM jobs WHERE id=?", (job_id,)).fetchone()[0] != encoded:
+            row = self.db.execute("SELECT intent FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                self.db.execute("INSERT INTO jobs VALUES (?, ?)", (job_id, encoded))
+            elif row[0] not in (encoded, legacy):
                 raise CoreBlocked("job_id_conflict")
         return job_id
 

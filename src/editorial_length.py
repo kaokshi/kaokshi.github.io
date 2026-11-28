@@ -2,18 +2,53 @@
 from html.parser import HTMLParser
 import re
 
-MIN_CHARS = 3000
-STANDARD_MAX = 6000
-HARD_MAX = 7000
+from contextlib import contextmanager
+
+# Versioned length policies (non-whitespace characters): (minimum, standard maximum,
+# exceptional maximum that needs a recorded length_exception_reason).
+# v1: legacy rule; orders created before 2026-11-29 stay on it so their saved,
+#     already-paid prompts and checkpoints keep matching.
+# v2: owner rule of 2026-11-29: 4000-6000, up to 6500 only when necessary and
+#     justified; volume follows the material instead of gravitating to the minimum.
+POLICIES = {"v1": (3000, 6000, 7000), "v2": (4000, 6000, 6500)}
+DEFAULT_POLICY = "v1"
+CURRENT_POLICY = "v2"  # assigned to newly submitted orders
+
+# Legacy constants (v1) for callers that validate historical material.
+MIN_CHARS, STANDARD_MAX, HARD_MAX = POLICIES["v1"]
+
+_active = DEFAULT_POLICY
+
+
+def active_policy():
+    return _active
+
+
+def limits():
+    return POLICIES[_active]
+
+
+@contextmanager
+def length_policy(name):
+    """Apply one order's pinned length policy for the duration of its pipeline run."""
+    global _active
+    if name not in POLICIES:
+        raise ValueError("unknown_length_policy")
+    previous, _active = _active, name
+    try:
+        yield
+    finally:
+        _active = previous
 
 
 def check_length(visible_text, reason=None):
+    minimum, standard, hard = limits()
     size = len(re.sub(r"\s", "", visible_text))
-    if size < MIN_CHARS:
+    if size < minimum:
         return size, "short_text"
-    if size > HARD_MAX:
+    if size > hard:
         return size, "long_text"
-    if size > STANDARD_MAX and (not isinstance(reason, str) or not reason.strip()):
+    if size > standard and (not isinstance(reason, str) or not reason.strip()):
         return size, "length_exception_reason_missing"
     return size, None
 

@@ -25,8 +25,9 @@ from .editorial_layout import arrange
 from .editorial_memory import digest
 from .editorial_no_repeat import topic_duplicate_reason
 from .editorial_http import Blocked, ProviderError, request
+from .editorial_length import active_policy
 from .editorial_review import (
-    RULES, STRICT_RULES, canonical, fact_evidence, grammar, parse_article, source_context, sources,
+    RULES, STRICT_RULES, rules as policy_rules, strict_rules as policy_strict_rules, canonical, fact_evidence, grammar, parse_article, source_context, sources,
     structural_checks,
 )
 from .editorial_routerai import MODELS, UnsafeToTest, call, credits
@@ -291,7 +292,7 @@ def thumbnail(image):
 def check_text(raw, channel, history, final=False, *, strict=False):
     article = parse_article(raw)
     checks = structural_checks(article, history)
-    if strict and checks["chars_without_spaces"] > 6000 and not any(
+    if strict and active_policy() == "v1" and checks["chars_without_spaces"] > 6000 and not any(
             issue.startswith("article_length:") for issue in checks["issues"]):
         checks["issues"].append("article_length_exceeds_6000")
     if not article["intro"]:
@@ -838,7 +839,7 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     if checkpoints:
         checkpoints.pass_stage("plan")
     evidence = source_context(records)
-    rules = f"{STRICT_RULES if checkpoints else RULES} Ровно шесть разделов. Упомяни «{name}» в финальном призыве. {mode}"
+    rules = f"{policy_strict_rules() if checkpoints else policy_rules()} Ровно шесть разделов. Упомяни «{name}» в финальном призыве. {mode}"
     facts = ("Подтверждай утверждения только предоставленными первичными материалами. "
              "Не вставляй URL в текст и не добавляй непроверяемых чисел.\n" + evidence
              if records else "Поддерживай рамку художественного вымысла.")

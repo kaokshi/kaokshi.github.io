@@ -13,6 +13,7 @@ from .editorial_cinema import (archive_film_identity, archive_source_record, eli
                                verify_original_year)
 from .editorial_images import ImageIndex
 from .editorial_memory import digest
+from .editorial_length import DEFAULT_POLICY, length_policy
 from .editorial_http import Blocked
 from .editorial_review import qa, sources
 from .editorial_no_repeat import topic_duplicate_reason
@@ -525,9 +526,11 @@ def execute(core, article, token, *, target=None, transport=call, balance=credit
         index = ImageIndex(SimpleNamespace(root=path, lock=Lock(), save=lambda: None), photos)
         catalogue = json.loads((ROOT / "config/editorial_science_sources.json").read_text())
         try:
-            pipeline(session.channel, router, session.evidence, report, index, path, catalogue,
-                     (history["titles"], [(name, set(terms)) for name, terms in history["prose"]]),
-                     None, checkpoints=session)
+            # Orders keep the length policy pinned at submission (legacy orders: v1).
+            with length_policy(session.plan.get("lengthPolicy", DEFAULT_POLICY)):
+                pipeline(session.channel, router, session.evidence, report, index, path, catalogue,
+                         (history["titles"], [(name, set(terms)) for name, terms in history["prose"]]),
+                         None, checkpoints=session)
             if not report["articles"][session.channel].get("assembled"):
                 raise CoreBlocked("article_quality_or_layout_blocked")
             session.pass_stage("package", {"private_package": "passed"})

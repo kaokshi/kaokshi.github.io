@@ -8,7 +8,7 @@ from .editorial_review import canonical, parse_article, structural_checks
 
 CATEGORIES = {
     "missing_cta": "Before submitting, compare the last paragraph with the original and preserve a natural channel-specific subscription CTA.",
-    "article_length": "Develop underexplained scenes or mechanisms with concrete new details. Verify 3000–6000 visible non-whitespace characters. Allow up to 7000 only with a concrete recorded reason.",
+    "article_length": "Develop underexplained scenes or mechanisms with concrete new details. Verify 4000–6000 visible non-whitespace characters (legacy orders: 3000–6000). Allow up to 6500 only with a concrete recorded reason. Do not shrink toward the minimum; volume and content should differ between articles.",
     "unsupported_claim": "Keep source-backed claims only. Compare each numeric and causal claim with its exact primary-source excerpt.",
     "section_structure": "Preserve each section's bold heading and body. Verify that the first nonempty line is the first heading.",
     "repeated_paragraphs": "Identify duplicated ideas and paragraphs before editing. Replace only the repeated contribution.",
