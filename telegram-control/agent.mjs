@@ -115,6 +115,7 @@ export class AgentHandler{
     confirmedRub:ledger.confirmedRub===null?null:ledger.confirmedRub+(verifiedReceipt?message.cost:0),
     opusAccountedRub:Math.max(0,ledger.opusAccountedRub+(opus?charged-bound:0))});
    if(verifiedReceipt)await tx.delete("agent:charge-hold");else await tx.put("agent:charge-hold",{...hold,status:"unknown"});
+   message.costVerified=verifiedReceipt;
    await tx.put("agent:id:"+id,message);
    await tx.put("agent:message:"+String(now).padStart(15,"0")+":"+id,message);
   });
