@@ -1,6 +1,8 @@
 """Bounded RouterAI transport shared by private evaluation and ZEN CORE."""
 from decimal import Decimal, InvalidOperation
 import json
+import re
+from http.client import IncompleteRead
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener
 
@@ -33,7 +35,14 @@ class UnsafeToTest(RuntimeError):
     pass
 
 
-def call(path, token, payload=None, *, limit=350000, timeout=None, exact_numbers=False):
+def generation_id(headers):
+    """Accept only a bounded provider identifier, never arbitrary header contents."""
+    value = headers.get("X-Generation-Id") if headers is not None else None
+    return value if isinstance(value, str) and re.fullmatch(r"rai-[A-Za-z0-9_-]{1,180}", value) else None
+
+
+def call(path, token, payload=None, *, limit=350000, timeout=None, exact_numbers=False,
+         on_generation_id=None):
     if payload is None:
         if path not in READ_PATHS:
             raise UnsafeToTest("routerai_request_not_allowlisted")
@@ -53,12 +62,20 @@ def call(path, token, payload=None, *, limit=350000, timeout=None, exact_numbers
                       )
     try:
         with build_opener(NoRedirect()).open(request, timeout=timeout or (75 if payload else 20)) as response:
+            if payload is not None and on_generation_id is not None:
+                identifier = generation_id(getattr(response, "headers", None))
+                if identifier is not None:
+                    on_generation_id(identifier)
             raw = response.read(limit + 1)
             if len(raw) > limit:
                 raise UnsafeToTest("routerai_response_too_large")
     except HTTPError as exc:
+        if payload is not None and on_generation_id is not None:
+            identifier = generation_id(exc.headers)
+            if identifier is not None:
+                on_generation_id(identifier)
         raise UnsafeToTest("routerai_http_" + str(exc.code)) from None
-    except (URLError, TimeoutError, OSError):
+    except (URLError, TimeoutError, OSError, IncompleteRead):
         raise UnsafeToTest("routerai_connection_failed") from None
     try:
         answer = json.loads(raw, parse_float=Decimal if exact_numbers else float)
