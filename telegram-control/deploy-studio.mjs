@@ -10,7 +10,7 @@ const SCRIPT = "zen-editorial-control";
 const BASE = "c6ec6392aa617f52e6115a1dd36875ba3c6145f6";
 const MAIN = "entry.mjs";
 const CHANGED = ["entry.mjs", "worker.mjs", "miniapp.mjs", "ui.mjs"];
-const ADDED = ["studio-analytics.mjs", "studio-auth.mjs"];
+const ADDED = ["studio-analytics.mjs", "studio-auth.mjs", "studio-channels.mjs"];
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(value);
 const verify = (value, error) => { if (!value) throw Error(error); };
 

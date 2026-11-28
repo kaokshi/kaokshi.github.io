@@ -1,6 +1,7 @@
 import {validEnvelope} from "./studio-auth.mjs";
+import {PRIMARY_CHANNEL, STUDIO_CHANNELS, validChannel, vaultKey} from "./studio-channels.mjs";
 
-export const STUDIO_CHANNELS = ["science", "legends", "cinema"];
+export {STUDIO_CHANNELS};
 export const DAILY_MS = 480000;
 export const RESERVATION_MS = 90000;
 const LEASE_MS = 180000;
@@ -16,7 +17,30 @@ const timestamp = now => new Date(now).toISOString();
 const exactDate = date => typeof date === "string" && /^\d{4}-\d\d-\d\d$/.test(date)
  && Number.isFinite(Date.parse(date)) && timestamp(Date.parse(date)).slice(0, 10) === date;
 const id = value => typeof value === "string" && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(value);
-const approved = state => state.auth === "ready" && state.acceptance === 3 && !state.closeHold;
+const approved = state => state.auth === "ready" && state.acceptance === STUDIO_CHANNELS.length && !state.closeHold;
+// Accepted channels as a set; older records only kept a count of the first N channels.
+const acceptedSet = state => new Set(Array.isArray(state.accepted) ? state.accepted.filter(validChannel)
+ : STUDIO_CHANNELS.slice(0, Math.min(state.acceptance || 0, STUDIO_CHANNELS.length)));
+const modeChannels = mode => validChannel(mode) ? [mode] : STUDIO_CHANNELS;
+// Session used for each channel: its own vault, or the primary account's session.
+async function channelVaults(tx, channels) {
+ const primary = await tx.get("vault");
+ const out = {};
+ for (const channel of channels) {
+  const own = channel === PRIMARY_CHANNEL ? null : await tx.get(vaultKey(channel));
+  const vault = own || primary;
+  if (!vault) return null;
+  out[channel] = {key: own ? vaultKey(channel) : "vault", generation: vault.generation, envelope: vault.envelope,
+   bound: own ? channel : PRIMARY_CHANNEL};
+ }
+ return out;
+}
+async function leaseCurrent(tx, lease) {
+ const generations = lease.generations || {vault: lease.generation};
+ for (const [key, generation] of Object.entries(generations))
+  if ((await tx.get(key))?.generation !== generation) return false;
+ return true;
+}
 
 function project(state, now, enabled) {
  const quota = state.quota?.day === day(now) ? state.quota : null;
@@ -106,43 +130,66 @@ export class AnalyticsHandler {
     const write = async body => { await tx.put("status", state); return body; };
     switch (path) {
     case "/analytics/enroll": {
-     if (!validEnvelope(data.envelope) || !id(data.generation)) return {status: 400, error: "invalid_auth"};
+     const channel = data.channel === undefined ? PRIMARY_CHANNEL : data.channel;
+     if (!validEnvelope(data.envelope) || !id(data.generation) || !validChannel(channel))
+      return {status: 400, error: "invalid_auth"};
      if (state.lease || state.closeHold) return {status: 409, error: "session_failed"};
      if (await tx.get("generation:" + data.generation)) return {status: 409, error: "invalid_auth"};
      await tx.put("generation:" + data.generation, true);
-     await tx.put("vault", {generation: data.generation, envelope: {version: 1,
+     await tx.put(vaultKey(channel), {generation: data.generation, channel, envelope: {version: 1,
       iv: data.envelope.iv, ciphertext: data.envelope.ciphertext}});
-     Object.assign(state, {auth: "ready", acceptance: 0, error: null, notification: null});
+     if (channel === PRIMARY_CHANNEL) {
+      Object.assign(state, {auth: "ready", acceptance: 0, accepted: [], error: null, notification: null});
+     } else {
+      // A new login for one channel resets only that channel's acceptance.
+      const accepted = acceptedSet(state);
+      accepted.delete(channel);
+      Object.assign(state, {accepted: [...accepted], acceptance: accepted.size, error: null});
+     }
      return write({ok: true});
     }
-    case "/analytics/revoke":
-     await tx.delete("vault");
-     Object.assign(state, {auth: "missing", acceptance: 0, error: "auth_revoked", notification: null});
+    case "/analytics/revoke": {
+     if (data.channel !== undefined && data.channel !== PRIMARY_CHANNEL) {
+      if (!validChannel(data.channel)) return {status: 400, error: "invalid_request"};
+      await tx.delete(vaultKey(data.channel));
+      const accepted = acceptedSet(state);
+      accepted.delete(data.channel);
+      Object.assign(state, {accepted: [...accepted], acceptance: accepted.size});
+      return write({ok: true});
+     }
+     for (const channel of STUDIO_CHANNELS) await tx.delete(vaultKey(channel));
+     Object.assign(state, {auth: "missing", acceptance: 0, accepted: [], error: "auth_revoked", notification: null});
      return write({ok: true});
+    }
     case "/analytics/claim": {
      const mode = data.mode;
-     if (!["science", "all", "hourly"].includes(mode) || !id(data.run)) return {status: 400, error: "invalid_request"};
+     if (!(["all", "hourly"].includes(mode) || validChannel(mode)) || !id(data.run)) return {status: 400, error: "invalid_request"};
      if (state.lease?.expires <= now && !state.lease.reserved) delete state.lease;
      if (state.lease || state.closeHold) return {status: 409, error: "closure_unconfirmed"};
      if (await tx.get("run:" + data.run)) return {status: 409, error: "duplicate_run"};
      const vault = await tx.get("vault");
      if (!vault || state.auth !== "ready") return {status: 409, error: "auth_missing"};
-     if ((mode === "all" && state.acceptance < 1) || (mode === "hourly" &&
-       (state.acceptance !== 3 || this.env.ZEN_STUDIO_SYNC_ENABLED !== "true")))
+     const accepted = acceptedSet(state);
+     // The primary channel is accepted first; other channels and "all" follow; hourly needs every channel.
+     if ((mode !== PRIMARY_CHANNEL && mode !== "hourly" && !accepted.has(PRIMARY_CHANNEL)) || (mode === "hourly" &&
+       (accepted.size !== STUDIO_CHANNELS.length || this.env.ZEN_STUDIO_SYNC_ENABLED !== "true")))
       return {status: 409, error: "acceptance_required"};
+     const sessions = await channelVaults(tx, modeChannels(mode));
+     if (!sessions) return {status: 409, error: "auth_missing"};
      await tx.put("run:" + data.run, true);
-     state.lease = {run: data.run, generation: vault.generation, mode, expires: now + LEASE_MS};
+     const generations = Object.fromEntries(Object.values(sessions).map(item => [item.key, item.generation]));
+     state.lease = {run: data.run, generation: vault.generation, generations, mode, expires: now + LEASE_MS};
      state.requestUntil = null;
      state.lastAttempt = timestamp(now);
-     return write({envelope: vault.envelope});
+     return write({envelope: vault.envelope, envelopes: Object.fromEntries(Object.entries(sessions)
+      .map(([channel, item]) => [channel, {envelope: item.envelope, bound: item.bound}]))});
     }
     case "/analytics/reserve": {
      if (!id(data.run) || state.lease?.run !== data.run || state.lease.expires <= now || state.lease.reserved)
       return {status: 409, error: "invalid_lease"};
      if (!Number.isSafeInteger(data.usedMs) || data.usedMs < 0 || data.day !== day(now))
       return {status: 400, error: "quota_unknown"};
-     const vault = await tx.get("vault");
-     if (state.auth !== "ready" || vault?.generation !== state.lease.generation)
+     if (state.auth !== "ready" || !await leaseCurrent(tx, state.lease))
       return {status: 409, error: "auth_revoked"};
      const spent = state.reservations?.day === data.day ? state.reservations.ms : 0;
      const usedMs = Math.max(data.usedMs, state.quota?.day === data.day ? state.quota.usedMs : 0);
@@ -158,9 +205,9 @@ export class AnalyticsHandler {
      const lease = state.lease;
      if (!id(data.run) || lease?.run !== data.run) return {status: 409, error: "invalid_lease"};
      const vault = await tx.get("vault");
-     const current = vault?.generation === lease.generation;
+     const current = await leaseCurrent(tx, lease);
      const channelIds = data.channelIds || {};
-     const expected = lease.mode === "science" ? ["science"] : STUDIO_CHANNELS;
+     const expected = modeChannels(lease.mode);
      let error = data.error === null ? null : ERRORS.has(data.error) ? data.error : "sync_failed";
      if (!current) error = "auth_revoked";
      delete state.lease;
@@ -201,8 +248,11 @@ export class AnalyticsHandler {
        if (!state.latest[item.channel] || !previous && item.end >= state.latest[item.channel].end)
         state.latest[item.channel] = previous || item;
       }
-      if (expected.length === 3) state.lastSuccess = timestamp(now);
-      state.acceptance = Math.max(state.acceptance, expected.length);
+      if (expected.length === STUDIO_CHANNELS.length) state.lastSuccess = timestamp(now);
+      const accepted = acceptedSet(state);
+      for (const channel of expected) accepted.add(channel);
+      state.accepted = STUDIO_CHANNELS.filter(channel => accepted.has(channel));
+      state.acceptance = state.accepted.length;
      }
      state.error = error;
      let notify;

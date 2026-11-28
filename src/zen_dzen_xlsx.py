@@ -3,6 +3,7 @@ No network, no write to production, no inferred CTR or income.
 """
 import hashlib
 import io
+from pathlib import Path
 import json
 import math
 import re
@@ -10,8 +11,10 @@ import zipfile
 from datetime import date, datetime, timedelta
 from xml.etree import ElementTree as ET
 
-CHANNELS = {"cinema": "Кадр за Кадром", "science": "За гранью очевидного",
-            "legends": "Легенды темных улиц"}
+# Channel titles as printed in Studio workbooks, from the shared channel registry
+# (config/zen_studio_channels.json, kept identical to telegram-control/studio-channels.mjs).
+CHANNELS = {row["key"]: row["title"] for row in json.loads(
+    (Path(__file__).resolve().parents[1] / "config" / "zen_studio_channels.json").read_text(encoding="utf-8"))["channels"]}
 HEADERS = ("Дата публикации", "Платформа", "Тип публикации", "Публикация",
            "Ссылка на публикацию", "Показы", "Открытия", "Дочитывания и просмотры",
            "Время просмотра в минутах", "Комментарии", "Подписки", "Лайки")

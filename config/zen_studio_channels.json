@@ -1,0 +1,8 @@
+{
+  "comment": "Single registry of Dzen Studio channels; must equal telegram-control/studio-channels.mjs. Routes live in the DZEN_STUDIO_ROUTES secret, never here.",
+  "channels": [
+    {"key": "science", "title": "За гранью очевидного"},
+    {"key": "legends", "title": "Легенды темных улиц"},
+    {"key": "cinema", "title": "Кадр за Кадром"}
+  ]
+}
