@@ -3,7 +3,7 @@
 export const AGENT_KEY="agent:settings",AGENT_HISTORY_PREFIX="agent:settings-history:";
 export const DEFAULT_MODEL="anthropic/claude-sonnet-5.5";
 export const OPUS_MODEL="anthropic/claude-opus-5.5";
-export const DEFAULT_DAILY_RUB=30,DEFAULT_PER_CALL_RUB=5;
+export const DEFAULT_DAILY_RUB=50,DEFAULT_PER_CALL_RUB=5;
 // The owner may pick any verified text model for the managing agent.
 export const AGENT_MODELS=Object.freeze([
  {id:"anthropic/claude-sonnet-5.5",label:"Claude Sonnet 5.5"},

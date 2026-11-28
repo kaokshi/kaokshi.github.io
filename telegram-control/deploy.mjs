@@ -343,7 +343,7 @@ async function main(){
  console.log("OWNER_START_REQUIRED");
  if(testChat){
   stage="verify_isolated_chat_paid_once";
-  requireOk(av.independentBalance===true&&av.enabled===true&&av.perCall<=5&&av.model==="anthropic/claude-sonnet-5.5","isolated_chat_test_precondition_failed");
+  requireOk(av.independentBalance===true&&av.enabled===true&&av.limit===50&&av.perCall===5&&av.model==="anthropic/claude-sonnet-5.5","isolated_chat_test_precondition_failed");
   const run=process.env.GITHUB_RUN_ID;
   requireOk(/^\d{1,20}$/.test(run||""),"isolated_chat_test_run_required");
   const hex=createHash("sha256").update("zen-control-isolated-chat:"+run).digest("hex");

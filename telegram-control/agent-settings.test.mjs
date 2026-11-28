@@ -24,7 +24,7 @@ test("the managing agent starts on Claude Sonnet 5.5 with the current limits", a
  const body = await get(storage);
  assert.equal(body.settings.model, "anthropic/claude-sonnet-5.5");
  assert.equal(body.settings.reasoning, "medium");
- assert.equal(body.settings.dailyRub, 30);
+ assert.equal(body.settings.dailyRub, 50);
  assert.equal(body.settings.perCallRub, 5);
  assert.equal(body.settings.version, 0);
  // The owner may pick any of the offered models, including going back to Qwen.
