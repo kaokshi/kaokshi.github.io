@@ -40,6 +40,11 @@ async function main(env) {
   const page = context.pages()[0] || await context.newPage();
   await page.goto(route.url, {waitUntil: "domcontentloaded", timeout: 15000});
   await terminal.question("Войдите в Дзен аккаунтом владельца канала «" + channelTitle(channel) + "» и откройте его статистику. Затем нажмите Enter. ", {signal: abort.signal});
+  // After login Dzen may show another page; open the channel's statistics in the same
+  // signed-in window. The identity check below stays exact.
+  const here = new URL(page.url());
+  if (here.origin + here.pathname !== route.url)
+   await page.goto(route.url + "?statType=publications", {waitUntil: "domcontentloaded", timeout: 15000});
   await assertStudio(page, route);
   const state = await context.storageState({indexedDB: true});
   const envelope = await sealStudioState(state, env.ZEN_STUDIO_VAULT_KEY, route.url);
