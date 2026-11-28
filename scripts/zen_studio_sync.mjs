@@ -275,7 +275,13 @@ async function scanStudio(context, {selected, path, name}, step, contextFor = {}
   let bytes;
   try {
    await step(() => dismissOverlays(page));
-   bytes = await step(() => workbook(page.context(), page, path, name));
+   try { bytes = await step(() => workbook(page.context(), page, path, name)); }
+   catch (failure) {
+    // An onboarding dialog can appear after the page is ready and cover the control.
+    // Retry once, only if a dialog was actually found and closed.
+    if (failure?.message !== "export_unverified" || !await step(() => dismissOverlays(page))) throw failure;
+    bytes = await step(() => workbook(page.context(), page, path, name));
+   }
   }
   catch (error) { await step(() => assertStudio(page, route)); throw error; }
   await step(() => assertStudio(page, route));
