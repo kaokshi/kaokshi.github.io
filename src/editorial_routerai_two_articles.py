@@ -361,11 +361,70 @@ def photo_queries(query):
     ) if len(candidate) >= 2))
 
 
+PHOTO_POOL = 6
+UNRELATED = "an unrelated image with no connection to the scene"
+
+
+def ranked_photo_pool(scene, cache):
+    """Free pre-selection for policy v2: download a few rights-verified Commons candidates,
+    drop the ones SigLIP finds unrelated to the scene and order the rest best first, so
+    paid QA sees the most relevant photo first."""
+    key = ("pool", scene["query"], scene["subject"])
+    if key in cache:
+        return cache[key]
+    seen, pool = set(), []
+    try:
+        for query in photo_queries(scene["query"]):
+            if query not in cache:
+                cache[query] = [row for row in commons_photos(query)
+                                if row["rights_status"] == "license_metadata_verified"]
+            for row in cache[query]:
+                if len(seen) >= PHOTO_POOL:
+                    break
+                if row["asset_url"] in seen:
+                    continue
+                seen.add(row["asset_url"])
+                try:
+                    raw = request(row["asset_url"], row["domains"], timeout=10)
+                    image, _ = decode_candidate(raw)
+                    scores, _ = compare_pixels("siglip", image, [scene["subject"], UNRELATED])
+                except ProviderError as exc:
+                    if exc.stop:
+                        raise
+                    continue
+                except (Blocked, OSError, ValueError):
+                    continue
+                if scores[0] > scores[1]:
+                    metadata = {k: v for k, v in row.items() if k != "domains"}
+                    pool.append((scores[0] - scores[1], raw, {**metadata, "label": "Фотография", "ai_generated": False}))
+    except ProviderError:
+        pass
+    pool.sort(key=lambda item: -item[0])
+    cache[key] = [(raw, metadata) for _, raw, metadata in pool]
+    return cache[key]
+
+
+def require_findable_photos(scenes, cache):
+    """Policy v2: every photo slot needs at least one relevant, rights-verified candidate
+    before any paid image work; otherwise the visual plan goes back for one correction."""
+    missing = [slot for slot, scene in enumerate(scenes)
+               if scene["kind"] == "photo" and "query" in scene and not ranked_photo_pool(scene, cache)]
+    if missing:
+        error = UnsafeToTest("image_plan_photo_unavailable")
+        error.slots = missing
+        raise error
+
+
 def science_asset(scene, records, photo_offset, cache=None):
     """Only verified Commons rights or an explicit, source-backed diagram template."""
     if scene["kind"] == "diagram":
         return render_diagram(scene["template"], records)
     cache = {} if cache is None else cache
+    if active_policy() == "v2":
+        pool = ranked_photo_pool(scene, cache)
+        if photo_offset < len(pool):
+            return pool[photo_offset]
+        raise UnsafeToTest("verified_photo_unavailable")
     seen = set()
     try:
         for query in photo_queries(scene["query"]):
@@ -446,10 +505,11 @@ def ranked_film_stills(cache, film, rows, subject, private_read):
     return [(raw, meta) for _, raw, meta in sorted(ranked, key=lambda row: -row[0])]
 
 
-def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, records, *, skip_cover=False, prior_section_attempt=False, checkpoints=None, film=None, film_registry=None):
+def illustrate(spend, save, report, channel, article, title, visual, scenes, index, path, reserve_next, records, *, skip_cover=False, prior_section_attempt=False, checkpoints=None, film=None, film_registry=None, photo_cache=None):
     rows, previews = [], []
     failed = [0] if skip_cover else []
-    still_cache, photo_cache = {}, {}
+    still_cache = {}
+    photo_cache = {} if photo_cache is None else photo_cache
     for slot, scene in enumerate(scenes):
         if slot == 0 and skip_cover:
             continue
@@ -929,6 +989,14 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
                + ("Используй оба вида, фотографии и схемы. " if licensed_photos else
                   "Включи illustration для художественных сцен. Используй все три вида. ")
                if channel == "science" else "Для кино используй только подтверждённые кадры фильма. " if film else "")
+            + (("Каждое photo — обычная документальная фотография реально существующих и часто снимаемых "
+                "предметов, мест или природных объектов. В subject и brief не указывай настроение, время суток, "
+                "кинематографичность, фантастические или вымышленные детали. query — два–четыре английских "
+                "существительных, называющих сам объект или место, как в названии файла на Wikimedia Commons. "
+                if licensed_photos else "")
+               + "В claims quote — только дословная выдержка из источника. Если утверждение опирается на разные "
+               "строки источника, дай quote массивом до трёх дословных выдержек. "
+               if active_policy() == "v2" else "")
             + "В каждом задании anchor — дословная короткая выдержка именно из нужного раздела (для обложки из вступления). "
             'Верни JSON с ключами "issues" (массив строк), "claims" (массив), "style" '
             '(общая визуальная инструкция), "images" (ровно 7 объектов subject и brief). '
@@ -986,14 +1054,23 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
                      and all(isinstance(scene, dict) and "anchor" not in scene for scene in saved_scenes))
     visual_options = {"science": channel == "science", "cinema": bool(film),
                       "legacy": legacy_visual, "licensed_photos": licensed_photos}
+    photo_cache = {}
+    findable = bool(checkpoints and licensed_photos and active_policy() == "v2")
     try:
         visual, scenes = plan_images(audit, article["sections"], **visual_options)
+        if findable:
+            require_findable_photos(scenes, photo_cache)
     except UnsafeToTest as exc:
         if not checkpoints or str(exc) not in {"image_plan_anchor_outside_section", "image_plan_count",
                                                "image_plan_duplicate_brief", "science_visual_mix_required",
-                                               "image_plan_template_invalid", "licensed_photos_required"}:
+                                               "image_plan_template_invalid", "licensed_photos_required",
+                                               "image_plan_photo_unavailable"}:
             raise
         failed_rule = str(exc)
+        if failed_rule == "image_plan_photo_unavailable":
+            failed_rule += (f": слоты {getattr(exc, 'slots', [])} — по их query на Wikimedia Commons нет "
+                            "подходящих фотографий с проверенной лицензией. Замени subject, brief и query этих "
+                            "слотов на обычные, часто фотографируемые реальные объекты из того же раздела")
         replacement = object_response(spend.chat(channel, "image-plan-correction", "brain", (
             f"Канал «{name}». Исправь только визуальный план. Статью не переписывай. "
             "Верни JSON с полями style и images. Для обложки скопируй anchor дословно из "
@@ -1007,6 +1084,8 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
         ), 5000, reserve=reserve))
         save(f"{channel}/qwen-visual-plan-correction.json", json_bytes(replacement))
         visual, scenes = plan_images(replacement, article["sections"], **{**visual_options, "legacy": False})
+        if findable:
+            require_findable_photos(scenes, photo_cache)
     if checkpoints:
         checkpoints.approve_visual_plan(canonical(article))
     if checkpoints:
@@ -1015,7 +1094,8 @@ def evaluate_channel(channel, spend, save, report, index, path, catalogue, prior
     rows, previews, failed = illustrate(spend, save, report, channel, article, title, visual, scenes,
                                         index, path, other_images, records, skip_cover=skip_cover,
                                         prior_section_attempt=bool(resume and resume.get("lost_image")),
-                                        checkpoints=checkpoints, film=film, film_registry=film_registry)
+                                        checkpoints=checkpoints, film=film, film_registry=film_registry,
+                                        photo_cache=photo_cache)
     status["accepted_images"] = len(rows)
     if failed:
         status.update(image_qa="failed", failed_slots=failed)

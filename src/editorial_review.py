@@ -163,12 +163,24 @@ def fact_evidence(text, audit, records):
         try:
             claim = row["claim"].strip()
             source = row["source"]
-            quote = row["quote"].strip()
             evidence = records[int(re.fullmatch(r"S([1-5])", source)[1]) - 1]
-            ok = (len(claim) > 10 and claim in text and len(quote) >= 18
+            raw_quote = row["quote"]
+            # A fact can span separate lines of a source (e.g. year and director in a
+            # structured record): accept up to three verbatim excerpts of the same source.
+            if isinstance(raw_quote, list):
+                quotes = [item.strip() for item in raw_quote]
+                if not 1 <= len(quotes) <= 3 or any(len(item) < 12 for item in quotes):
+                    raise ValueError
+                quote = " … ".join(quotes)
+            else:
+                quotes = [raw_quote.strip()]
+                quote = quotes[0]
+                if len(quote) < 18:
+                    raise ValueError
+            ok = (len(claim) > 10 and claim in text
                   and evidence["status"] == "accessible"
-                  and normalize(quote) in normalize(evidence["text"])
-                  and numbers(claim) <= numbers(quote)
+                  and all(normalize(item) in normalize(evidence["text"]) for item in quotes)
+                  and numbers(claim) <= set().union(*(numbers(item) for item in quotes))
                   and row.get("verdict") == "supported")
         except (KeyError, IndexError, TypeError, AttributeError, ValueError):
             claim, ok = str(row)[:100], False
