@@ -211,3 +211,46 @@ test("an affordable Sonnet request sheds optional context before reserving spend
   assert.equal((await agent.view()).messages.length,4);
  }finally{globalThis.fetch=original;}
 });
+
+
+test("chat distinguishes provider billing failures from paid malformed replies", async () => {
+ const cases=[
+  {code:"reply_token_limit",verified:true,response:{model:MODEL,usage:{cost:0.01},choices:[{finish_reason:"length",message:{content:"{"}}]}},
+  {code:"reply_invalid_json",verified:true,response:{model:MODEL,usage:{cost:0.01},choices:[{finish_reason:"stop",message:{content:"Привет!"}}]}},
+  {code:"model_mismatch",verified:false,response:{model:"unexpected-model",usage:{cost:0.01}}},
+  {code:"cost_missing",verified:false,response:{model:MODEL,usage:{}}},
+  {code:"cost_over_bound",verified:false,response:{model:MODEL,usage:{cost:10}}},
+  {code:"router_http_503",verified:false,http:503},
+  {code:"router_timeout",verified:false,timeout:true},
+  {code:"router_response_unreadable",verified:false,unreadable:true},
+ ];
+ const original=globalThis.fetch;
+ try{
+  for(const item of cases){
+   const {storage}=fixture();
+   const agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},new CoreHandler({storage}));
+   let paid=0;
+   globalThis.fetch=async url=>{
+    if(url.endsWith("/models"))return Response.json({data:[priceRow(MODEL)]});
+    if(url.endsWith("/credits"))return Response.json({data:{credits:100}});
+    paid++;
+    if(item.timeout)throw new DOMException("private transport detail","TimeoutError");
+    if(item.http)return new Response("private provider detail",{status:item.http});
+    if(item.unreadable)return new Response("not json");
+    return Response.json(item.response);
+   };
+   const id="9b00a000-1111-4222-8333-444444444444";
+   const result=await agent.chat({id,text:"Synthetic",consent:true});
+   const message=result.body.message;
+   assert.equal(message.status,"failed",item.code);
+   assert.equal(message.errorCode,item.code);
+   assert.equal(message.costVerified,item.verified);
+   assert.equal(Boolean(await storage.get("agent:charge-hold")),!item.verified);
+   assert.equal((await agent.view()).enabled,item.verified);
+   assert.equal(message.reply.includes("private"),false);
+   assert.equal(message.proposal,null);
+   assert.equal((await agent.chat({id,text:"Synthetic",consent:true})).status,409);
+   assert.equal(paid,1);
+  }
+ }finally{globalThis.fetch=original;}
+});
