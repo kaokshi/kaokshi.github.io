@@ -5,7 +5,7 @@ import re
 from threading import Lock
 
 from .editorial_ai_check import measure_text, threshold_review
-from .editorial_length import HARD_MAX, MIN_CHARS, check_length
+from .editorial_length import active_policy, check_length, limits
 from .editorial_language_tool import serialize_match
 from .editorial_memory import digest
 from .editorial_no_repeat import normalize, words
@@ -41,6 +41,31 @@ STRUCTURE_RULES = (
 )
 RULES = LENGTH_RULE + EXCEPTION_RULE + STRUCTURE_RULES + "Кроме строки обоснования объёма возвращай только текст статьи."
 STRICT_RULES = LENGTH_RULE + STRUCTURE_RULES + "Возвращай только текст статьи."
+
+# Owner rule of 2026-11-29 (length policy v2). The v1 strings above must stay
+# byte-identical: they are part of saved, already-paid request fingerprints.
+LENGTH_RULE_V2 = (
+    "Русская статья, 4000–6000 непробельных знаков. Объём определяй глубиной материала: "
+    "не сокращай текст до нижней границы и не подгоняй статьи под одинаковый размер; "
+    "у разных статей должны различаться объём, ход изложения и наполнение. "
+)
+EXCEPTION_RULE_V2 = (
+    "Только при конкретной необходимости раскрыть материал можно написать 6001–6500 знаков. "
+    "В этом случае после статьи добавь одну служебную строку "
+    "<!-- length_exception_reason: конкретная причина -->. Строка в текст статьи не входит. "
+)
+
+
+def rules():
+    if active_policy() == "v1":
+        return RULES
+    return (LENGTH_RULE_V2 + EXCEPTION_RULE_V2 + STRUCTURE_RULES
+            + "Кроме строки обоснования объёма возвращай только текст статьи.")
+
+
+def strict_rules():
+    # v2 keeps the strict checkpointed path but allows the justified 6001-6500 range.
+    return STRICT_RULES if active_policy() == "v1" else rules()
 
 
 LENGTH_NOTE = re.compile(r"\s*<!--\s*length_exception_reason:[ \t]*([^<>\n]*?)\s*-->\s*\Z")
@@ -250,6 +275,7 @@ def improves(previous, candidate):
     if sum(after.values()) < sum(before.values()):
         return True
     if before["article_length"]:
-        distance = lambda n: max(MIN_CHARS - n, n - HARD_MAX, 0)
+        minimum, _, maximum = limits()
+        distance = lambda n: max(minimum - n, n - maximum, 0)
         return distance(candidate["chars_without_spaces"]) < distance(previous["chars_without_spaces"])
     return False
