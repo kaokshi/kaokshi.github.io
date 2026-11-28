@@ -21,6 +21,17 @@ export function claudyPreflight(model,payload,observation,balanceRub,perCallRub)
  // Budget eligibility is not permission to dispatch a paid operation.
  return {allowed:false,budgetEligible:reason===null,reason:reason??"provider_settlement_unavailable",inputBound,reportedInputTokens:observation.inputTokens,estimatedUpperRub,estimateOnly:true,settlementAvailable:false};
 }
+// Provider monthly counters are actual aggregates, not per-request receipts.
+export function claudyMonthlyEligibility(preflight,status,now=Date.now()){
+ const amount=preflight?.estimatedUpperRub;
+ if(preflight?.budgetEligible!==true||!Number.isFinite(amount)||amount<=0)return {eligible:false,reason:"request_budget_unverified",dispatchAuthorized:false};
+ if(status?.status!=="ok"||!Number.isSafeInteger(status.observedAt)||status.observedAt>now||now-status.observedAt>60000)return {eligible:false,reason:"provider_snapshot_stale",dispatchAuthorized:false};
+ const k=status.keyLimit,a=status.accountLimit;
+ if(!k||k.consistent!==true||!Number.isFinite(k.leftRub)||k.leftRub<0||a&&(a.consistent!==true||!Number.isFinite(a.leftRub)||a.leftRub<0))return {eligible:false,reason:"monthly_limit_unverified",dispatchAuthorized:false};
+ if(!Number.isFinite(status.balanceRub)||status.balanceRub<amount)return {eligible:false,reason:"insufficient_balance",dispatchAuthorized:false};
+ if(k.leftRub<amount||a&&a.leftRub<amount)return {eligible:false,reason:"provider_monthly_limit",dispatchAuthorized:false};
+ return {eligible:true,reason:"provider_settlement_unavailable",dispatchAuthorized:false,estimatedUpperRub:amount};
+}
 export function claudyEvidence(headers,response){
  const id=v=>typeof v==="string"&&/^[A-Za-z0-9_.:-]{1,160}$/.test(v)?v:null;
  return {provider:"claudy",requestId:id(headers?.get("request-id"))??id(headers?.get("x-request-id")),messageId:id(response?.id),cacheMode:headers?.get("X-Claudy-Cache")==="bypass"?"bypass":"unknown",costVerified:false,settlementSource:null};
