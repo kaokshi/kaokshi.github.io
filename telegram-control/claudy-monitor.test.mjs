@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {claudyBalance,claudyMonthlyLimit,claudyFinancialFields,claudyRateLimits,balanceMovement,readClaudyStatus} from "./claudy-monitor.mjs";
+import {claudyBalance,claudyMonthlyLimit,claudyFinancialFields,claudyRateLimits,balanceMovement,monthlySpendMovement,readClaudyStatus} from "./claudy-monitor.mjs";
 test("only explicitly ruble-denominated balances accepted",()=>{
  assert.equal(claudyBalance({data:{balance_rub:"49.59"}}),49.59);
  assert.equal(claudyBalance({currency:"RUB",balance:0}),0);
@@ -43,4 +43,14 @@ test("monthly data from authenticated GET is sanitized",async()=>{
  assert.equal(d.keyLimit.leftRub,1500);
  assert.equal(JSON.stringify(d).includes("do-not-expose"),false);
  assert.equal(d.accountLimit,null);
+});
+
+test("monthly counter changes never certify individual receipts",()=>{
+ const before={status:"ok",observedAt:Date.UTC(2026,10,28),keyLimit:{consistent:true,limitRub:1500,spentRub:0}};
+ const after={...before,observedAt:before.observedAt+1000,keyLimit:{...before.keyLimit,spentRub:2.02}};
+ assert.equal(monthlySpendMovement(before,after).deltaRub,2.02);
+ assert.equal(monthlySpendMovement(before,after).costVerified,false);
+ assert.equal(monthlySpendMovement(after,{...before,observedAt:after.observedAt+1000}).deltaRub,null);
+ assert.equal(monthlySpendMovement(after,{...after,observedAt:Date.UTC(2026,11,1)}).classification,"counter_reset_or_adjustment");
+ assert.equal(monthlySpendMovement(after,{...after,observedAt:after.observedAt+1000,keyLimit:{...after.keyLimit,limitRub:2000}}).deltaRub,null);
 });
