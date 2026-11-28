@@ -1,0 +1,20 @@
+name: RouterAI receipt read-only comparison
+on:
+  push:
+    branches: [assistant/routerai-receipt-readonly]
+    paths: ['.github/workflows/routerai-receipt-readonly.yml']
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read receipt and existing account status only
+        env:
+          ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
+          ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+        run: python3 -u scripts/routerai_receipt_readonly.py
