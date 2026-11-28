@@ -1,0 +1,25 @@
+name: Claudy Opus chat code review
+on:
+  push:
+    branches: [assistant/claudy-opus-chat-review]
+    paths: ['.github/workflows/claudy-opus-chat-review.yml']
+permissions:
+  contents: read
+concurrency:
+  group: claudy-isolated-benchmark
+  cancel-in-progress: false
+jobs:
+  review:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate syntax
+        run: python3 -m py_compile scripts/claudy_chat_code_review.py
+      - name: Review public chat code only
+        env:
+          CLAUDY_API_KEY: ${{ secrets.CLAUDY_API_KEY }}
+        run: python3 -u scripts/claudy_chat_code_review.py
