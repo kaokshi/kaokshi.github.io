@@ -1,0 +1,25 @@
+name: Claudy advanced benchmark
+on:
+  push:
+    branches: [assistant/claudy-isolated-benchmark]
+    paths: ['.github/workflows/claudy-advanced-benchmark.yml']
+permissions:
+  contents: read
+concurrency:
+  group: claudy-isolated-benchmark
+  cancel-in-progress: false
+jobs:
+  benchmark:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate syntax
+        run: python3 -m py_compile scripts/claudy_advanced_benchmark.py
+      - name: Run native Claude API tests
+        env:
+          CLAUDY_API_KEY: ${{ secrets.CLAUDY_API_KEY }}
+        run: python3 -u scripts/claudy_advanced_benchmark.py
