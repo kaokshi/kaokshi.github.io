@@ -24,7 +24,7 @@ What does total({"a":2,"b":6}) return? bugs must be an array of the three line-s
     ("opus", "javascript", """Return ONLY JSON with keys actual, expected, reason.
 function accept(items) {
  const seen = new Set();
- return items.filter(x => {if (seen.has(x.id)) return false; seen.add(x); return true;});
+ return items.filter(x => {if (seen.has(x.id)) return true; seen.add(x); return true;});
 }
 For input [{id:1},{id:1},{id:2}], actual and expected are arrays of IDs before and after correcting the bug. Explain the fix in Russian."""),
     ("sonnet", "editorial", """Return ONLY JSON with keys unsupported, corrected.
@@ -105,7 +105,8 @@ def main():
         rate,out=RATES[model]
         bounds.append((Decimal(len(prompt.encode())+1024)*rate*2+MAX_OUTPUT*out)/1_000_000)
     if sum(bounds)>CAP: raise RuntimeError("estimated_budget_exceeded")
-    if before is not None and before<sum(bounds): raise RuntimeError("balance_insufficient")
+    if before is None: raise RuntimeError("balance_schema_unverified")
+    if before<sum(bounds): raise RuntimeError("balance_insufficient")
     print("CLAUDY_ESTIMATED_MAX_RUB",str(sum(bounds)),flush=True)
     est=Decimal(0)
     passed=0
