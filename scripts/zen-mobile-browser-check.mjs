@@ -46,6 +46,14 @@ try{
    await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),"chat horizontal overflow at "+width+" "+theme);
   }
+  if(width<750){
+   await page.setViewportSize({width,height:520});
+   await page.waitForFunction(()=>{const e=document.querySelector("#managerchat .conversation-composer");return e.getBoundingClientRect().bottom<=innerHeight+1});
+   await page.setViewportSize({width,height:800});
+  }
+  await page.locator("#managerchat .chat-options summary").click();
+  assert.ok(await page.locator("#managerchat .chat-settings-popover").isVisible());
+  await page.locator("#managerchat .chat-options summary").click();
   assert.equal(await page.locator("#managerchat .chat-options").getAttribute("open"),null);
   assert.ok(await page.locator("#agenthistory").getByRole("button",{name:"Копировать"}).isVisible());
   await page.locator("#chatdeveloper").click();
