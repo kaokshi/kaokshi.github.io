@@ -1,7 +1,7 @@
 name: ZEN mobile browser checks
 on:
   push:
-    branches: [assistant/zen-mobile-chat-ui]
+    branches: [assistant/zen-mobile-chat-ui, assistant/zen-conversation-redesign]
     paths: ['scripts/zen-mobile-browser-check.mjs', 'telegram-control/**', '.github/workflows/zen-mobile-browser-check.yml']
 permissions:
   contents: read
