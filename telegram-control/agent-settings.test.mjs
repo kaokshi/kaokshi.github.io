@@ -23,9 +23,9 @@ test("the managing agent starts on Claude Sonnet 5.5 with the current limits", a
  const {storage} = fixture();
  const body = await get(storage);
  assert.equal(body.settings.model, "anthropic/claude-sonnet-5.5");
- assert.equal(body.settings.reasoning, "low");
- assert.equal(body.settings.dailyRub, 10);
- assert.equal(body.settings.perCallRub, 2);
+ assert.equal(body.settings.reasoning, "medium");
+ assert.equal(body.settings.dailyRub, 30);
+ assert.equal(body.settings.perCallRub, 5);
  assert.equal(body.settings.version, 0);
  // The owner may pick any of the offered models, including going back to Qwen.
  const ids = body.models.map(m => m.id);
@@ -103,4 +103,20 @@ test("an unsettled paid request blocks a settings change", async () => {
   reasoning: "low", dailyRub: 10, perCallRub: 2});
  assert.equal(r.status, 423);
  assert.equal((await r.json()).error, "charge_reconciliation_required");
+});
+
+
+test("a production hold preserves production accounting while the owner saves chat settings", async () => {
+ const {storage, store} = fixture();
+ const hold = {id: "agent:production", operation: "agent:production/science/1/plan"};
+ await storage.put("account:production-hold", hold);
+ await storage.put("budget:executor-report", {budget: {unsettledRequest: true}});
+ const r = await post(storage, {...initialAgentSettings(), reasoning: "high", dailyRub: 25, perCallRub: 4, confirm: true});
+ assert.equal(r.status, 200);
+ const {settings} = await get(storage);
+ assert.equal(settings.reasoning, "high");
+ assert.equal(settings.dailyRub, 25);
+ assert.equal(settings.perCallRub, 4);
+ assert.deepEqual(store.get("account:production-hold"), hold);
+ assert.equal(store.get("budget:executor-report").budget.unsettledRequest, true);
 });

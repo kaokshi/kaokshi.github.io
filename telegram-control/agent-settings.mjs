@@ -3,7 +3,7 @@
 export const AGENT_KEY="agent:settings",AGENT_HISTORY_PREFIX="agent:settings-history:";
 export const DEFAULT_MODEL="anthropic/claude-sonnet-5.5";
 export const OPUS_MODEL="anthropic/claude-opus-5.5";
-export const DEFAULT_DAILY_RUB=10,DEFAULT_PER_CALL_RUB=2;
+export const DEFAULT_DAILY_RUB=30,DEFAULT_PER_CALL_RUB=5;
 // The owner may pick any verified text model for the managing agent.
 export const AGENT_MODELS=Object.freeze([
  {id:"anthropic/claude-sonnet-5.5",label:"Claude Sonnet 5.5"},
@@ -19,7 +19,7 @@ export const MAX_DAILY_RUB=1000,MAX_PER_CALL_RUB=100;
 export const MAX_CALLS_PER_DAY=20;
 
 export const initialAgentSettings=()=>({
- version:0,model:DEFAULT_MODEL,reasoning:"low",dailyRub:DEFAULT_DAILY_RUB,perCallRub:DEFAULT_PER_CALL_RUB,opusDailyRub:0,
+ version:0,model:DEFAULT_MODEL,reasoning:"medium",dailyRub:DEFAULT_DAILY_RUB,perCallRub:DEFAULT_PER_CALL_RUB,opusDailyRub:0,
  updatedAt:null,actor:"owner"});
 
 const money=v=>typeof v==="number"&&Number.isFinite(v)&&v>=0;
@@ -46,10 +46,9 @@ export async function writeAgentSettings(storage,data,now=Date.now()){
  const result=await storage.transaction(async tx=>{
   const current=await readAgentSettings(tx);
   if(!Number.isSafeInteger(data.version)||data.version!==current.version)return null;
-  // A change of the managing model or its limits must not run while a paid
-  // request is unsettled, so the reserved amount stays known.
-  if(await tx.get("agent:charge-hold")||await tx.get("account:production-hold"))return {status:423,body:{error:"charge_reconciliation_required"}};
-  if((await tx.get("budget:executor-report"))?.budget?.unsettledRequest)return {status:423,body:{error:"in_flight_paid_request"}};
+  // A production hold blocks spend on the shared account but does not change
+  // the chat ledger or prevent saving settings for future chat requests.
+  if(await tx.get("agent:charge-hold"))return {status:423,body:{error:"charge_reconciliation_required"}};
   const opusDailyRub=v.settings.opusDailyRub??current.opusDailyRub;
   if(opusDailyRub>v.settings.dailyRub)return {status:400,body:{error:"invalid_opus_daily_limit"}};
   const next={...v.settings,opusDailyRub,version:current.version+1,updatedAt:new Date(now).toISOString(),actor:"owner"};
