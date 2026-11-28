@@ -1,0 +1,19 @@
+name: Claudy Opus read-only status
+on:
+  push:
+    branches: [assistant/zen-conversation-redesign]
+    paths: ['.github/workflows/claudy-opus-status-only.yml']
+permissions:
+  contents: read
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read existing monthly counter only
+        env:
+          CLAUDY_OPUS_API_KEY: ${{ secrets.CLAUDY_OPUS_API_KEY }}
+        run: python3 -u scripts/claudy_opus_status_only.py
