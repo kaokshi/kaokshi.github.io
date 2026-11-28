@@ -21,3 +21,15 @@ test("developer limits are versioned and bounded",async()=>{
  assert.equal((await developerAction(s,d)).status,409);
  assert.equal((await developerAction(s,{...task,version:1})).status,409);
 });
+
+test("handoff is pinned, read-only and invalid after cancellation or policy changes",async()=>{
+ const s=storage();await developerAction(s,task,100);
+ const req={action:"handoff",confirm:true,id:task.id,settings:{baseSha:"a".repeat(40)}};
+ const result=await developerAction(s,req,101);
+ assert.equal(result.manifest.baseSha,"a".repeat(40));assert.equal(result.manifest.branch,"assistant/opus-task-"+task.id);
+ for(const flag of ["executionEnabled","paidDispatchAuthorized","writeAuthorized","publicationAuthorized"])assert.equal(result.manifest[flag],false);
+ assert.equal((await developerAction(s,{...req,settings:{baseSha:"main"}})).status,400);
+ assert.equal((await developerView(s)).tasks[0].executed,false);
+ await developerAction(s,{action:"cancel",id:task.id,confirm:true},102);
+ assert.equal((await developerAction(s,req,103)).status,409);
+});
