@@ -52,7 +52,13 @@ export class AgentHandler{
   const {token,independent}=chatBilling(this.env);
   const chargeHold=Boolean(await this.storage.get("agent:charge-hold"));
   const productionHold=Boolean(await this.storage.get("account:production-hold"));
-  return {independentBalance:independent,messages:[...rows.values()].reverse(),limit:settings.dailyRub,perCall:settings.perCallRub,chargedOrReserved:ledger.reserved,confirmedRub:ledger.confirmedRub??(ledger.calls?null:0),opusAccountedRub:ledger.opusAccountedRub??null,opusDailyRub:settings.opusDailyRub,calls:ledger.calls,model:settings.model,reasoning:settings.reasoning,settingsVersion:settings.version,enabled:Boolean(token)&&!(await opsState(this.storage)).stopped&&!chargeHold&&(independent||!productionHold),chargeHold,productionHold,mode:"owner_chat_only"};
+  const messages=await Promise.all([...rows.values()].reverse().map(async m=>{
+   if(m.status!=="complete")return m;
+   if(m.job){const job=await this.storage.get("production:job:agent:"+m.id);if(job)return {...m,applicationState:"saved",applicationJobId:job.id};}
+   if(m.proposal){const applied=await this.storage.get("agent:applied:"+m.id);if(applied)return {...m,applicationState:"saved"};const state=await this.core.state();if(state.version!==m.version)return {...m,applicationState:"stale"};}
+   return m;
+  }));
+  return {independentBalance:independent,messages,limit:settings.dailyRub,perCall:settings.perCallRub,chargedOrReserved:ledger.reserved,confirmedRub:ledger.confirmedRub??(ledger.calls?null:0),opusAccountedRub:ledger.opusAccountedRub??null,opusDailyRub:settings.opusDailyRub,calls:ledger.calls,model:settings.model,reasoning:settings.reasoning,settingsVersion:settings.version,enabled:Boolean(token)&&!(await opsState(this.storage)).stopped&&!chargeHold&&(independent||!productionHold),chargeHold,productionHold,mode:"owner_chat_only"};
  }
  async chat(d,now=Date.now()){
   if(d.consent!==true||typeof d.text!=="string"||!d.text.trim()||d.text.length>1200||!/^[a-f0-9-]{36}$/.test(d.id||""))return {status:400,body:{error:"invalid_chat"}};
@@ -158,7 +164,9 @@ export class AgentHandler{
   if((await opsState(this.storage)).stopped)return {status:409,body:{error:"emergency_paused"}};
   if(m.job){const plan=validateJob(m.job);if(!plan)return {status:400,body:{error:"invalid_job"}};const job=await this.storage.transaction(async tx=>(await opsState(tx)).stopped?null:saveJob(tx,"agent:"+m.id,plan,Date.now(),"agent"));return {status:job?200:409,body:job?{job}:{error:"job_conflict"}};}
   const r=await this.core.fetch(new Request("https://core.internal/core/schedule",{method:"POST",body:JSON.stringify({settings:m.proposal,version:m.version})}));
-  return {status:r.status,body:await r.json()};
+  const body=await r.json();
+  if(r.ok)await this.storage.put("agent:applied:"+m.id,{at:Date.now(),version:body.settings?.version??null});
+  return {status:r.status,body};
  }
  async fetch(request){
   const path=new URL(request.url).pathname;
