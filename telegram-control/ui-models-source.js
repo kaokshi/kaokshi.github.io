@@ -106,13 +106,29 @@ async function renderAgentSettings(root){
  const block=e("div",null,root);block.className="mode-panel";
  e("h2","Управляющий агент",block);
  const summary=e("p",null,block);summary.className="muted";
- summary.textContent="Модель: "+modelName(s.model)+" · мышление: "+s.reasoning+" · за запрос: "+money2(s.perCallRub)+" · за сутки: "+money2(s.dailyRub);
- e("p","Действующий маршрут: RouterAI. Переход Claude на Claudy пока не активирован.",block).className="muted";
- const modelPick=e("select",null,block);modelPick.className="review-input";modelPick.setAttribute("aria-label","Модель управляющего агента");
- for(const model of d.models){
-  const option=e("option",null,modelPick);option.value=model.id;option.textContent=model.label;
-  if(model.id===s.model)option.selected=true;
+ const providers=d.providers||[{id:"routerai",label:"RouterAI",models:d.models.map(m=>m.id),configured:true}];
+ const providerLabel=id=>(providers.find(p=>p.id===id)||{label:id||"RouterAI"}).label;
+ summary.textContent="Провайдер: "+providerLabel(s.provider||"routerai")+" · модель: "+modelName(s.model)+" · мышление: "+s.reasoning+" · за запрос: "+money2(s.perCallRub)+" · за сутки: "+money2(s.dailyRub);
+ e("p","RouterAI — по умолчанию, стоимость по чеку RouterAI. Claudy — стоимость по изменению месячного счётчика ключа чата до и после одного запроса; при сомнении списание остаётся на сверке.",block).className="muted";
+ const providerPick=e("select",null,block);providerPick.className="review-input";providerPick.setAttribute("aria-label","Провайдер управляющего агента");
+ for(const p of providers){
+  const option=e("option",null,providerPick);option.value=p.id;option.textContent=p.label+(p.configured===false?" · ключ не подключён":"");
+  option.disabled=p.configured===false&&p.id!==(s.provider||"routerai");
+  if(p.id===(s.provider||"routerai"))option.selected=true;
  }
+ const modelPick=e("select",null,block);modelPick.className="review-input";modelPick.setAttribute("aria-label","Модель управляющего агента");
+ const fillModels=()=>{
+  const allowed=(providers.find(p=>p.id===providerPick.value)||providers[0]).models;
+  const keep=modelPick.value||s.model;
+  modelPick.replaceChildren();
+  for(const model of d.models){
+   if(!allowed.includes(model.id))continue;
+   const option=e("option",null,modelPick);option.value=model.id;option.textContent=model.label;
+   if(model.id===keep)option.selected=true;
+  }
+ };
+ fillModels();
+ providerPick.addEventListener("change",fillModels);
  const levelPick=e("select",null,block);levelPick.className="review-input";levelPick.setAttribute("aria-label","Уровень мышления агента");
  for(const value of d.reasoningLevels){
   const option=e("option",null,levelPick);option.value=value;option.textContent="Мышление: "+value;
@@ -128,9 +144,9 @@ async function renderAgentSettings(root){
  labels.textContent="Лимиты агента в ₽: на запрос, на сутки и на Opus в пределах суточного лимита агента.";
  const save=e("button","Сохранить настройки агента",block);save.className="review-action";
  save.addEventListener("click",async()=>{
-  const body={confirm:true,version:s.version,model:modelPick.value,reasoning:levelPick.value,
+  const body={confirm:true,version:s.version,provider:providerPick.value,model:modelPick.value,reasoning:levelPick.value,
    perCallRub:Number(perCall.value),dailyRub:Number(daily.value),opusDailyRub:Number(opus.value)};
-  if(!window.confirm("Сменить модель управляющего агента и его лимиты? История и память сохранятся."))return;
+  if(!window.confirm("Сменить провайдера, модель управляющего агента и его лимиты? История и память сохранятся."))return;
   save.disabled=true;
   try{await coreRequest("/api/core/agent/settings/write",body);await renderAgentSettings(root);await loadAgent();}
   catch(err){save.disabled=false;window.alert(err.message);}
@@ -141,6 +157,6 @@ async function renderAgentSettings(root){
  if(!d.history.length){const empty=e("p","Изменений ещё не было.",histBlock);empty.className="muted";}
  for(const entry of d.history){
   const line=e("p",null,histBlock);line.className="muted";
-  line.textContent="Ревизия "+entry.version+": "+modelName(entry.model)+" · мышление "+entry.reasoning+" · "+money2(entry.perCallRub)+" за запрос, "+money2(entry.dailyRub)+" за сутки";
+  line.textContent="Ревизия "+entry.version+": "+providerLabel(entry.provider||"routerai")+" · "+modelName(entry.model)+" · мышление "+entry.reasoning+" · "+money2(entry.perCallRub)+" за запрос, "+money2(entry.dailyRub)+" за сутки";
  }
 }
