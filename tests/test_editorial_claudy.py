@@ -35,3 +35,21 @@ class ClaudyExecutorTests(unittest.TestCase):
         self.assertTrue(all(not r["dispatch_authorized"] for r in result.values()))
         with self.assertRaises(ValueError):
             preview_editorial_routes({**models,"images":self.model})
+
+    def test_pinned_settings_preview(self):
+        import hashlib
+        import json
+        from src.editorial_claudy import preview_pinned_routes
+        from src.editorial_zen_core import MODEL_ROLES, CoreBlocked
+        models={"plan":"qwen/qwen3.6-plus","draft":self.model,"edit":"deepseek/deepseek-v4-pro-0813","visual_plan":"qwen/qwen3.6-plus","images":"bytedance-seed/seedream-5-0-flash"}
+        levels={r:"off" for r in MODEL_ROLES}
+        levels["draft"]="high"
+        sha=hashlib.sha256(json.dumps([[r,models[r],levels[r]] for r in MODEL_ROLES],separators=(",",":")).encode()).hexdigest()
+        settings={"models":{"revision":7,"hash":sha,"value":models},"reasoning":levels}
+        result=preview_pinned_routes(settings)
+        self.assertEqual(result["revision"],7)
+        self.assertEqual(result["reasoning"]["draft"],"high")
+        self.assertFalse(result["execution_enabled"])
+        settings["reasoning"]["draft"]="low"
+        with self.assertRaises(CoreBlocked):
+            preview_pinned_routes(settings)
