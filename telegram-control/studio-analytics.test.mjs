@@ -239,6 +239,10 @@ test("route mismatch, login and CAPTCHA stop independently", async () => {
  await assert.rejects(assertStudio(location("https://passport.yandex.ru/auth", "Вход"), route), /auth_expired/);
  await assert.rejects(assertStudio(location(routes.science, "подтвердите, что вы не робот"), route), /challenge/);
  await assertStudio(location(routes.science, "Статистика"), route);
+ // Dzen adds view parameters after login; the same channel path still passes.
+ await assertStudio(location(routes.science + "?statType=publications&publicationsSelectedField=impressions", "Статистика"), route);
+ await assert.rejects(assertStudio(location(routes.cinema + "?statType=publications", "Статистика"), route), /channel_mismatch/);
+ await assert.rejects(assertStudio(location(routes.science + "/other?statType=publications", "Статистика"), route), /channel_mismatch/);
 });
 
 test("statistics uses the existing themed app, owner endpoint and accessible controls", () => {

@@ -66,7 +66,9 @@ export async function assertStudio(page, route) {
      (/\/auth(?:\/|$)|\/login(?:\/|$)/i.test(where.pathname) ||
      /войти в дзен|войти с яндекс id|введите номер телефона/i.test(text) || await login.count() > 0)))
   throw Error("auth_expired");
- if (where.href !== route.url) throw Error("channel_mismatch");
+ // Dzen appends view parameters (?statType=...) to the statistics page; the channel
+ // identity is the exact origin and path, so compare those and ignore the query.
+ if (where.origin + where.pathname !== route.url || where.username || where.password) throw Error("channel_mismatch");
 }
 
 async function takeWorkbook(cdp, event) {
