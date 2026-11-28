@@ -26,6 +26,8 @@ export async function readBudget(storage,now=Date.now()){
  const fresh=Boolean(latest&&latest.budget?.day===day&&now-latest.observedAt<=300000&&latest.observedAt<=now+30000);
  const chat=await storage.get("agent:budget:"+day)||{reserved:0,calls:0};
  const agent=await readAgentSettings(storage);
+ const [productionHold,chatHold]=await Promise.all([storage.get("account:production-hold"),storage.get("agent:charge-hold")]);
+ const holdInfo=hold=>hold?{active:true,startedAt:Number.isSafeInteger(hold.startedAt)&&hold.startedAt>0?hold.startedAt:null,generationRecorded:typeof hold.generationId==="string"&&/^rai-[A-Za-z0-9_-]{1,180}$/.test(hold.generationId)}:{active:false,startedAt:null,generationRecorded:false};
  const matched=fresh&&policy.mainKop===DEFAULT_MAIN_KOP;
  const remaining=(field)=>matched?Math.floor(Number(latest.budget[field])*100+1e-8):null;
  const mainLeft=remaining("mainRemainingRub"),reserveLeft=remaining("reserveRemainingRub");
@@ -34,7 +36,7 @@ export async function readBudget(storage,now=Date.now()){
   reserveSpentKop:reserveLeft===null?null:RESERVE_KOP-reserveLeft,reserveRemainingKop:reserveLeft,
   activationReason:matched?latest.reserveReasons?.map(x=>x.reason).join(", ")||null:null,
   reported:latest?{...latest,stale:!fresh}:null,policyMismatch:policy.mainKop!==DEFAULT_MAIN_KOP
- },chat:{limitRub:agent.dailyRub,opusDailyRub:agent.opusDailyRub,opusAccountedRub:chat.opusAccountedRub??(chat.calls?null:0),confirmedRub:chat.confirmedRub??(chat.calls?null:0),accountedRub:chat.reserved,calls:chat.calls,chargeHold:Boolean(await storage.get("agent:charge-hold")),productionHold:Boolean(await storage.get("account:production-hold"))},executionEnabled:false};
+ },financialStatus:{mode:"read_only",observedAt:now,production:holdInfo(productionHold),chat:holdInfo(chatHold),ledgerReportFresh:fresh,providerFinality:"not_verified_by_panel"},chat:{limitRub:agent.dailyRub,opusDailyRub:agent.opusDailyRub,opusAccountedRub:chat.opusAccountedRub??(chat.calls?null:0),confirmedRub:chat.confirmedRub??(chat.calls?null:0),accountedRub:chat.reserved,calls:chat.calls,chargeHold:Boolean(chatHold),productionHold:Boolean(productionHold)},executionEnabled:false};
 }
 export async function writeBudget(storage,data,now=Date.now()){
  const v=validateBudget(data?.budget);
