@@ -123,3 +123,26 @@ test("the chat view reports the configured model and the actual spend", async ()
  assert.equal(view.calls, 0);
  assert.equal(view.mode, "owner_chat_only");
 });
+
+test("dedicated chat uses its own key while the production hold remains closed", async () => {
+ const {storage} = fixture();
+ await storage.put("account:production-hold", {id:"production", operation:"production/science/1/plan"});
+ const agent = new AgentHandler({storage}, {ROUTERAI_API_KEY:"production-key", ROUTERAI_CHAT_API_KEY:"chat-key"}, new CoreHandler({storage}));
+ const original = globalThis.fetch;
+ let paid = 0;
+ globalThis.fetch = async (url, opts) => {
+  assert.equal(opts.headers.Authorization, "Bearer chat-key");
+  if(url.endsWith("/models"))return Response.json({data:[priceRow(MODEL)]});
+  if(url.endsWith("/credits"))return Response.json({data:{credits:10}});
+  paid++;
+  return Response.json({model:MODEL,usage:{cost:0.01},
+   choices:[{finish_reason:"stop",message:{content:'{"reply":"Synthetic response","proposal":null}'}}]});
+ };
+ try{
+  assert.equal((await agent.view()).enabled,true);
+  const r=await agent.chat({id:"9b00a000-1111-4222-8333-444444444444",text:"Synthetic",consent:true});
+  assert.equal(r.body.message.costVerified,true);
+  assert.equal(paid,1);
+  assert.equal((await storage.get("account:production-hold")).id,"production");
+ }finally{globalThis.fetch=original;}
+});

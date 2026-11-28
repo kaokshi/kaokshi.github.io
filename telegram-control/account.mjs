@@ -1,11 +1,19 @@
 // One durable production charge lane, shared with the existing owner chat hold.
 // Call only inside the same Durable Object transaction as the control decision.
+// A separate secret is enrolled only for a RouterAI account with its own balance.
+export function chatBilling(env){
+ const shared=env?.ROUTERAI_API_KEY;
+ const dedicated=env?.ROUTERAI_CHAT_API_KEY;
+ if(dedicated)return {token:dedicated===shared?null:dedicated,independent:dedicated!==shared};
+ return {token:shared,independent:false};
+}
 const LOCK="account:production-hold";
 const valid=d=>typeof d?.operation==="string"&&/^[-a-zA-Z0-9:_/]{1,180}$/.test(d.operation)&&typeof d.id==="string"&&/^[-a-zA-Z0-9:]{1,120}$/.test(d.id)&&d.operation.startsWith(d.id+"/");
 const fail=(status,error)=>({status,body:{error}});
 export async function claimProduction(tx,d,now){
  if(!valid(d))return fail(400,"invalid_account_operation");
- if(await tx.get("agent:charge-hold")||await tx.get(LOCK))return fail(409,"account_charge_hold");
+ const chat=await tx.get("agent:charge-hold");
+ if((chat&&chat.billingLane!=="dedicated_chat")||await tx.get(LOCK))return fail(409,"account_charge_hold");
  if(await tx.get("account:closed:"+d.operation))return fail(409,"account_operation_seen");
  const hold={id:d.id,operation:d.operation,startedAt:now};
  await tx.put(LOCK,hold);

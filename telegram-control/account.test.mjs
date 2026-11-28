@@ -60,3 +60,9 @@ test("bounded uncertain closure releases the lane but permanently closes the ope
  assert.equal((await claimProduction(s,op,now)).body.error,"account_operation_seen");
  assert.equal((await claimProduction(s,{...op,operation:op.id+"/science/2/plan"},now)).status,200);
 });
+
+test("a dedicated chat charge does not block the independent production account",async()=>{
+ const s=fixture();
+ await s.put("agent:charge-hold",{status:"unknown",billingLane:"dedicated_chat"});
+ assert.equal((await claimProduction(s,op,now)).status,200);
+});

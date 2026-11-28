@@ -1,7 +1,7 @@
 // Explicit one-time deployment of a new, isolated read-only Worker.
 // No package downloads, paid model requests, GitHub writes or editorial changes.
 import {readFile} from "node:fs/promises";
-import {createHmac} from "node:crypto";
+import {createHash,createHmac} from "node:crypto";
 import {buildSnapshot,snapshotBindings} from "./snapshot.mjs";
 import {activeDeployment,latestVersion,readBridgeProbe,verifyDeployedAssets,rollbackBody} from "./deploy-guard.mjs";
 import {HTML,CSS,JS} from "./ui.mjs";
@@ -10,6 +10,7 @@ const account=process.env.CLOUDFLARE_ACCOUNT_ID||"";
 const cfToken=process.env.CLOUDFLARE_API_TOKEN||"";
 const botToken=process.env.TELEGRAM_BOT_TOKEN||"";
 const owner=process.env.TELEGRAM_OWNER_ID||"";
+const chatRouter=process.env.ROUTERAI_CHAT_API_KEY||"";
 const router=process.env.ROUTERAI_API_KEY||"";
 const webhookSecret=process.env.TELEGRAM_WEBHOOK_SECRET||"";
 const intakeSecret=process.env.ZEN_CORE_INTAKE_SECRET||"";
@@ -37,7 +38,9 @@ async function telegram(method,payload={}){
 }
 async function main(){
  const production=process.env.ZEN_CONTROL_ENABLE_PRIVATE_EXECUTOR==="true";
+ const testChat=process.env.ZEN_CONTROL_TEST_ISOLATED_CHAT==="true";
  const inspectOnly=process.env.ZEN_CONTROL_PREFLIGHT_ONLY==="true";
+ requireOk(!testChat||(!inspectOnly&&!production&&Boolean(chatRouter)),"isolated_chat_test_requires_dedicated_deployment");
  requireOk(inspectOnly||process.env.ZEN_CONTROL_CONFIRM_UPDATE==="true","explicit_update_confirmation_required");
  requireOk(/^[a-fA-F0-9]{64}$/.test(intakeSecret),"intake_secret_required");
  requireOk(!webhookSecret||/^[a-zA-Z0-9_-]{32,256}$/.test(webhookSecret),"existing_webhook_secret_invalid");
@@ -92,6 +95,15 @@ async function main(){
  bindings.push({type:"secret_text",name:"EDITORIAL_REVIEW_READ_TOKEN",text:readToken});
  if(production)requireOk(Boolean(router),"router_key_required_for_private_execution");
  if(router)bindings.push({type:"secret_text",name:"ROUTERAI_API_KEY",text:router});
+ if(chatRouter){
+  requireOk(Boolean(router)&&chatRouter!==router,"independent_chat_key_required");
+  stage="verify_chat_balance";
+  const billing=await request("https://routerai.ru/api/v1/credits",{headers:{Authorization:"Bearer "+chatRouter,Accept:"application/json"}});
+  const credits=billing?.data?.credits??billing?.data?.total_credits;
+  requireOk((typeof credits==="number"||typeof credits==="string"&&credits.trim()!=="")&&Number.isFinite(Number(credits))&&Number(credits)>=0,
+   "independent_chat_balance_unavailable");
+  bindings.push({type:"secret_text",name:"ROUTERAI_CHAT_API_KEY",text:chatRouter});
+ }
  if(intakeSecret){requireOk(/^[a-fA-F0-9]{64}$/.test(intakeSecret),"invalid_intake_secret");bindings.push({type:"secret_text",name:"ZEN_CORE_INTAKE_SECRET",text:intakeSecret});}
  const settings=await cf("/scripts/"+SCRIPT+"/settings");
  requireOk(Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="TELEGRAM_WEBHOOK_SECRET"&&b.type==="secret_text"),"existing_webhook_binding_required");
@@ -183,7 +195,7 @@ async function main(){
  console.log("PRIVATE_IMAGE_CONFIRMED");
  stage="verify_review_journal";
  requireOk(dashboard.reviewEnabled===true,"journal_binding_missing");
- const journalRequest=async(path,body)=>fetch(endpoint+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(20000)});
+ const journalRequest=async(path,body,timeoutMs=20000)=>fetch(endpoint+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(timeoutMs)});
  const deniedJournal=await journalRequest("/api/journal",{initData:"invalid"});
  requireOk(deniedJournal.status===401,"journal_auth_gate_failed");
  const journal=await journalRequest("/api/journal",{initData:params.toString()});
@@ -222,6 +234,8 @@ async function main(){
  const unconfirmedSettings=await journalRequest("/api/core/agent/settings/write",{initData:params.toString(),...as,confirm:false});
  requireOk(unconfirmedSettings.status===400,"agent_settings_confirmation_gate_failed");
  console.log("AGENT_CHAT_LIMITS="+av.limit+"/"+av.perCall+" REASONING="+av.reasoning);
+ if(chatRouter)requireOk(av.independentBalance===true,"independent_chat_binding_unverified");
+ console.log("AGENT_CHAT_INDEPENDENT_BALANCE="+av.independentBalance);
  console.log("AGENT_CHAT_ENABLED="+av.enabled+" CHAT_HOLD="+av.chargeHold+" PRODUCTION_HOLD="+av.productionHold);
  const deniedAgent=await journalRequest("/api/core/agent/chat",{initData:"invalid"});
  requireOk(deniedAgent.status===401,"agent_auth_gate_failed");
@@ -327,6 +341,21 @@ async function main(){
  console.log("BALANCE_CONFIGURED="+Boolean(router));
  console.log("PRIVATE_ARTICLE_SNAPSHOT_CONNECTED");
  console.log("OWNER_START_REQUIRED");
+ if(testChat){
+  stage="verify_isolated_chat_paid_once";
+  requireOk(av.independentBalance===true&&av.enabled===true&&av.limit===50&&av.perCall===5&&av.model==="anthropic/claude-sonnet-5.5","isolated_chat_test_precondition_failed");
+  const run=process.env.GITHUB_RUN_ID;
+  requireOk(/^\d{1,20}$/.test(run||""),"isolated_chat_test_run_required");
+  const hex=createHash("sha256").update("zen-control-isolated-chat:"+run).digest("hex");
+  const id=hex.slice(0,8)+"-"+hex.slice(8,12)+"-4"+hex.slice(13,16)+"-8"+hex.slice(17,20)+"-"+hex.slice(20,32);
+  const response=await journalRequest("/api/core/agent/chat",{initData:params.toString(),id,consent:true,
+   text:"Ответь коротко: связь с управляющим агентом работает?"},120000);
+  requireOk(response.ok,"isolated_chat_test_http_"+response.status);
+  const {message}=await response.json();
+  requireOk(message?.status==="complete"&&message.costVerified===true&&Number.isFinite(message.cost)&&message.cost<=5,
+   "isolated_chat_test_receipt_unconfirmed");
+  console.log("ISOLATED_CHAT_TEST_CONFIRMED_RUB="+message.cost);
+ }
 }
 try{await main();}catch(e){
  // Only known safe error codes are allowed. Fetch errors may contain credentials.
