@@ -87,7 +87,7 @@ export class AgentHandler{
    if(opus&&opusAccountedRub+bound>settings.opusDailyRub)return false;
    await tx.put(budgetKey,{...ledger,reserved:ledger.reserved+bound,calls:ledger.calls+1,
     confirmedRub:ledger.confirmedRub??(ledger.calls?null:0),opusAccountedRub:opusAccountedRub+(opus?bound:0)});
-   await tx.put("agent:charge-hold",{id,startedAt:now,status:"pending",billingLane:independent?"dedicated_chat":"shared"});
+   await tx.put("agent:charge-hold",{id,startedAt:now,status:"pending",billingLane:independent?"verified_dedicated_chat":"shared"});
    const pending={id,text,status:"pending",at:new Date(now).toISOString(),reserved:bound,cost:null,proposal:null};await tx.put("agent:id:"+id,pending);await tx.put("agent:message:"+String(now).padStart(15,"0")+":"+id,pending);return true;
   });
   if(!reserved)return {status:409,body:{error:"budget_or_duplicate"}};

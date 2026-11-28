@@ -5,6 +5,7 @@ import {createHash,createHmac} from "node:crypto";
 import {buildSnapshot,snapshotBindings} from "./snapshot.mjs";
 import {activeDeployment,latestVersion,readBridgeProbe,verifyDeployedAssets,rollbackBody} from "./deploy-guard.mjs";
 import {HTML,CSS,JS} from "./ui.mjs";
+import {compareChatBalances} from "./account.mjs";
 const SCRIPT="zen-editorial-control";
 const account=process.env.CLOUDFLARE_ACCOUNT_ID||"";
 const cfToken=process.env.CLOUDFLARE_API_TOKEN||"";
@@ -95,15 +96,21 @@ async function main(){
  bindings.push({type:"secret_text",name:"EDITORIAL_REVIEW_READ_TOKEN",text:readToken});
  if(production)requireOk(Boolean(router),"router_key_required_for_private_execution");
  if(router)bindings.push({type:"secret_text",name:"ROUTERAI_API_KEY",text:router});
- if(chatRouter){
-  requireOk(Boolean(router)&&chatRouter!==router,"independent_chat_key_required");
+ let independentChat=false;
+ if(chatRouter&&router&&chatRouter!==router){
   stage="verify_chat_balance";
-  const billing=await request("https://routerai.ru/api/v1/credits",{headers:{Authorization:"Bearer "+chatRouter,Accept:"application/json"}});
-  const credits=billing?.data?.credits??billing?.data?.total_credits;
-  requireOk((typeof credits==="number"||typeof credits==="string"&&credits.trim()!=="")&&Number.isFinite(Number(credits))&&Number(credits)>=0,
-   "independent_chat_balance_unavailable");
+  const credits=async token=>{
+   try{
+    const billing=await request("https://routerai.ru/api/v1/credits",{headers:{Authorization:"Bearer "+token,Accept:"application/json"}});
+    return billing?.data?.credits??billing?.data?.total_credits;
+   }catch{return null;}
+  };
+  const balanceComparison=compareChatBalances(await credits(router),await credits(chatRouter),await credits(router));
+  independentChat=balanceComparison==="distinct";
+  console.log("ROUTERAI_CHAT_BALANCE_COMPARISON="+balanceComparison);
   bindings.push({type:"secret_text",name:"ROUTERAI_CHAT_API_KEY",text:chatRouter});
  }
+ bindings.push({type:"plain_text",name:"ZEN_CHAT_BALANCE_VERIFIED",text:String(independentChat)});
  if(intakeSecret){requireOk(/^[a-fA-F0-9]{64}$/.test(intakeSecret),"invalid_intake_secret");bindings.push({type:"secret_text",name:"ZEN_CORE_INTAKE_SECRET",text:intakeSecret});}
  const settings=await cf("/scripts/"+SCRIPT+"/settings");
  requireOk(Array.isArray(settings?.bindings)&&settings.bindings.some(b=>b.name==="TELEGRAM_WEBHOOK_SECRET"&&b.type==="secret_text"),"existing_webhook_binding_required");
@@ -234,7 +241,7 @@ async function main(){
  const unconfirmedSettings=await journalRequest("/api/core/agent/settings/write",{initData:params.toString(),...as,confirm:false});
  requireOk(unconfirmedSettings.status===400,"agent_settings_confirmation_gate_failed");
  console.log("AGENT_CHAT_LIMITS="+av.limit+"/"+av.perCall+" REASONING="+av.reasoning);
- if(chatRouter)requireOk(av.independentBalance===true,"independent_chat_binding_unverified");
+ requireOk(av.independentBalance===independentChat,"independent_chat_binding_unverified");
  console.log("AGENT_CHAT_INDEPENDENT_BALANCE="+av.independentBalance);
  console.log("AGENT_CHAT_ENABLED="+av.enabled+" CHAT_HOLD="+av.chargeHold+" PRODUCTION_HOLD="+av.productionHold);
  const deniedAgent=await journalRequest("/api/core/agent/chat",{initData:"invalid"});
