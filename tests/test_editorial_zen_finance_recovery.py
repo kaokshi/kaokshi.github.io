@@ -1,7 +1,8 @@
+import json
 import unittest
 from src.editorial_zen_cloud import CloudCore
 from src.editorial_zen_core import CoreBlocked
-from src.editorial_zen_finance_recovery import inspect, recover
+from src.editorial_zen_finance_recovery import inspect, recover, recover_bounded
 from tests.test_editorial_zen_executor import Store
 
 NOW = 1795536000000
@@ -45,6 +46,34 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(report["confirmedRub"], "1.25")
         self.assertEqual(self.events, [("close", "fixture", OP, "settled")])
         self.assertEqual(before, self.cloud.store.data)
+
+    def test_bounded_evidence_retains_reservation_without_confirming_or_resending(self):
+        article = "fixture/science/1"
+        self.cloud.access(lambda c: c.reserve_call(OP, article, "plan", "new_article", "2"), change=True)
+        evidence = {"schema": "zen-core/billing-upper-bound-v1", "provider": "RouterAI",
+                    "requestId": OP, "providerEvidence": "synthetic provider statement",
+                    "maxFinalRub": "1.80", "billingFinal": True}
+        encode = lambda data: json.dumps(data).encode()
+        for data in ({**evidence, "billingFinal": False}, {**evidence, "maxFinalRub": "2.01"}):
+            with self.assertRaises(CoreBlocked):
+                recover_bounded(self.cloud, self.account, encode(data), confirm=True, now=NOW)
+        self.assertEqual(self.events, [])
+        report = recover_bounded(self.cloud, self.account, encode(evidence), confirm=True, now=NOW)
+        self.assertIsNone(report["confirmedRub"])
+        self.assertEqual(report["reservedRub"], "2")
+        self.assertEqual(self.events, [("close", "fixture", OP, "bounded_uncertain")])
+        status = inspect(self.cloud, self.account, NOW)
+        self.assertEqual(status["budget"]["meteredRub"], "0")
+        self.assertEqual(status["budget"]["boundedUncertainRub"], "2")
+        self.assertFalse(status["budget"]["unsettledRequest"])
+        self.assertEqual(status["budget"]["mainRemainingRub"], "298")
+        with self.assertRaisesRegex(CoreBlocked, "request_already_seen"):
+            self.cloud.access(lambda c: c.reserve_call(OP, article, "plan", "new_article", "2"), change=True)
+        self.cloud.access(lambda c: c.reconcile(OP, "1.25", "a" * 64), change=True)
+        status = inspect(self.cloud, self.account, NOW)
+        self.assertEqual(status["budget"]["meteredRub"], "1.25")
+        self.assertEqual(status["budget"]["boundedUncertainRub"], "0")
+        self.assertEqual(status["budget"]["mainRemainingRub"], "298.75")
 
     def test_missing_cloud_or_stale_account_blocks(self):
         for cloud, now in ((CloudCore(Store()), NOW), (self.cloud, NOW + 60000)):

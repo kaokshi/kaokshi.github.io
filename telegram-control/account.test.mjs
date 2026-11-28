@@ -51,3 +51,12 @@ test("private execution authorization permits a matching claim only outside emer
  await s.put("ops:state",{requestedMode:"manual",stopped:true,version:1,modeRevision:0});
  assert.equal((await accountView(s,{...op,operation:op.id+"/science/1/draft",action:"claim"},now,true)).status,409);
 });
+
+test("bounded uncertain closure releases the lane but permanently closes the operation key", async () => {
+ const s=fixture();
+ assert.equal((await claimProduction(s,op,now)).status,200);
+ assert.equal((await closeProduction(s,{...op,outcome:"bounded_uncertain"},now)).status,200);
+ assert.equal((await closeProduction(s,{...op,outcome:"bounded_uncertain"},now)).body.replay,true);
+ assert.equal((await claimProduction(s,op,now)).body.error,"account_operation_seen");
+ assert.equal((await claimProduction(s,{...op,operation:op.id+"/science/2/plan"},now)).status,200);
+});

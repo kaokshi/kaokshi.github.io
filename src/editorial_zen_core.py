@@ -119,6 +119,8 @@ class Core:
             CREATE TABLE IF NOT EXISTS images (article TEXT, slot INTEGER, evidence TEXT,
                                                PRIMARY KEY(article, slot));
             CREATE TABLE IF NOT EXISTS reconciliations (request TEXT PRIMARY KEY, evidence_sha TEXT);
+            CREATE TABLE IF NOT EXISTS bounded_uncertain_charges (
+                request TEXT PRIMARY KEY, evidence_sha TEXT NOT NULL, maximum TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS spend (
                 id TEXT PRIMARY KEY, day TEXT NOT NULL, article TEXT NOT NULL,
                 stage TEXT NOT NULL, reason TEXT NOT NULL, slot INTEGER,
@@ -369,9 +371,13 @@ class Core:
         main_used = sum((amount(r["main"]) for r in rows), Decimal(0))
         reserve_used = sum((amount(r["reserve"]) for r in rows), Decimal(0))
         start = (date.fromisoformat(day) - timedelta(days=29)).isoformat()
-        period = self.db.execute("SELECT main,reserve,actual FROM spend WHERE day BETWEEN ? AND ?", (start, day)).fetchall()
+        period = self.db.execute("SELECT id,main,reserve,actual FROM spend WHERE day BETWEEN ? AND ?", (start, day)).fetchall()
         period_used = sum((amount(r["main"]) + amount(r["reserve"]) for r in period), Decimal(0))
+        uncertain = {row[0] for row in self.db.execute("SELECT request FROM bounded_uncertain_charges")}
         period_metered = sum((amount(r["actual"]) for r in period if r["actual"] is not None), Decimal(0))
+        def uncertain_total(entries):
+            return str(sum((amount(r["main"]) + amount(r["reserve"]) for r in entries
+                            if r["actual"] is None and r["id"] in uncertain), Decimal(0)))
         return {
             "rollingStart": start, "rollingCapRub": str(self.rolling_cap),
             "rollingRemainingRub": str(max(Decimal(0), self.rolling_cap - period_used)),
@@ -383,7 +389,11 @@ class Core:
                              "rub": r["reserve"], "pending": r["actual"] is None}
                             for r in rows if amount(r["reserve"])],
             "overrun": main_used > self.main or reserve_used > self.reserve,
-            "unsettledRequest": self.db.execute("SELECT id FROM spend WHERE actual IS NULL").fetchone() is not None,
+            "unsettledRequest": self.db.execute(
+                "SELECT id FROM spend WHERE actual IS NULL AND id NOT IN (SELECT request FROM bounded_uncertain_charges)"
+            ).fetchone() is not None,
+            "boundedUncertainRub": uncertain_total(rows),
+            "rollingBoundedUncertainRub": uncertain_total(period),
             "meteredRub": str(sum((amount(r["actual"]) for r in rows if r["actual"] is not None), Decimal(0))),
         }
 
@@ -441,7 +451,8 @@ class Core:
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             row = self.db.execute("SELECT actual FROM spend WHERE id=?", (request_id,)).fetchone()
-            if not row or row["actual"] is not None:
+            if not row or row["actual"] is not None or self.db.execute(
+                    "SELECT 1 FROM bounded_uncertain_charges WHERE request=?", (request_id,)).fetchone():
                 raise CoreBlocked("request_not_pending")
             self.db.execute("DELETE FROM spend WHERE id=?", (request_id,))
 
@@ -500,6 +511,27 @@ class Core:
                 self.db.execute("DELETE FROM stages WHERE article=? AND stage=?", (article, stage))
         return {"article": article, "stage": stage, "releasedReason": expected_reason,
                 "previousStatus": previous["status"]}
+
+    def retain_bounded_uncertain(self, request_id, maximum, evidence_sha):
+        """Retain the full reservation after independent evidence bounds the final charge."""
+        if not isinstance(evidence_sha, str) or not re.fullmatch(r"[a-f0-9]{64}", evidence_sha):
+            raise CoreBlocked("invalid_billing_evidence")
+        maximum = amount(maximum)
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self.db.execute("SELECT main,reserve,actual FROM spend WHERE id=?", (request_id,)).fetchone()
+            if not row or row["actual"] is not None:
+                raise CoreBlocked("request_not_pending")
+            if maximum > amount(row["main"]) + amount(row["reserve"]):
+                raise CoreBlocked("billing_bound_exceeds_reservation")
+            prior = self.db.execute("SELECT evidence_sha, maximum FROM bounded_uncertain_charges WHERE request=?",
+                                    (request_id,)).fetchone()
+            if prior:
+                if prior["evidence_sha"] != evidence_sha or amount(prior["maximum"]) != maximum:
+                    raise CoreBlocked("billing_bound_conflict")
+                return
+            self.db.execute("INSERT INTO bounded_uncertain_charges VALUES (?, ?, ?)",
+                            (request_id, evidence_sha, str(maximum)))
 
     def reconcile(self, request_id, actual, evidence_sha):
         """Book a provider-confirmed charge without reopening its operation key."""
