@@ -126,3 +126,16 @@ test("an order pins the model revision and the thinking level together", async (
  assert.equal(pin.reasoning.plan, "high");
  assert.equal(pin.reasoning.draft, "low");
 });
+
+test("Claudy rates are displayed without changing RouterAI verification or enabling execution",async()=>{
+ const {storage,store}=fixture();
+ const d=await readModels(storage);
+ const sonnet=d.providerPlan.find(m=>m.id==="anthropic/claude-sonnet-5.5");
+ assert.deepEqual(sonnet,{id:"anthropic/claude-sonnet-5.5",targetProvider:"claudy",nativeModel:"claude-sonnet-5-5",executionEnabled:false,rateStatus:"configured_estimate",inputRubPerMillion:30,outputRubPerMillion:150,settlementVerified:false});
+ assert.equal(d.catalogue.find(m=>m.id===sonnet.id).priceVerified,false);
+ assert.equal(d.providerPlan.find(m=>m.id==="deepseek/deepseek-v4-pro-0813").targetProvider,"routerai");
+ assert.equal(d.providerPlan.find(m=>m.id==="bytedance-seed/seedream-5-0-flash").targetProvider,"routerai");
+ assert.equal(d.effectiveTransport,"routerai");assert.equal(d.claudyExecutionEnabled,false);
+ assert.equal(store.size,0);
+ assert.equal(validateModels({...DEFAULT_MODELS,plan:"anthropic/claude-opus-5.5"},d.catalogue).error,"unknown_price");
+});
