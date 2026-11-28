@@ -1,7 +1,7 @@
 name: ZEN mobile UI offline checks
 on:
   push:
-    branches: [assistant/zen-mobile-chat-ui]
+    branches: [assistant/zen-mobile-chat-ui, assistant/zen-conversation-redesign]
     paths: ['telegram-control/**', '.github/workflows/zen-mobile-ui-checks.yml']
 permissions:
   contents: read
