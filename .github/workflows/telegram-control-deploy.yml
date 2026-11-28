@@ -63,4 +63,5 @@ jobs:
           ZEN_CONTROL_TEST_ISOLATED_CHAT: ${{ inputs.test_isolated_chat }}
           ROUTERAI_CHAT_API_KEY: ${{ secrets.ROUTERAI_CHAT_API_KEY }}
           ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
+          CLAUDY_API_KEY: ${{ secrets.CLAUDY_API_KEY }}
         run: node deploy.mjs
