@@ -529,3 +529,22 @@ test("agent settings proxy separates authenticated reads and writes",async()=>{
   {url:"https://core.internal/core/agent/settings",method:"POST",body:settings}
  ]);
 });
+
+
+test("finance status uses live hold independently of stale report and never exposes generation ID",async()=>{
+ const now=Date.parse("2026-11-28T10:00:00Z");
+ const map=new Map([["account:production-hold",{id:"fixture",startedAt:now-1000}],
+ ["agent:charge-hold",{id:"chat",startedAt:now-2000,generationId:"rai-private-fixture"}]]);
+ const storage={get:async k=>map.get(k),put:async()=>{throw Error("read only");}};
+ const d=await readBudget(storage,now);
+ assert.equal(d.financialStatus.production.active,true);
+ assert.equal(d.financialStatus.production.startedAt,now-1000);
+ assert.equal(d.financialStatus.chat.active,true);
+ assert.equal(d.financialStatus.chat.generationRecorded,true);
+ assert.equal(d.financialStatus.ledgerReportFresh,false);
+ assert.equal(d.financialStatus.providerFinality,"not_verified_by_panel");
+ assert.equal(JSON.stringify(d).includes("rai-private-fixture"),false);
+ assert.equal(d.executionEnabled,false);
+ map.delete("account:production-hold");
+ assert.equal((await readBudget(storage,now)).financialStatus.production.active,false);
+});
