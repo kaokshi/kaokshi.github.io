@@ -9,7 +9,7 @@ from pathlib import Path
 
 BASE="https://api.claudy.shop"
 MODEL="claude-opus-5-5"
-MAX_OUTPUT=3200
+MAX_OUTPUT=12000
 CAP=Decimal("8")
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -24,7 +24,7 @@ def call(path,key,payload=None):
         data=json.dumps(payload,ensure_ascii=False).encode()
     req=urllib.request.Request(BASE+path,data=data,headers=h)
     try:
-        with urllib.request.build_opener(NoRedirect()).open(req,timeout=150) as res:
+        with urllib.request.build_opener(NoRedirect()).open(req,timeout=240) as res:
             return json.loads(res.read(2_000_000))
     except urllib.error.HTTPError as e: raise RuntimeError("HTTP_"+str(e.code)) from None
     except Exception: raise RuntimeError("transport_or_schema") from None
@@ -63,12 +63,13 @@ def main():
     stop=body.get("stop_reason")
     content=body.get("content") or []
     report="\n".join(x.get("text","") for x in content if x.get("type")=="text")
-    if not model_ok or stop!="end_turn" or not report.strip(): raise RuntimeError("review_incomplete")
+    print("REVIEW_RESULT",json.dumps({"actual_rub":str(before-after),"seconds":elapsed,"model_match":model_ok,"stop":stop if stop in ("end_turn","max_tokens","stop_sequence","tool_use","refusal") else "other","input_tokens":usage.get("input_tokens"),"output_tokens":usage.get("output_tokens"),"cache_read":usage.get("cache_read_input_tokens"),"cache_write":usage.get("cache_creation_input_tokens"),"text_chars":len(report),"thinking_blocks":sum(x.get("type")=="thinking" for x in content)}),flush=True)
+    if not model_ok or not report.strip(): raise RuntimeError("review_incomplete")
     Path("claudy-review.txt").write_text(report[:18000],encoding="utf-8")
-    print("REVIEW_RESULT",json.dumps({"actual_rub":str(before-after),"seconds":elapsed,"model_match":model_ok,"input_tokens":usage.get("input_tokens"),"output_tokens":usage.get("output_tokens"),"cache_read":usage.get("cache_read_input_tokens"),"cache_write":usage.get("cache_creation_input_tokens")}),flush=True)
     # Public-source review only; output is advisory, never executed.
     for line in report[:18000].splitlines():
         print("OPUS_REVIEW "+line,flush=True)
+    if stop!="end_turn": raise RuntimeError("review_incomplete")
 
 if __name__=="__main__":
     try: main()
