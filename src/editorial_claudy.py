@@ -108,3 +108,15 @@ def preview_editorial_routes(models):
                         "dispatch_authorized": False,
                         "reason": "provider_settlement_unavailable" if provider == "claudy" else "preview_only"}
     return routes
+
+def preview_pinned_routes(settings):
+    """Validate the exact immutable settings envelope used by the existing executor."""
+    from .editorial_zen_core import validate_editorial_settings
+    checked = validate_editorial_settings(settings)
+    return {"schema": "zen-core/provider-preview-v1",
+            "revision": checked["models"]["revision"],
+            "hash": checked["models"]["hash"],
+            "routes": preview_editorial_routes(checked["models"]["value"]),
+            "reasoning": checked["reasoning"],
+            "execution_enabled": False, "publication_authorized": False,
+            "rss_enabled": False}
