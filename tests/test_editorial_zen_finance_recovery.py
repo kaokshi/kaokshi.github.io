@@ -2,7 +2,7 @@ import json
 import unittest
 from src.editorial_zen_cloud import CloudCore
 from src.editorial_zen_core import CoreBlocked
-from src.editorial_zen_finance_recovery import inspect, recover, recover_bounded
+from src.editorial_zen_finance_recovery import inspect, recover, recover_bounded, recover_owner_waived
 from tests.test_editorial_zen_executor import Store
 
 NOW = 1795536000000
@@ -74,6 +74,27 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(status["budget"]["meteredRub"], "1.25")
         self.assertEqual(status["budget"]["boundedUncertainRub"], "0")
         self.assertEqual(status["budget"]["mainRemainingRub"], "298.75")
+
+    def test_owner_waiver_retains_buffer_and_never_claims_billing_finality(self):
+        article = "fixture/science/1"
+        self.cloud.access(lambda c: c.reserve_call(OP, article, "plan", "new_article", "2"), change=True)
+        for confirm, reserve in ((False, "2"), (True, "1")):
+            with self.assertRaises(CoreBlocked):
+                recover_owner_waived(self.cloud, self.account, confirm=confirm,
+                                     expected_reserve=reserve, now=NOW)
+        self.assertEqual(self.events, [])
+        result = recover_owner_waived(self.cloud, self.account, confirm=True,
+                                      expected_reserve="2", now=NOW)
+        self.assertEqual(result["status"], "owner_waived")
+        self.assertIsNone(result["confirmedRub"])
+        self.assertFalse(result["billingFinal"])
+        self.assertEqual(self.events, [("close", "fixture", OP, "bounded_uncertain")])
+        budget = inspect(self.cloud, self.account, NOW)["budget"]
+        self.assertFalse(budget["unsettledRequest"])
+        self.assertEqual(budget["boundedUncertainRub"], "2")
+        self.assertEqual(budget["meteredRub"], "0")
+        with self.assertRaisesRegex(CoreBlocked, "request_already_seen"):
+            self.cloud.access(lambda c: c.reserve_call(OP, article, "plan", "new_article", "2"), change=True)
 
     def test_missing_cloud_or_stale_account_blocks(self):
         for cloud, now in ((CloudCore(Store()), NOW), (self.cloud, NOW + 60000)):
