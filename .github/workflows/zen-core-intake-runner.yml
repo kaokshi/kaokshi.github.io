@@ -26,6 +26,19 @@ concurrency:
   group: zen-core-intake-runner
   cancel-in-progress: false
 jobs:
+  sonnet-live-check:
+    if: github.ref == 'refs/heads/codex/zen-sonnet-live-check' && github.event_name == 'workflow_dispatch' && inputs.settings_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Restore and test owner chat once
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+        run: node telegram-control/sonnet-live-check.mjs
   intake:
     if: (github.ref == 'refs/heads/integration/zen-core-routerai-20261124' && github.event_name != 'schedule') || (github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.ZEN_CORE_INTAKE_SCHEDULE_ENABLED == 'true'))
     runs-on: ubuntu-latest
