@@ -1,0 +1,61 @@
+name: Claudy role key verification
+on:
+  push:
+    branches: [assistant/claudy-isolated-benchmark]
+    paths: ['.github/workflows/claudy-role-key-verification.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify distinct role credentials using account GET only
+        env:
+          CLAUDY_SONNET_API_KEY: ${{ secrets.CLAUDY_SONNET_API_KEY }}
+          CLAUDY_OPUS_API_KEY: ${{ secrets.CLAUDY_OPUS_API_KEY }}
+          CLAUDY_EDITORIAL_API_KEY: ${{ secrets.CLAUDY_EDITORIAL_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os, json, urllib.request, urllib.error
+          from decimal import Decimal
+          roles=("SONNET","OPUS","EDITORIAL")
+          keys={r:os.environ.get("CLAUDY_"+r+"_API_KEY","") for r in roles}
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*a): return None
+          def balance(d):
+              if not isinstance(d,dict): return None
+              for k in ("balance_rub","balanceRub","credits_rub","balance_rubles"):
+                  if k in d:
+                      try:
+                          v=Decimal(str(d[k]))
+                          if v.is_finite() and v>=0: return v
+                      except Exception: pass
+              if d.get("currency") in ("RUB","rub"):
+                  try:
+                      v=Decimal(str(d.get("balance")))
+                      if v.is_finite() and v>=0: return v
+                  except Exception: pass
+              for k in ("data","account","balance"):
+                  v=balance(d.get(k))
+                  if v is not None: return v
+          distinct=all(keys.values()) and len(set(keys.values()))==3
+          print("ROLE_KEYS_DISTINCT",str(distinct).lower(),flush=True)
+          ok=distinct
+          for role,key in keys.items():
+              status="missing"
+              if key:
+                  try:
+                      req=urllib.request.Request("https://api.claudy.shop/v1/me",headers={"Authorization":"Bearer "+key,"Accept":"application/json"})
+                      with urllib.request.build_opener(NoRedirect()).open(req,timeout=20) as r:
+                          b=balance(json.load(r))
+                      status="ok" if b is not None else "balance_schema_unverified"
+                  except urllib.error.HTTPError as e:
+                      status="auth_failed" if e.code in (401,403) else "http_"+str(e.code)
+                  except Exception:
+                      status="unavailable"
+              print("ROLE_KEY",json.dumps({"role":role,"status":status}),flush=True)
+              ok=ok and status=="ok"
+          if not ok: raise SystemExit(1)
+          PY
