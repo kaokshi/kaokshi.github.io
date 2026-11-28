@@ -25,3 +25,19 @@ test("all navigation destinations exist, including secondary pages",()=>{
  assert.ok(CSS.includes('env(safe-area-inset-bottom)'));
  assert.ok(JS.includes('link.dataset.openTab'));
 });
+
+test("chat history uses single flight and only redraws changed content",()=>{
+ assert.ok(JS.includes("if(agentLoadFlight)return agentLoadFlight"));
+ assert.ok(JS.includes("if(changed){root.replaceChildren()"));
+ assert.ok(JS.includes("await refreshAgentAfterMutation()"));
+ assert.ok(JS.includes("Автоматического повтора нет."));
+ assert.ok(JS.includes('agentApplicationStates.set(m.id,"saved")'));
+});
+test("chat shortcuts and accessible navigation preserve the confirmation flow",()=>{
+ assert.ok(HTML.indexOf('data-tab="chat"')<HTML.indexOf('data-tab="analytics"'));
+ assert.ok(HTML.includes('id="agentcount"'));
+ assert.ok(!/id="agenthistory"[^>]*aria-live/.test(HTML));
+ assert.ok(JS.includes('if(!by("agentsend").disabled)sendAgent()'));
+ assert.ok(/async function sendAgent[\s\S]*?window\.confirm/.test(JS));
+ assert.ok(CSS.includes("backdrop-filter:blur(12px)"));
+});
