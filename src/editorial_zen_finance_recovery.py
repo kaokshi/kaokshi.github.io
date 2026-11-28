@@ -117,17 +117,53 @@ def recover_bounded(cloud, account, evidence, *, confirm=False, now=None):
             "reservedRub": report["reservedRub"], "executed": False, "publicationAuthorized": False}
 
 
+def recover_owner_waived(cloud, account, *, confirm=False, expected_reserve=None, now=None):
+    """Explicit owner write-off, not evidence of provider billing finality.
+
+    Keep the reservation in budget as a conservative risk buffer; exclude it from
+    confirmed spend. The existing worker bounded_uncertain outcome is a lock
+    release compatibility marker, not a provider attestation for this path.
+    """
+    if confirm is not True or expected_reserve is None:
+        raise CoreBlocked("explicit_recovery_confirmation_required")
+    report = inspect(cloud, account, now=now)
+    hold = report["productionHold"]
+    if (not hold or len(report["pending"]) != 1
+            or report["productionRecovery"] not in
+            {"unsettled_requires_evidence", "bounded_hold_can_close"}
+            or amount(report["reservedRub"]) != amount(expected_reserve)):
+        raise CoreBlocked("owner_waiver_requires_matching_single_hold")
+    operation = hold["operation"]
+    record = json.dumps({"schema": "zen-core/owner-waiver-v1",
+        "requestId": operation, "reservedRub": report["reservedRub"],
+        "billingFinal": False, "confirmedRub": None,
+        "decision": "owner_authorized_release_keep_risk_buffer"},
+        sort_keys=True).encode()
+    sha = digest(record)
+    cloud.store.immutable("billing-evidence/" + sha + ".json", record)
+    cloud.access(lambda core: core.retain_bounded_uncertain(
+        operation, amount(expected_reserve), sha), change=True)
+    account("close", hold["id"], operation, "bounded_uncertain")
+    return {"status": "owner_waived", "confirmedRub": None,
+            "riskBufferRub": report["reservedRub"], "billingFinal": False,
+            "executed": False, "publicationAuthorized": False}
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("command", choices=("audit", "close-settled", "close-bounded"))
+    p.add_argument("command", choices=("audit", "close-settled", "close-bounded", "owner-waive"))
     p.add_argument("--operation")
+    p.add_argument("--expected-reserve")
     p.add_argument("--evidence", type=Path)
     p.add_argument("--confirm", action="store_true")
     args = p.parse_args()
     try:
         cloud = CloudCore(GitHubStore(os.getenv("EDITORIAL_PRIVATE_TOKEN")))
         account = configured_account()
-        if args.command == "close-bounded":
+        if args.command == "owner-waive":
+            result = recover_owner_waived(cloud, account, confirm=args.confirm,
+                                          expected_reserve=args.expected_reserve)
+        elif args.command == "close-bounded":
             if not args.confirm or args.evidence is None:
                 raise CoreBlocked("explicit_recovery_confirmation_required")
             result = recover_bounded(cloud, account, args.evidence.read_bytes(), confirm=True)
