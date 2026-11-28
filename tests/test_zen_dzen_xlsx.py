@@ -4,11 +4,12 @@ import zipfile
 from xml.sax.saxutils import escape
 from src.zen_dzen_xlsx import HEADERS, CHANNELS, import_report
 
-def fixture(channel="science", duplicate=False, wrong_total=False):
+def fixture(channel="science", duplicate=False, wrong_total=False, extra=None):
     out=io.BytesIO()
     with zipfile.ZipFile(out,"w") as z:
-        z.writestr("xl/workbook.xml", '<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Статистика" r:id="r1"/><sheet name="Дзен" r:id="r2"/></sheets></workbook>')
-        z.writestr("xl/_rels/workbook.xml.rels", '<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/><Relationship Id="r2" Target="worksheets/sheet2.xml"/></Relationships>')
+        z.writestr("xl/workbook.xml", '<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Статистика" r:id="r1"/><sheet name="Дзен" r:id="r2"/>'+(f'<sheet name="{extra}" r:id="r3"/>' if extra else '')+'</sheets></workbook>')
+        z.writestr("xl/_rels/workbook.xml.rels", '<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/><Relationship Id="r2" Target="worksheets/sheet2.xml"/>'+('<Relationship Id="r3" Target="worksheets/sheet3.xml"/>' if extra else '')+'</Relationships>')
+        if extra: z.writestr("xl/worksheets/sheet3.xml", '<worksheet><sheetData><row><c r="Z99" t="inlineStr"><is><t>not parsed</t></is></c></row></sheetData></worksheet>')
         for i, n in ((1,12),(2,9)):
             plat="Все платформы" if i==1 else "Дзен"
             total=["Всего",plat,None,None,None,10,2,1,3,0,4,1][:n]
@@ -44,3 +45,15 @@ class ImportTest(unittest.TestCase):
         with self.assertRaises(ValueError): import_report(fixture(),"cinema")
     def test_duplicate_rejected(self):
         with self.assertRaises(ValueError): import_report(fixture(duplicate=True),"science")
+
+    def test_extra_platform_sheet_is_skipped_without_changing_totals(self):
+        # Dzen now adds per-platform sheets such as "Mail.ru"; the verified totals stay
+        # the two known sheets and the extra sheet is not parsed (even if malformed).
+        base=import_report(fixture(),"science","a"*24)
+        withextra=import_report(fixture(extra="Mail.ru"),"science","a"*24)
+        self.assertEqual(withextra["all_platforms"]["totals"],base["all_platforms"]["totals"])
+        self.assertEqual(withextra["dzen_platform"]["totals"],base["dzen_platform"]["totals"])
+        self.assertEqual(withextra["channel_binding"],"expected_id_matched")
+    def test_missing_main_sheet_still_rejected(self):
+        broken=fixture(extra="Mail.ru").replace('name="Дзен"'.encode(), 'name="Xзен"'.encode())
+        with self.assertRaises(ValueError): import_report(broken,"science")

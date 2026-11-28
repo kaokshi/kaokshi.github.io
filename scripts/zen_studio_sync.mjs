@@ -12,6 +12,7 @@ const MAX_XLSX = 10_000_000;
 const CAP = 60000;
 const KEEP_ALIVE = 10000;
 const WORK = 33000;
+const STATS_VIEW = "?statType=publications";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const UTC = now => new Date(now).toISOString().slice(0, 10);
 const SAFE = new Set(["auth_missing", "invalid_auth", "auth_expired", "challenge", "route_unconfigured",
@@ -75,7 +76,9 @@ async function takeWorkbook(cdp, event) {
  const type = event.responseHeaders?.find(header => header.name.toLowerCase() === "content-type")?.value || "";
  const disposition = event.responseHeaders?.find(header => header.name.toLowerCase() === "content-disposition")?.value || "";
  if (event.responseStatusCode !== 200 || !(/application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/i.test(type) ||
-     (/application\/octet-stream/i.test(type) && /\.xlsx(?:["';\s]|$)/i.test(disposition)))) {
+     // Dzen serves its XLSX report as application/vnd.ms-excel with an .xlsx attachment name;
+     // the importer still validates the workbook structure, channel and period.
+     (/application\/(?:octet-stream|vnd\.ms-excel)/i.test(type) && /\.xlsx(?:["';\s]|$)/i.test(disposition)))) {
   await cdp.send("Fetch.continueResponse", {requestId: event.requestId});
   return null;
  }
@@ -97,6 +100,30 @@ async function takeWorkbook(cdp, event) {
    await cdp.send("Fetch.fulfillRequest", {requestId: event.requestId, responseCode: 204, body: ""});
   }
  }
+}
+
+// Dzen opens a period menu whose confirm item repeats the control label ("Отчёт").
+// Click it only when exactly one other visible element with that exact label appears;
+// a single-step export (download on the first click) needs no confirmation.
+export async function confirmReportMenu(page, name, control, done, {attempts = 12, pause = sleep} = {}) {
+ const origin = await control.first().boundingBox().catch(() => null);
+ for (let i = 0; i < attempts && !done(); i++) {
+  await pause(250);
+  const items = page.getByText(name, {exact: true}).filter({visible: true});
+  const others = [];
+  for (let j = 0; j < await items.count(); j++) {
+   const box = await items.nth(j).boundingBox().catch(() => null);
+   const cx = box && box.x + box.width / 2, cy = box && box.y + box.height / 2;
+   const inside = origin && box && cx >= origin.x && cx <= origin.x + origin.width && cy >= origin.y && cy <= origin.y + origin.height;
+   if (box && !inside) others.push(j);
+  }
+  if (others.length > 1) throw Error("export_unverified");
+  if (others.length === 1) {
+   await items.nth(others[0]).click({timeout: 4000, noWaitAfter: true});
+   return true;
+  }
+ }
+ return false;
 }
 
 export async function workbook(context, page, path, name, origin = ORIGIN) {
@@ -128,6 +155,7 @@ export async function workbook(context, page, path, name, origin = ORIGIN) {
   await cdp.send("Fetch.enable", {patterns: [{urlPattern: origin + path + "*", requestStage: "Response"}]});
   timer = setTimeout(() => reject(Error("download_failed")), 9000);
   await control.click({timeout: 4000, noWaitAfter: true});
+  await confirmReportMenu(page, name, control, () => captured);
   return await result;
  } finally {
   clearTimeout(timer);
@@ -198,7 +226,8 @@ export async function cloudSession({client, state, routes, scan, now = Date.now,
 async function scanStudio(context, {selected, path, name}, step) {
  const pages = await Promise.all(Object.entries(selected).map(async ([channel, route]) => {
   const page = await step(() => context.newPage());
-  const response = await step(() => page.goto(route.url, {waitUntil: "domcontentloaded", timeout: 9000}));
+  // The bare statistics route opens the subscribers tab; the XLSX report lives on the publications tab.
+  const response = await step(() => page.goto(route.url + STATS_VIEW, {waitUntil: "domcontentloaded", timeout: 9000}));
   await step(() => assertStudio(page, route));
   if (!response?.ok()) throw Error("channel_mismatch");
   return {channel, route, page};
