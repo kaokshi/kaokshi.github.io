@@ -74,8 +74,20 @@ export class AgentHandler{
   const agentModel=settings.model,agentReasoning=settings.reasoning,perCall=settings.perCallRub,dailyLimit=settings.dailyRub;
   const memory=await readMemory(this.storage);
   const diagnostics=(await this.core.diagnostics(now)).findings.slice(0,6).map(({code,scope})=>({code,scope}));
-  const messages=[{role:"system",content:system},{role:"user",content:JSON.stringify({schedule:state,moscowDate:dayKey(now),latestTest:snapshot,balance,balanceScope:independent?"dedicated_chat":"shared",budget,editorialMemory:memory.notes,diagnostics,requestedMode:ops.requestedMode,history,question:text})}];
-  const bound=estimate(catalog?.data?.find(x=>x.id===agentModel),messages,agentModel);
+  const context={schedule:state,moscowDate:dayKey(now),latestTest:snapshot,balance,
+   balanceScope:independent?"dedicated_chat":"shared",budget,editorialMemory:memory.notes,
+   diagnostics,requestedMode:ops.requestedMode,history,question:text};
+  const model=catalog?.data?.find(row=>row.id===agentModel);
+  const messages=[{role:"system",content:system},{role:"user",content:JSON.stringify(context)}];
+  let bound=estimate(model,messages,agentModel);
+  // Reprice the payload after dropping optional context. Keep the question,
+  // owner instructions, current controls and the reply token ceiling.
+  for(const key of ["history","latestTest","diagnostics"]){
+   if(bound===null||bound<=perCall)break;
+   delete context[key];
+   messages[1].content=JSON.stringify(context);
+   bound=estimate(model,messages,agentModel);
+  }
   if(bound===null||balance===null)return {status:409,body:{error:"budget_or_price_unavailable"}};
   // The call does not fit the per-request limit. Say so instead of spending.
   if(bound>perCall)return {status:409,body:{error:"agent_call_exceeds_limit",model:agentModel,boundRub:String(bound),perCallRub:String(perCall),suggestion:"raise_per_call_limit"}};

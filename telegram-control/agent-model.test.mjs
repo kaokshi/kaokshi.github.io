@@ -175,3 +175,39 @@ test("chat generation receipt survives an interrupted response without retry", a
   assert.equal(JSON.stringify(await agent.view()).includes("rai-fixture-123"),false);
  }finally{globalThis.fetch=original;}
 });
+
+test("an affordable Sonnet request sheds optional context before reserving spend", async () => {
+ const {storage}=fixture();
+ const core=new CoreHandler({storage});
+ const agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},core);
+ const prior={status:"complete",text:"x".repeat(400),reply:"y".repeat(500)};
+ for(let i=0;i<3;i++)await storage.put("agent:message:fixture:"+i,prior);
+ const model={...priceRow(MODEL),pricing:{prompt:0.0005,completion:0.001}};
+ const original=globalThis.fetch;
+ let paid=0;
+ globalThis.fetch=async (url,opts)=>{
+  if(url.endsWith("/models"))return Response.json({data:[model]});
+  if(url.endsWith("/credits"))return Response.json({data:{credits:100}});
+  paid++;
+  const payload=JSON.parse(opts.body);
+  const context=JSON.parse(payload.messages[1].content);
+  assert.equal(context.question,"Synthetic question");
+  assert.ok(context.schedule);
+  assert.equal(context.history,undefined);
+  assert.deepEqual(payload.reasoning,{effort:"medium"});
+  assert.equal(payload.max_tokens,700);
+  assert.ok(estimate(model,payload.messages)<=5);
+  assert.ok(estimate(model,[payload.messages[0],{role:"user",content:JSON.stringify({
+   ...context,history:Array(3).fill({user:prior.text,assistant:prior.reply})
+  })}])>5);
+  return Response.json({model:MODEL,usage:{cost:0.01},choices:[
+   {finish_reason:"stop",message:{content:'{"reply":"Synthetic answer","proposal":null}'}}]});
+ };
+ try{
+  const r=await agent.chat({id:"9b00a000-1111-4222-8333-444444444446",text:"Synthetic question",consent:true});
+  assert.equal(r.body.message.status,"complete");
+  assert.equal(r.body.message.costVerified,true);
+  assert.equal(paid,1);
+  assert.equal((await agent.view()).messages.length,4);
+ }finally{globalThis.fetch=original;}
+});
