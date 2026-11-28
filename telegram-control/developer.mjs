@@ -43,3 +43,19 @@ export async function developerAction(storage,d,now=Date.now()){
   await tx.put(key,task);return {task};
  });
 }
+
+const shaOK=v=>typeof v==="string"&&/^[a-f0-9]{40}$/.test(v);
+// Export is a read-only handoff, not a claim, a reservation or a permit to invoke Opus.
+export async function developerHandoff(storage,id,baseSha,now=Date.now()){
+ if(!idOK(id)||!shaOK(baseSha)||!Number.isSafeInteger(now)||now<0)return fail("invalid_handoff");
+ return storage.transaction(async tx=>{
+  const task=await tx.get(PREFIX+id),policy=await tx.get(KEY)??defaults();
+  if((await opsState(tx)).stopped)return fail("emergency_paused",409);
+  if(!task||task.status!=="queued_blocked")return fail("task_not_available",409);
+  if(task.policyVersion!==policy.version||task.limitKop>policy.perTaskKop)return fail("stale_settings",409);
+  return {manifest:{schema:"zen-developer/handoff-v1",id:task.id,text:task.text,reasoning:task.reasoning,
+   repository:"kaokshi/kaokshi.github.io",baseSha,branch:"assistant/opus-task-"+task.id,
+   limits:{taskKop:task.limitKop,dailyKop:policy.dailyKop,monthlyKop:policy.monthlyKop,policyVersion:policy.version},
+   exportedAt:now,executionEnabled:false,paidDispatchAuthorized:false,writeAuthorized:false,publicationAuthorized:false}};
+ });
+}
