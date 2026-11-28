@@ -30,7 +30,7 @@ def recovery_status(core, article):
     if result.get("status") not in ("failed", "blocked"):
         return {**base, "status": "ready", "reason": None}
     reason = result.get("reason")
-    if reason not in TRANSIENT:
+    if reason not in TRANSIENT and reason not in OWNER_ONLY:
         return {**base, "status": "blocked", "reason": reason or "unknown_failure_requires_review"}
     return {**base, "status": "recheck_required", "reason": reason}
 
@@ -57,9 +57,16 @@ def retry_window(core, article, stage, reason, now):
     blocked_at = json.loads(previous[0]).get("blockedAt") if previous else None
     return blocked_at is None or now - blocked_at >= COOLDOWN_MS
 
+# Non-transient blockers whose cause is outside the article and that a re-run
+# re-verifies before any reservation: a checkpoint fingerprint mismatch raises
+# again before reserve_call, and a connection failure that may have charged is
+# already held by the ledger (request_already_seen / unsettled_request). They are
+# never retried automatically and need the same explicit owner release.
+OWNER_ONLY = {"paid_checkpoint_input_changed", "routerai_connection_failed"}
+
 # Reasons that stop the lane but have neither an automatic nor a claimable path.
 # They require an explicit owner release after the blocker is verifiably gone.
-OWNER_RELEASE = TRANSIENT - AUTO_RETRY
+OWNER_RELEASE = (TRANSIENT - AUTO_RETRY) | OWNER_ONLY
 
 def release_blocked_stage(core, article, stage, reason, *, confirm=False):
     """Explicit owner release of a transient blocker that nothing else can clear.

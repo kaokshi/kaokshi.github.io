@@ -136,7 +136,11 @@ class MeteredRouter(Spend):
             raise CoreBlocked("paid_image_generation_disabled")
         phase, reason, slot = classify(stage, "brain" if role == "visual_plan" else role)
         operation = self.session.article + "/" + stage
-        body = {**payload, "model": self.models[role]}
+        if "model" in payload:
+            raise CoreBlocked("payload_must_not_choose_model")
+        # Key order is part of the checkpoint fingerprint (json_bytes does not sort keys).
+        # Keep "model" first: every paid checkpoint saved since the start uses this order.
+        body = {"model": self.models[role], **payload}
         fingerprint = digest(json_bytes({"path": path, "body": body}))
         name = f"requests/{stage}.json"
         response = self.session.read(name)
@@ -244,6 +248,16 @@ class Session:
             if isinstance(title, str) and 4 <= len(title) <= 240:
                 self.core.access(
                     lambda c: c.register_title(self.article, self.channel, title), change=True)
+
+    def closed_without_response(self, stage):
+        """True only for a reserved paid call with no saved reply whose charge the
+        owner already closed as bounded-uncertain. Such an operation is never resent."""
+        if self.read(f"requests/{stage}.json") is not None:
+            return False
+        operation = self.article + "/" + stage
+        return self.core.access(lambda c: c.db.execute(
+            "SELECT 1 FROM spend s JOIN bounded_uncertain_charges b ON b.request = s.id "
+            "WHERE s.id=? AND s.article=? AND s.actual IS NULL", (operation, self.article)).fetchone() is not None)
 
     def account_call(self, action, operation, outcome=None):
         if self.account is not None:

@@ -145,3 +145,24 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertEqual(released["advisories"],[])
         self.assertNotIn("draft",self.c.check_stage(self.article,"draft"))
         self.assertEqual(self.c.article_work(self.article)[1],"draft")
+
+    def test_checkpoint_and_connection_blockers_need_owner_release_never_auto_retry(self):
+        for reason in ("paid_checkpoint_input_changed","routerai_connection_failed"):
+            self.c.stage_result(self.article,"plan",{"status":"passed"})
+            self.c.stage_result(self.article,"draft",{"status":"blocked","reason":reason})
+            state=recovery_status(self.c,self.article)
+            self.assertEqual(state["status"],"recheck_required")
+            blocked=json.loads(self.c.check_stage(self.article,"draft")["draft"])["blockedAt"]
+            self.assertFalse(retry_window(self.c,self.article,"draft",reason,blocked+10*COOLDOWN_MS))
+            with self.assertRaises(CoreBlocked):
+                release_blocked_stage(self.c,self.article,"draft",reason)
+            released=release_blocked_stage(self.c,self.article,"draft",reason,confirm=True)
+            self.assertEqual(released["advisories"],[])
+            self.assertEqual(self.c.article_work(self.article)[1],"draft")
+
+    def test_checkpoint_blocker_release_still_refuses_an_unsettled_charge(self):
+        self.c.stage_result(self.article,"plan",{"status":"passed"})
+        self.c.stage_result(self.article,"draft",{"status":"blocked","reason":"paid_checkpoint_input_changed"})
+        self.c.reserve_call("fixture/science/1/draft",self.article,"draft","new_article",1)
+        with self.assertRaises(CoreBlocked):
+            release_blocked_stage(self.c,self.article,"draft","paid_checkpoint_input_changed",confirm=True)
