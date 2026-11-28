@@ -63,7 +63,7 @@ try{
   if(width<750){
    await page.locator('[data-tab="more"]').click();
    for(const id of ["finance","models","core","settings"]){
-    await page.locator('[data-open-tab="'+id+'"]').click();
+    await page.locator('#more [data-open-tab="'+id+'"]').click();
     assert.equal(await page.locator("#"+id).isVisible(),true);
     assert.equal(await page.locator('[data-tab="more"]').getAttribute("aria-current"),"page");
     assert.equal(await page.evaluate(()=>document.activeElement?.tagName),"H1");
