@@ -162,9 +162,17 @@ class MeteredRouter(Spend):
             if self.session.account is not None and self.balance(self.token) < bound + reserve:
                 raise CoreBlocked("routerai_balance_insufficient")
             self.session.check_control()
+            def save_generation_id(identifier):
+                # Private immutable receipt survives timeouts and malformed bodies.
+                self.session.save(f"requests/{stage}.generation.json",
+                                  json_bytes({"schema": "zen-core/provider-generation-v1",
+                                              "operation": operation, "model": self.models[role],
+                                              "fingerprint": fingerprint, "generationId": identifier}))
+
             answer = self.transport(path, self.token, body,
                                     limit=12_000_000 if role == "image" else 350000,
-                                    timeout=180, exact_numbers=True)
+                                    timeout=180, exact_numbers=True,
+                                    on_generation_id=save_generation_id)
             self.session.save(name, json.dumps({"fingerprint": fingerprint, "answer": answer},
                                                ensure_ascii=False, default=str).encode())
         else:
