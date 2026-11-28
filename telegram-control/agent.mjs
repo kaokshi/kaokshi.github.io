@@ -22,10 +22,12 @@ export function estimate(model,messages,modelId=MODEL){
 }
 export function parseReply(response){
  const choice=response?.choices?.[0];
+ if(choice?.finish_reason==="length")throw Error("reply_token_limit");
  if(choice?.finish_reason!=="stop"||typeof choice.message?.content!=="string")throw Error("incomplete_reply");
  const raw=choice.message.content.trim().replace(/^```json\s*/i,"").replace(/\s*```$/,"");
- const d=JSON.parse(raw);
- if(typeof d.reply!=="string"||!d.reply.trim()||d.reply.length>5000)throw Error("invalid_reply");
+ let d;
+ try{d=JSON.parse(raw);}catch{throw Error("reply_invalid_json");}
+ if(!d||typeof d!=="object"||typeof d.reply!=="string"||!d.reply.trim()||d.reply.length>5000)throw Error("invalid_reply");
  const proposal=d.proposal===null?null:validateSchedule(d.proposal);
  if(d.proposal!==null&&!proposal)throw Error("invalid_proposal");
  const job=d.job===null||d.job===undefined?null:validateJob(d.job);
@@ -40,7 +42,13 @@ async function api(token,path,payload,onGenerationId){
   if(identifier&&/^rai-[A-Za-z0-9_-]{1,180}$/.test(identifier))await onGenerationId(identifier);
  }
  if(!r.ok)throw Error("router_http_"+r.status);
- return r.json();
+ try{return await r.json();}catch(error){if(error?.name==="AbortError"||error?.name==="TimeoutError")throw error;throw Error("router_response_unreadable");}
+}
+const failureText={reply_token_limit:"Ответ обрезан по лимиту токенов.",incomplete_reply:"Модель вернула неполный ответ.",reply_invalid_json:"Модель вернула ответ не в ожидаемом формате JSON.",invalid_reply:"Ответ модели не прошёл проверку формата.",invalid_proposal:"Предложение расписания не прошло проверку.",invalid_job:"Предложение задания не прошло проверку.",cost_missing:"RouterAI не вернул подтверждаемую стоимость.",cost_over_bound:"Стоимость выше предварительной оценки.",model_mismatch:"Идентификатор модели в ответе не совпадает с запрошенным.",router_timeout:"Истекло время ожидания RouterAI.",router_response_unreadable:"Не удалось прочитать ответ RouterAI.",generation_id_conflict:"Не удалось подтвердить идентификатор генерации.",chat_hold_mismatch:"Не удалось подтвердить состояние запроса.",router_request_failed:"Не удалось получить подтверждённый ответ RouterAI."};
+function failureCode(error){
+ if(error?.name==="TimeoutError"||error?.name==="AbortError")return "router_timeout";
+ const code=error?.message;
+ return Object.hasOwn(failureText,code)||/^router_http_[1-5][0-9]{2}$/.test(code||"")?code:"router_request_failed";
 }
 export function dayKey(now){return new Date(now+10800000).toISOString().slice(0,10);}
 export class AgentHandler{
@@ -115,7 +123,7 @@ export class AgentHandler{
    const available=number(fresh?.data?.credits??fresh?.data?.total_credits);
    preflight=available!==null&&available>=bound&&!(await opsState(this.storage)).stopped&&(await opsState(this.storage)).version===ops.version;
   }catch{}
-  if(!preflight){verifiedReceipt=true;message.cost=0;message.reply="Запрос не отправлен: баланс или состояние управления не подтверждены.";}else try{
+  if(!preflight){verifiedReceipt=true;message.cost=0;message.errorCode="preflight_unconfirmed";message.reply="Запрос не отправлен: баланс или состояние управления не подтверждены.";}else try{
    const response=await api(token,"/chat/completions",{model:agentModel,messages,max_tokens:MAX_OUTPUT,reasoning:agentReasoning==="off"?{enabled:false}:{effort:agentReasoning}},async generationId=>{
     await this.storage.transaction(async tx=>{
      const hold=await tx.get("agent:charge-hold");
@@ -128,11 +136,18 @@ export class AgentHandler{
    });
    const cost=number(response.usage?.cost);
    if(cost!==null)message.cost=cost;
-   if(cost===null||cost>bound||response.model!==agentModel)throw Error("unverified_cost_or_model");
+   if(cost===null)throw Error("cost_missing");
+   if(cost>bound)throw Error("cost_over_bound");
+   if(response.model!==agentModel)throw Error("model_mismatch");
    verifiedReceipt=true;
    const parsed=parseReply(response);
    message={...message,...parsed,status:"complete"};
-  }catch{}
+  }catch(error){
+   const code=failureCode(error);
+   message.errorCode=code;
+   const detail=failureText[code]||("RouterAI вернул HTTP "+code.slice(-3)+".");
+   message.reply=detail+" "+(verifiedReceipt?"Стоимость подтверждена, но ответ не принят.":"Списание не подтверждено.")+" Автоповтор отключён.";
+  }
   await this.storage.transaction(async tx=>{
    const hold=await tx.get("agent:charge-hold");
    const previous=await tx.get("agent:id:"+id);
