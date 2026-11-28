@@ -154,3 +154,16 @@ test("collection opens one isolated browser context per account session", async 
  assert.equal(contexts.length, 2, "science and legends share the primary account, cinema has its own");
  assert.deepEqual(seen, {science: "science-account", legends: "science-account", cinema: "cinema-account"});
 });
+
+test("onboarding dialogs over statistics are closed before looking for the report control", async () => {
+ const {dismissOverlays} = await import("../scripts/zen_studio_sync.mjs");
+ let open = 1;
+ const keys = [];
+ const page = {keyboard: {press: async key => { keys.push(key); open = 0; }},
+  locator: () => ({filter: () => ({count: async () => open, first: () => ({})})})};
+ assert.equal(await dismissOverlays(page, {pause: async () => {}}), true);
+ assert.deepEqual(keys, ["Escape"]);
+ const clear = {keyboard: {press: async () => { throw Error("must not press keys without a dialog"); }},
+  locator: () => ({filter: () => ({count: async () => 0})})};
+ assert.equal(await dismissOverlays(clear, {pause: async () => {}}), false);
+});

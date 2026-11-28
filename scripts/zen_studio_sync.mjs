@@ -140,6 +140,23 @@ export async function confirmReportMenu(page, name, control, done, {attempts = 1
  return false;
 }
 
+// Dzen shows onboarding dialogs (e.g. "Дочитывания") over statistics on some channels; they hide
+// the report control from the accessibility tree. Close only dialogs, never navigate or confirm.
+export async function dismissOverlays(page, {attempts = 3, pause = sleep} = {}) {
+ for (let i = 0; i < attempts; i++) {
+  const dialogs = page.locator("[role=dialog],[aria-modal=true]").filter({visible: true});
+  if (await dialogs.count() === 0) return i > 0;
+  await page.keyboard.press("Escape").catch(() => {});
+  await pause(300);
+  if (await dialogs.count() === 0) return true;
+  const close = dialogs.first().getByRole("button", {name: /^(закрыть|close)$/i})
+   .or(dialogs.first().locator("[aria-label*=акрыть],[aria-label*=lose]")).filter({visible: true});
+  if (await close.count()) await close.first().click({timeout: 2000}).catch(() => {});
+  await pause(300);
+ }
+ return false;
+}
+
 export async function workbook(context, page, path, name, origin = ORIGIN) {
  const button = page.getByRole("button", {name, exact: true});
  const link = page.getByRole("link", {name, exact: true});
@@ -222,7 +239,7 @@ export async function cloudSession({client, state, states, routes, scan, now = D
   const contextFor = {};
   for (const [channel, channelState] of Object.entries(perChannel)) {
    if (!contexts.has(channelState)) contexts.set(channelState, await step(() => browser.newContext({storageState: channelState,
-     acceptDownloads: false, serviceWorkers: "block", timezoneId: "Europe/Moscow"})));
+     acceptDownloads: false, serviceWorkers: "block", timezoneId: "Europe/Moscow", viewport: {width: 1440, height: 900}})));
    contextFor[channel] = contexts.get(channelState);
   }
   const first = contexts.values().next().value;
@@ -256,7 +273,10 @@ async function scanStudio(context, {selected, path, name}, step, contextFor = {}
  }));
  return Promise.all(pages.map(async ({channel, route, page}) => {
   let bytes;
-  try { bytes = await step(() => workbook(page.context(), page, path, name)); }
+  try {
+   await step(() => dismissOverlays(page));
+   bytes = await step(() => workbook(page.context(), page, path, name));
+  }
   catch (error) { await step(() => assertStudio(page, route)); throw error; }
   await step(() => assertStudio(page, route));
   return step(() => importWorkbook(bytes, channel, route.id));
