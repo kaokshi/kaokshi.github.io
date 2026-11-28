@@ -9,7 +9,7 @@ test("chat has one instance of its existing controls and its own page",()=>{
   assert.ok(chat.includes('id="'+id+'"'));
  }
  assert.ok(HTML.includes('data-tab="chat"'));
- assert.ok(JS.includes('if(tab.dataset.tab==="chat")loadAgent()'));
+ assert.ok(JS.includes('if(tab.dataset.tab==="chat"){if(by("developerchat").hidden)loadAgent();else loadDeveloper();}'));
  assert.ok(JS.includes('"/api/core/agent/chat"'));
  assert.ok(JS.includes('consent:true'));
 });
@@ -41,3 +41,4 @@ test("chat shortcuts and accessible navigation preserve the confirmation flow",(
  assert.ok(/async function sendAgent[\s\S]*?window\.confirm/.test(JS));
  assert.ok(CSS.includes("backdrop-filter:blur(12px)"));
 });
+test("developer chat has separate controls and no paid submission",()=>{for(const id of ["chatdeveloper","developerchat","devtaskcap","devdaycap","devmonthcap","devbudget","devtext","devcreate","devhistory"])assert.ok(HTML.includes('id="'+id+'"'));assert.ok(JS.includes('"/api/core/developer/action"'));assert.ok(HTML.includes("Выполнение и оплата выключены"));});
