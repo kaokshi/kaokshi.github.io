@@ -21,7 +21,7 @@ test("unknown or insufficient budget fails closed",()=>{
  assert.equal(claudyPreflight(model,p,{status:"ok",inputTokens:42},0.01,5).reason,"insufficient_balance");
  assert.equal(claudyPreflight(model,p,{status:"ok",inputTokens:100000},50,5).reason,"call_budget_exceeded");
  const result=claudyPreflight(model,p,{status:"ok",inputTokens:42},50,5);
- assert.equal(result.allowed,true);assert.equal(result.estimateOnly,true);assert.equal(result.settlementAvailable,false);
+ assert.equal(result.allowed,false);assert.equal(result.budgetEligible,true);assert.equal(result.reason,"provider_settlement_unavailable");assert.equal(result.estimateOnly,true);assert.equal(result.settlementAvailable,false);
 });
 test("request identifiers are diagnostic only",()=>{
  const x=claudyEvidence(new Headers({"request-id":"req_123","X-Claudy-Cache":"bypass"}),{id:"msg_123",cost:0.01});
