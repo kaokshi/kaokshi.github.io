@@ -18,7 +18,8 @@ export function claudyPreflight(model,payload,observation,balanceRub,perCallRub)
  const inputBound=Math.max(b.inputBound,observation.inputTokens+1024);
  const estimatedUpperRub=Math.ceil((inputBound*selected.input*2+payload.max_tokens*selected.output)/1e6*100)/100;
  const reason=estimatedUpperRub>perCallRub?"call_budget_exceeded":estimatedUpperRub>balanceRub?"insufficient_balance":null;
- return {allowed:reason===null,reason,inputBound,reportedInputTokens:observation.inputTokens,estimatedUpperRub,estimateOnly:true,settlementAvailable:false};
+ // Budget eligibility is not permission to dispatch a paid operation.
+ return {allowed:false,budgetEligible:reason===null,reason:reason??"provider_settlement_unavailable",inputBound,reportedInputTokens:observation.inputTokens,estimatedUpperRub,estimateOnly:true,settlementAvailable:false};
 }
 export function claudyEvidence(headers,response){
  const id=v=>typeof v==="string"&&/^[A-Za-z0-9_.:-]{1,160}$/.test(v)?v:null;
