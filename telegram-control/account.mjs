@@ -12,7 +12,7 @@ export async function claimProduction(tx,d,now){
  return {status:200,body:{schema:"zen-core/account-v1",claimed:true}};
 }
 export async function closeProduction(tx,d,now){
- if(!valid(d)||!["settled","not_sent"].includes(d.outcome))return fail(400,"invalid_account_outcome");
+ if(!valid(d)||!["settled","not_sent","bounded_uncertain"].includes(d.outcome))return fail(400,"invalid_account_outcome");
  const key="account:closed:"+d.operation,old=await tx.get(key);
  if(old)return old.outcome===d.outcome?{status:200,body:{closed:true,replay:true}}:fail(409,"account_outcome_conflict");
  const hold=await tx.get(LOCK);
