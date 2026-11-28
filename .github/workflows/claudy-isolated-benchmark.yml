@@ -1,0 +1,25 @@
+name: Claudy isolated benchmark
+on:
+  push:
+    branches: [assistant/claudy-isolated-benchmark]
+    paths: ['.github/workflows/claudy-isolated-benchmark.yml']
+permissions:
+  contents: read
+concurrency:
+  group: claudy-isolated-benchmark
+  cancel-in-progress: false
+jobs:
+  benchmark:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate Python syntax
+        run: python3 -m py_compile scripts/claudy_isolated_benchmark.py
+      - name: Test Claudy using only synthetic fixtures
+        env:
+          CLAUDY_API_KEY: ${{ secrets.CLAUDY_API_KEY }}
+        run: python3 -u scripts/claudy_isolated_benchmark.py
