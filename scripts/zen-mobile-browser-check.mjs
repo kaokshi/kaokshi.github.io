@@ -17,6 +17,7 @@ try{
    if(p==="/app.js")return route.fulfill({contentType:"application/javascript",body:JS});
    requests.push(p);
    if(p==="/api/dashboard")return route.fulfill({json:{balance:45.41,checkedAt:Date.now()}});
+   if(p==="/api/core/developer")return route.fulfill({json:{policy:{version:0,perTaskKop:1000,dailyKop:5000,monthlyKop:150000},tasks:[{id:"synthetic",text:"Проверить проект",reasoning:"high",limitKop:500,status:"queued_blocked",chargedRub:null}],executionEnabled:false,stopped:false}});
    if(p==="/api/core/agent"){
     if(release)await new Promise(r=>setTimeout(r,180));
     return route.fulfill({json:fixtures});
@@ -45,6 +46,20 @@ try{
    await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),"chat horizontal overflow at "+width+" "+theme);
   }
+  assert.equal(await page.locator("#managerchat .chat-options").getAttribute("open"),null);
+  assert.ok(await page.locator("#agenthistory").getByRole("button",{name:"Копировать"}).isVisible());
+  await page.locator("#chatdeveloper").click();
+  await page.locator("#devhistory").getByText("Проверить проект").waitFor();
+  assert.equal(await page.locator("#developerchat .chat-options").getAttribute("open"),null);
+  assert.equal(await page.locator("#managerchat").isVisible(),false);
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),"developer overflow at "+width);
+  await page.locator("#devtext").fill("Тестовый черновик");
+  await page.locator("#chatmanager").click();
+  assert.equal(await page.locator("#agenttext").inputValue(),"Привет");
+  await page.locator("#chatdeveloper").click();
+  assert.equal(await page.locator("#devtext").inputValue(),"Тестовый черновик");
+  await page.locator("#chatmanager").click();
+  assert.equal(requests.filter(x=>x==="/api/core/developer/action").length,0);
   if(width<750){
    await page.locator('[data-tab="more"]').click();
    for(const id of ["finance","models","core","settings"]){
