@@ -1,0 +1,61 @@
+name: RouterAI time-window reconciliation
+on:
+  push:
+    branches: [assistant/routerai-mcp-readonly-probe]
+    paths: ['.github/workflows/routerai-time-window.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compare candidate windows without publishing transaction data
+        env:
+          ROUTERAI_MCP_TOKEN: ${{ secrets.ROUTERAI_MCP_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os,json
+          from datetime import datetime,timezone
+          from decimal import Decimal,InvalidOperation
+          from src import editorial_routerai_mcp as m
+          m.token=os.environ.get("ROUTERAI_MCP_TOKEN","")
+          if not m.token.startswith("rmcp_"): raise SystemExit("Missing MCP token")
+          init=m.rpc("initialize",{"protocolVersion":m.version,"capabilities":{},"clientInfo":{"name":"zen-window-audit","version":"1.0"}},1)
+          m.version=init.get("protocolVersion",m.version)
+          m.rpc("notifications/initialized",{})
+          rows=m.read_all_statement({"from":"2026-11-25","to":"2026-11-27","limit":100})
+          centers={"krasnoyarsk":"2026-11-25T20:38:00+00:00","moscow":"2026-11-26T00:38:00+00:00","utc":"2026-11-26T03:38:00+00:00"}
+          reserved=Decimal("0.531664880760")
+          def timestamp(row):
+              try:
+                  value=datetime.fromisoformat(row["created_at"].replace("Z","+00:00"))
+                  return value.astimezone(timezone.utc) if value.tzinfo else None
+              except (ValueError,TypeError,KeyError,AttributeError): return None
+          def qwen(row):
+              model=row.get("model")
+              if isinstance(model,dict):
+                  model=" ".join(str(model.get(k,"")) for k in ("slug","name","model","identifier","model_id"))
+              return "qwen3.6-plus" in str(model).lower() or "qwen 3.6 plus" in str(model).lower()
+          def bounded(row):
+              try:
+                  return str(row.get("currency","")).upper() in ("RUB","RUR") and Decimal(0)<abs(Decimal(str(row["amount"])))<=reserved
+              except (InvalidOperation,KeyError,TypeError): return False
+          def summary(center,seconds):
+              selected=[r for r in rows if timestamp(r) is not None and abs((timestamp(r)-center).total_seconds())<=seconds]
+              return {"count":len(selected),"model_match":sum(qwen(r) for r in selected),"rub_within_reservation":sum(bounded(r) for r in selected),"both":sum(qwen(r) and bounded(r) for r in selected)}
+          result={}
+          for name,value in centers.items():
+              center=datetime.fromisoformat(value)
+              result[name]={"five_minutes":summary(center,300),"fifteen_minutes":summary(center,900)}
+          known_model_fields=("slug","name","model","identifier","model_id")
+          identifiable=sum(isinstance(r.get("model"),str) or (isinstance(r.get("model"),dict) and any(isinstance(r["model"].get(k),str) for k in known_model_fields)) for r in rows)
+          print(json.dumps({"statement_count":len(rows),"timestamps_with_timezone":sum(timestamp(r) is not None for r in rows),"model_text_available":identifiable,"windows":result,"billingFinal":False,"ledgerChanged":False}))
+          PY
