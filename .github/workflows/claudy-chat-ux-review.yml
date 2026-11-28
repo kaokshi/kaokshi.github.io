@@ -1,0 +1,24 @@
+name: Claudy Opus chat UX redesign
+on:
+  push:
+    branches: [assistant/zen-conversation-redesign]
+    paths: ['.github/workflows/claudy-chat-ux-review.yml']
+permissions:
+  contents: read
+concurrency:
+  group: claudy-opus-ui-review
+  cancel-in-progress: false
+jobs:
+  review:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 -m py_compile scripts/claudy_chat_ux_review.py
+      - name: Bounded redesign proposal on public source
+        env:
+          CLAUDY_OPUS_API_KEY: ${{ secrets.CLAUDY_OPUS_API_KEY }}
+        run: python3 -u scripts/claudy_chat_ux_review.py
