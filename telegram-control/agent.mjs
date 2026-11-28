@@ -32,9 +32,13 @@ export function parseReply(response){
  if(d.job!=null&&!job||job&&proposal)throw Error("invalid_job");
  return {reply:d.reply.trim(),proposal,job};
 }
-async function api(token,path,payload){
+async function api(token,path,payload,onGenerationId){
  if(!token)throw Error("router_unavailable");
  const r=await fetch("https://routerai.ru/api/v1"+path,{method:payload?"POST":"GET",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json",Accept:"application/json"},body:payload?JSON.stringify(payload):undefined,redirect:"manual",signal:AbortSignal.timeout(payload?60000:12000)});
+ if(payload&&onGenerationId){
+  const identifier=r.headers.get("X-Generation-Id");
+  if(identifier&&/^rai-[A-Za-z0-9_-]{1,180}$/.test(identifier))await onGenerationId(identifier);
+ }
  if(!r.ok)throw Error("router_http_"+r.status);
  return r.json();
 }
@@ -100,7 +104,16 @@ export class AgentHandler{
    preflight=available!==null&&available>=bound&&!(await opsState(this.storage)).stopped&&(await opsState(this.storage)).version===ops.version;
   }catch{}
   if(!preflight){verifiedReceipt=true;message.cost=0;message.reply="Запрос не отправлен: баланс или состояние управления не подтверждены.";}else try{
-   const response=await api(token,"/chat/completions",{model:agentModel,messages,max_tokens:MAX_OUTPUT,reasoning:agentReasoning==="off"?{enabled:false}:{effort:agentReasoning}});
+   const response=await api(token,"/chat/completions",{model:agentModel,messages,max_tokens:MAX_OUTPUT,reasoning:agentReasoning==="off"?{enabled:false}:{effort:agentReasoning}},async generationId=>{
+    await this.storage.transaction(async tx=>{
+     const hold=await tx.get("agent:charge-hold");
+     if(hold?.id!==id)throw Error("chat_hold_mismatch");
+     const key="agent:generation:"+id, previous=await tx.get(key);
+     if(previous&&previous.generationId!==generationId)throw Error("generation_id_conflict");
+     if(!previous)await tx.put(key,{schema:"zen-core/provider-generation-v1",id,model:agentModel,generationId,observedAt:Date.now()});
+     await tx.put("agent:charge-hold",{...hold,generationId});
+    });
+   });
    const cost=number(response.usage?.cost);
    if(cost!==null)message.cost=cost;
    if(cost===null||cost>bound||response.model!==agentModel)throw Error("unverified_cost_or_model");
