@@ -18,3 +18,10 @@ Sources: https://claudy.shop/docs/api-overview , https://claudy.shop/docs/api-ac
 
 ## Support question
 Does Claudy provide an API-key authenticated read-only request-history/receipt endpoint for the final amount debited in RUB by request ID, with status, key ID and refunds/adjustments? Please provide the documented path, response schema, rate limits and finality timing. If there is no such API, can you provide a documented machine-readable export or another supported reconciliation method? No key or private account data is required for this question.
+
+## Support clarification, 2026-11-28
+- Owner supplied support response: GET /v1/me exposes key.monthly_limit, key.spent_this_month, key.left, and account_limit when configured. Completed requests are charged immediately and appear in cabinet history with X-Request-ID after a short delay. No programmatic request-history endpoint is currently offered.
+- Live read-only probe 46153834215 confirmed 1500/1500/4500 RUB monthly limits for Sonnet/Opus/editorial respectively. account_limit was unavailable under the validated schema.
+- Dedicated development key counter increased 2.02 RUB during UI review 46154161179 and 3.05 RUB during patch proposal 46154886439. Those are observed aggregate changes, not independently verified request receipts.
+- Monthly counters and freshness checks are implemented and tested. They do not resolve the existing RouterAI hold or provide authority to dispatch paid chat.
+- Remaining acceptance gap: supported per-operation evidence or explicit reviewed manual receipt workflow. Until that gate passes, paid routing stays disabled. Do not label monthly counter differences as individual receipts even if the requests appear serialized.
