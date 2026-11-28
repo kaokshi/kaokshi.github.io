@@ -27,7 +27,6 @@ async function renderModelPolicy(root){
  const note=e("p",null,root);note.className="muted";
  note.textContent="Действующий маршрут исполнителя: RouterAI. Claude через Claudy — подготовленный маршрут, платное исполнение пока отключено. Уже созданные заказы сохраняют свою ревизию.";
  const providers=new Map((d.providerPlan||[]).map(m=>[m.id,m]));
- const providerName=p=>p?.targetProvider==="claudy"?"Claudy":"RouterAI";
  const roles=e("div",null,root);roles.className="core-row";
  for(const role of d.roles){
   const block=e("article",null,roles);block.className="mode-panel";
@@ -44,7 +43,7 @@ async function renderModelPolicy(root){
    const option=e("option",null,pick);
    option.value=id;
    const planned=providers.get(id);
-   option.textContent=modelName(id)+" · "+providerName(planned)+(planned?.targetProvider==="claudy"?" (план)":model?.priceVerified?"":" — тариф не подтверждён");
+   option.textContent=modelName(id)+" · RouterAI"+(planned?.targetProvider==="claudy"?" → Claudy (план)":"")+(model?.priceVerified?"":" · тариф RouterAI не подтверждён");
    option.disabled=id!==current&&(!model||model.available!==true||model.priceVerified!==true);
    if(id===current)option.selected=true;
   }
