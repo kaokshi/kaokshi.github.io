@@ -1,3 +1,4 @@
+import {developerView,developerAction} from "./developer.mjs";
 import {opsState,opsView,updateOps,notifyTimer} from "./ops.mjs";
 import {readBudget,writeBudget} from "./budget.mjs";
 import {readClaudyStatus,balanceMovement} from "./claudy-monitor.mjs";
@@ -110,6 +111,7 @@ export class CoreHandler {
  }
  async fetch(request){
   const url=new URL(request.url),now=Date.now();
+  if(request.method==="GET"&&url.pathname==="/core/developer")return Response.json(await developerView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
   if(request.method==="GET"&&url.pathname==="/core/diagnostics")return Response.json(await this.diagnostics(now,true));
   if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
@@ -142,6 +144,7 @@ export class CoreHandler {
   }
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/developer/action"){const result=await developerAction(this.storage,d,now);return Response.json(result,{status:result.status??200});}
   if(url.pathname=="/core/models/settings"){
    // The owner changes the requested model policy; existing orders keep their own pin.
    const r=await writeModels(this.storage,d,now);
