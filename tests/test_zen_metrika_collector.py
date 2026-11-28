@@ -33,5 +33,19 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(self.report(sampled=True)["reason"],"report_unavailable_or_sampled")
     def test_missing_token(self):
         self.assertEqual(channel_report("cinema","")["reason"],"token_missing")
+    def test_missing_credentials_leave_no_output_file(self):
+        import os
+        import subprocess
+        import sys
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            target=Path(directory)/"report.json"
+            env={k:v for k,v in os.environ.items() if not k.startswith("YANDEX_METRIKA_")}
+            env["ZEN_METRIKA_OUTPUT"]=str(target)
+            result=subprocess.run([sys.executable,"-m","src.zen_metrika_collector"],env=env,capture_output=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertFalse(target.exists())
+
 if __name__=="__main__":
     unittest.main()

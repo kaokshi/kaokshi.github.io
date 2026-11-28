@@ -1,5 +1,8 @@
+import {developerView,developerAction} from "./developer.mjs";
 import {opsState,opsView,updateOps,notifyTimer} from "./ops.mjs";
 import {readBudget,writeBudget} from "./budget.mjs";
+import {readClaudyStatus,balanceMovement} from "./claudy-monitor.mjs";
+import {claudyRoleKey} from "./claudy-role-keys.mjs";
 import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from "./production.mjs";
 import {previewJob} from "./adapter.mjs";
 import {intakeView,controlView,queueView,accountView} from "./intake.mjs";
@@ -48,6 +51,24 @@ export function slots(settings,now){
 export function nextSlots(settings,now){return slots(settings,now).filter(x=>x.at>now).slice(0,60);}
 export class CoreHandler {
  constructor(ctx,env={}){this.storage=ctx.storage;this.env=env;}
+ async claudyTelemetry(key,now){
+  if(!key)return {current:await readClaudyStatus("",{now}),movement:null};
+  if(this.claudyTelemetryFlight)return this.claudyTelemetryFlight;
+  const work=async()=>{
+   const storageKey="telemetry:claudy:chat:latest";
+   const last=await this.storage.get(storageKey);
+   if(Number.isFinite(last?.current?.observedAt)&&now-last.current.observedAt>=0&&now-last.current.observedAt<60000)return last;
+   const current=await readClaudyStatus(key,{now});
+   return this.storage.transaction(async tx=>{
+    const previous=await tx.get(storageKey);
+    if(Number.isFinite(previous?.current?.observedAt)&&previous.current.observedAt>=now)return previous;
+    const next={current,movement:balanceMovement(previous?.current,current)};
+    await tx.put(storageKey,next);return next;
+   });
+  };
+  this.claudyTelemetryFlight=work().finally(()=>{this.claudyTelemetryFlight=null;});
+  return this.claudyTelemetryFlight;
+ }
  async state(){return await this.storage.get("core:settings")||initial();}
  async view(now=Date.now()){
   const settings=await this.state(),events=await this.storage.list({prefix:"core:event:",reverse:true,limit:60}),orders=await this.storage.list({prefix:"core:order:",reverse:true,limit:30});
@@ -90,6 +111,7 @@ export class CoreHandler {
  }
  async fetch(request){
   const url=new URL(request.url),now=Date.now();
+  if(request.method==="GET"&&url.pathname==="/core/developer")return Response.json(await developerView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core")return Response.json(await this.view(now));
   if(request.method==="GET"&&url.pathname==="/core/diagnostics")return Response.json(await this.diagnostics(now,true));
   if(request.method==="GET"&&url.pathname==="/core/memory")return Response.json({memory:await readMemory(this.storage)});
@@ -99,7 +121,13 @@ export class CoreHandler {
    return Response.json({settings,models:AGENT_MODELS,reasoningLevels:AGENT_REASONING,history:await agentSettingsHistory(this.storage),executionEnabled:false,publicationAuthorized:false,rssEnabled:false});
   }
 
-  if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
+  if(request.method==="GET"&&url.pathname==="/core/budget"){
+   const budget=await readBudget(this.storage,now);
+   // Provider observation only; never mutates billing or charge-hold records.
+   const key=claudyRoleKey(this.env,"chat");
+   const {current:claudy,movement}=await this.claudyTelemetry(key,now);
+   return Response.json({...budget,providers:{claudy:{...claudy,movement,credentialRole:"chat",balanceScope:"account",paidChatEnabled:false}}});
+  }
   if(request.method==="GET"&&url.pathname=="/core/models")return Response.json(await readModels(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/jobs"){
    const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),
@@ -116,6 +144,7 @@ export class CoreHandler {
   }
   if(request.method!=="POST")return new Response("Not found",{status:404});
   const d=await request.json();
+  if(url.pathname==="/core/developer/action"){const result=await developerAction(this.storage,d,now);return Response.json(result,{status:result.status??200});}
   if(url.pathname=="/core/models/settings"){
    // The owner changes the requested model policy; existing orders keep their own pin.
    const r=await writeModels(this.storage,d,now);

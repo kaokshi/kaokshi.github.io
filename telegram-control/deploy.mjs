@@ -13,6 +13,7 @@ const botToken=process.env.TELEGRAM_BOT_TOKEN||"";
 const owner=process.env.TELEGRAM_OWNER_ID||"";
 const chatRouter=process.env.ROUTERAI_CHAT_API_KEY||"";
 const router=process.env.ROUTERAI_API_KEY||"";
+const claudySonnet=process.env.CLAUDY_SONNET_API_KEY||"";
 const webhookSecret=process.env.TELEGRAM_WEBHOOK_SECRET||"";
 const intakeSecret=process.env.ZEN_CORE_INTAKE_SECRET||"";
 let stage="preflight", deploymentRecovery;
@@ -96,6 +97,8 @@ async function main(){
  bindings.push({type:"secret_text",name:"EDITORIAL_REVIEW_READ_TOKEN",text:readToken});
  if(production)requireOk(Boolean(router),"router_key_required_for_private_execution");
  if(router)bindings.push({type:"secret_text",name:"ROUTERAI_API_KEY",text:router});
+ // Only the chat-role key belongs in this Worker; developer/editorial credentials remain isolated.
+ if(claudySonnet)bindings.push({type:"secret_text",name:"CLAUDY_SONNET_API_KEY",text:claudySonnet});
  let independentChat=false;
  if(chatRouter&&router&&chatRouter!==router){
   stage="verify_chat_balance";
@@ -131,7 +134,7 @@ async function main(){
  const form=new FormData();
  form.set("metadata",new Blob([JSON.stringify({main_module:"entry.mjs",compatibility_date:"2026-11-24",bindings,...migrations,observability:{enabled:false}})],{type:"application/json"}));
  form.set("worker.mjs",new Blob([code],{type:"application/javascript+module"}),"worker.mjs");
- for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","ui-models.mjs","snapshot.mjs","journal.mjs","core.mjs","agent.mjs","agent-settings.mjs","model-settings.mjs","model-prices.mjs","settings-sync.mjs","production.mjs","budget.mjs","ops.mjs","adapter.mjs","intake.mjs","receipt.mjs","memory.mjs","notifications.mjs","diagnostics.mjs","recovery.mjs","account.mjs","release.mjs","probe.mjs","stage-intent.mjs","studio-analytics.mjs","studio-auth.mjs"]){
+ for(const module of ["entry.mjs","miniapp.mjs","ui.mjs","ui-models.mjs","snapshot.mjs","journal.mjs","core.mjs","developer.mjs","agent.mjs","agent-settings.mjs","model-settings.mjs","model-prices.mjs","settings-sync.mjs","production.mjs","budget.mjs","ops.mjs","adapter.mjs","intake.mjs","receipt.mjs","memory.mjs","notifications.mjs","diagnostics.mjs","recovery.mjs","account.mjs","release.mjs","probe.mjs","stage-intent.mjs","studio-analytics.mjs","studio-auth.mjs","claudy-adapter.mjs","claudy-monitor.mjs","claudy-preflight.mjs","claudy-role-keys.mjs","claudy-admission.mjs","claudy-coordinator.mjs"]){
   const source=await readFile(new URL("./"+module,import.meta.url),"utf8");
   form.set(module,new Blob([source],{type:"application/javascript+module"}),module);
  }

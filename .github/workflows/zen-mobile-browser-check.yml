@@ -1,0 +1,21 @@
+name: ZEN mobile browser checks
+on:
+  push:
+    branches: [assistant/zen-mobile-chat-ui]
+    paths: ['scripts/zen-mobile-browser-check.mjs', 'telegram-control/**', '.github/workflows/zen-mobile-browser-check.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --ignore-scripts playwright@1.55.0
+      - run: npx playwright install --with-deps chromium
+      - run: node scripts/zen-mobile-browser-check.mjs

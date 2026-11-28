@@ -144,5 +144,18 @@ def collect():
 
 if __name__ == "__main__":
     # Caller must redirect to private storage; never print report into public CI logs.
-    with open(os.environ["ZEN_METRIKA_OUTPUT"], "x", encoding="utf-8") as f:
-        json.dump(collect(), f, ensure_ascii=False, allow_nan=False)
+    from pathlib import Path
+    import tempfile
+    target = Path(os.environ["ZEN_METRIKA_OUTPUT"])
+    payload = json.dumps(collect(), ensure_ascii=False, allow_nan=False)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent, delete=False) as f:
+            temporary = Path(f.name)
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.link(temporary, target)  # Atomic creation, never overwrite an existing report.
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
