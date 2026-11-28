@@ -51,3 +51,12 @@ export async function readClaudyStatus(key,{fetcher=fetch,now=Date.now()}={}){
   return {...base,rateLimits,balanceRub,...claudyFinancialFields(body),status:balanceRub===null?"balance_schema_unverified":"ok"};
  }catch{return {...base,status:"unavailable"};}
 }
+
+// Compare two observations of the SAME role/key enrollment and billing period.
+// Monthly counters can reset or be adjusted. No operation-level attribution.
+export function monthlySpendMovement(previous,current){
+ const p=previous?.keyLimit,c=current?.keyLimit;
+ if(previous?.status!=="ok"||current?.status!=="ok"||!p?.consistent||!c?.consistent||!Number.isSafeInteger(previous.observedAt)||!Number.isSafeInteger(current.observedAt)||current.observedAt<=previous.observedAt)return null;
+ if(new Date(previous.observedAt).toISOString().slice(0,7)!==new Date(current.observedAt).toISOString().slice(0,7)||p.limitRub!==c.limitRub||c.spentRub<p.spentRub)return {classification:"counter_reset_or_adjustment",deltaRub:null,costVerified:false};
+ return {classification:"provider_monthly_counter_movement",deltaRub:Math.round((c.spentRub-p.spentRub)*1e6)/1e6,intervalStart:previous.observedAt,intervalEnd:current.observedAt,costVerified:false};
+}
