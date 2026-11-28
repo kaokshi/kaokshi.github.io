@@ -34,3 +34,28 @@ class RouterAIAdapterTests(unittest.TestCase):
                 self.assertEqual(json.loads(request.data)["model"], model)
                 self.assertEqual(outcome["usage"]["cost"], Decimal("0.0000208247208"))
                 self.assertIsInstance(factory.call_args.args[0], router.NoRedirect)
+
+
+    def test_generation_id_is_captured_before_body_failure(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.headers = {"X-Generation-Id": "rai-fixture_123"}
+        seen = []
+
+        def failed_read(*args):
+            self.assertEqual(seen, ["rai-fixture_123"])
+            raise TimeoutError()
+
+        response.read.side_effect = failed_read
+        with patch.object(router, "build_opener") as factory:
+            factory.return_value.open.return_value = response
+            with self.assertRaisesRegex(router.UnsafeToTest, "routerai_connection_failed"):
+                router.call("/chat/completions", "synthetic", {"model": router.MODELS["brain"]},
+                            on_generation_id=seen.append)
+        self.assertEqual(seen, ["rai-fixture_123"])
+
+    def test_generation_id_rejects_invalid_headers(self):
+        for value in (None, "", "not-provider-id", "rai-bad\nheader", "rai-" + "x" * 181):
+            self.assertIsNone(router.generation_id({"X-Generation-Id": value}))
+        self.assertEqual(router.generation_id({"X-Generation-Id": "rai-good-123"}), "rai-good-123")
