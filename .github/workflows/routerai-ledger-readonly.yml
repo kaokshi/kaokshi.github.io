@@ -1,0 +1,51 @@
+name: RouterAI ledger reconciliation read-only
+on:
+  push:
+    branches: [assistant/routerai-mcp-readonly-probe]
+    paths: ['.github/workflows/routerai-ledger-readonly.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Inspect existing hold and compare exact identifiers in statement
+        env:
+          ROUTERAI_MCP_TOKEN: ${{ secrets.ROUTERAI_MCP_TOKEN }}
+          EDITORIAL_PRIVATE_TOKEN: ${{ secrets.EDITORIAL_PRIVATE_TOKEN }}
+          ZEN_CORE_INTAKE_SECRET: ${{ secrets.ZEN_CORE_INTAKE_SECRET }}
+          ZEN_CORE_CONTROL_ENDPOINT: 'https://zen-editorial-control.kvasrapr.workers.dev/internal/zen-core/control'
+        run: |
+          python - <<'PY'
+          import os,json
+          from src import editorial_routerai_mcp as m
+          from src.editorial_zen_finance_recovery import inspect
+          from src.editorial_zen_cloud import CloudCore,GitHubStore
+          from src.editorial_zen_control import configured_account
+          try:
+              report=inspect(CloudCore(GitHubStore(os.environ.get("EDITORIAL_PRIVATE_TOKEN"))),configured_account())
+              hold=report.get("productionHold")
+              print(json.dumps({"ledgerRead":True,"recovery":report["productionRecovery"],"pendingCount":len(report["pending"]),"holdPresent":bool(hold),"ledgerChanged":False}))
+              if not hold: raise SystemExit(0)
+              m.token=os.environ.get("ROUTERAI_MCP_TOKEN","")
+              if not m.token.startswith("rmcp_"): raise ValueError()
+              init=m.rpc("initialize",{"protocolVersion":m.version,"capabilities":{},"clientInfo":{"name":"zen-ledger-readonly","version":"1.0"}},1)
+              m.version=init.get("protocolVersion",m.version)
+              m.rpc("notifications/initialized",{})
+              rows=m.read_all_statement({"from":"2026-11-25","to":"2026-11-27","limit":100})
+              op=hold["operation"]
+              keys=("id","request_id","requestId","generation_id","generationId","external_id","externalId")
+              matches=[r for r in rows if any(r.get(k)==op for k in keys)]
+              print(json.dumps({"statementCount":len(rows),"exactIdentifierMatches":len(matches),"billingFinal":False,"ledgerChanged":False}))
+          except Exception as exc:
+              print("Read-only audit blocked: "+type(exc).__name__)
+              raise SystemExit(1) from None
+          PY
