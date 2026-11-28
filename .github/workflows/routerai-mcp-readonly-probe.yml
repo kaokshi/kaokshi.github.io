@@ -1,0 +1,66 @@
+name: RouterAI MCP read-only probe
+on:
+  push:
+    branches: [assistant/routerai-mcp-readonly-probe]
+    paths: ['.github/workflows/routerai-mcp-readonly-probe.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Inspect read-only MCP capabilities
+        env:
+          ROUTERAI_MCP_TOKEN: ${{ secrets.ROUTERAI_MCP_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request, urllib.error
+          token = os.environ.get("ROUTERAI_MCP_TOKEN", "")
+          if not token.startswith("rmcp_"):
+              raise SystemExit("MCP token absent or invalid format")
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs): return None
+          opener = urllib.request.build_opener(NoRedirect)
+          session = None
+          version = "2025-03-26"
+          def rpc(method, params, ident=None):
+              global session
+              data = {"jsonrpc":"2.0","method":method,"params":params}
+              if ident is not None: data["id"] = ident
+              headers = {"Authorization":"Bearer "+token,"Content-Type":"application/json","Accept":"application/json, text/event-stream","MCP-Protocol-Version":version}
+              if session: headers["Mcp-Session-Id"] = session
+              req = urllib.request.Request("https://routerai.ru/api/v1/mcp", json.dumps(data).encode(), headers)
+              try:
+                  with opener.open(req, timeout=20) as res:
+                      session = res.headers.get("Mcp-Session-Id") or session
+                      if ident is None: return {}
+                      if "text/event-stream" in res.headers.get("Content-Type",""):
+                          for line in res:
+                              if line.startswith(b"data:"):
+                                  obj=json.loads(line[5:])
+                                  if obj.get("id")==ident: break
+                          else: raise SystemExit("No matching MCP response")
+                      else: obj=json.loads(res.read(2000000))
+              except urllib.error.HTTPError as exc:
+                  raise SystemExit("MCP HTTP status "+str(exc.code)) from None
+              except Exception:
+                  raise SystemExit("MCP transport or parsing failure") from None
+              if "error" in obj: raise SystemExit("MCP RPC rejected: "+method)
+              return obj.get("result",{})
+          init=rpc("initialize", {"protocolVersion":version,"capabilities":{},"clientInfo":{"name":"zen-readonly-probe","version":"1.0"}},1)
+          version=init.get("protocolVersion",version)
+          rpc("notifications/initialized", {})
+          tools=rpc("tools/list", {},2).get("tools",[])
+          allowed={"get_balance","get_statement","get_generation","list_models","get_model","list_model_endpoints","search_docs","get_doc","get_top_up_link"}
+          names={t["name"] for t in tools}
+          if not names <= allowed: raise SystemExit("Unexpected MCP capabilities; stopping")
+          for name in ("get_balance","get_statement","get_generation"):
+              if name not in names: raise SystemExit("Required capability missing: "+name)
+              schema=next(t.get("inputSchema",{}) for t in tools if t["name"]==name)
+              print(name, json.dumps({"fields":{k:v.get("type") for k,v in schema.get("properties",{}).items()},"required":schema.get("required",[])},ensure_ascii=True))
+          result=rpc("tools/call",{"name":"get_balance","arguments":{}},3)
+          if result.get("isError"): raise SystemExit("Balance read rejected")
+          print("MCP_READ_ONLY_CONNECTION_OK; no financial values printed; no inference called")
+          PY
