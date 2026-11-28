@@ -16,6 +16,11 @@ from editorial_auto_route import decide, digest_article
 
 def prepare_release(article, evidence, settings):
     decision = decide(article, evidence)
+    # Approval of an article never grants permission to publish the site.
+    if settings.get("publication_enabled") is not True:
+        decision["blockers"] = sorted(set(decision["blockers"] + ["publication_disabled"]))
+        decision["disposition"] = "send_for_owner_review"
+        return {"decision": decision, "article": None, "settings": None}
     if decision["disposition"] != "automatic_release_candidate":
         return {"decision": decision, "article": None, "settings": None}
     if article.get("status") != "draft":
@@ -48,11 +53,7 @@ def prepare_release(article, evidence, settings):
             for provider in ("modernbert", "lightgbm", "transformer", "ai_accent_detector")
         ],
     })
-    # If publication is currently off, turn it on in the same verified release
-    # transaction, never on mere installation of this tool.
-    cfg = dict(settings)
-    cfg["publication_enabled"] = True
-    return {"decision": decision, "article": new, "settings": cfg}
+    return {"decision": decision, "article": new, "settings": dict(settings)}
 
 
 def main():
@@ -82,7 +83,6 @@ def main():
         json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.apply and prepared["article"] is not None:
         path.write_text(json.dumps(prepared["article"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        settings_path.write_text(json.dumps(prepared["settings"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print("RELEASE_ELIGIBLE", args.slug, "risk", decision["risk_score"])
     else:
         print("ROUTE", args.slug, decision["disposition"], json.dumps(decision["blockers"], ensure_ascii=False))
