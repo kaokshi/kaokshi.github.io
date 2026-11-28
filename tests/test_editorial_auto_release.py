@@ -55,6 +55,14 @@ class AutoReleaseTests(unittest.TestCase):
         self.assertIsNone(result["article"])
         self.assertIsNone(result["settings"])
 
+    def test_publication_freeze_overrides_even_eligible_decision(self):
+        settings={"auto_release_enabled":True,"publication_enabled":False}
+        with patch.object(release,"decide",return_value={"disposition":"automatic_release_candidate","blockers":[]}):
+            result=release.prepare_release(self.article,self.evidence,settings)
+        self.assertIn("publication_disabled",result["decision"]["blockers"])
+        self.assertIsNone(result["article"])
+        self.assertFalse(settings["publication_enabled"])
+
     def test_disabled_feature_leaves_everything_unchanged(self):
         result=release.prepare_release(self.article,self.evidence,
                     {"auto_release_enabled":False,"publication_enabled":False})
