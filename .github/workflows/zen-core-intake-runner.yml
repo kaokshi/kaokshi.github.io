@@ -38,6 +38,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+          ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
         run: node telegram-control/sonnet-live-check.mjs
   intake:
     if: (github.ref == 'refs/heads/integration/zen-core-routerai-20261124' && github.event_name != 'schedule') || (github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.ZEN_CORE_INTAKE_SCHEDULE_ENABLED == 'true'))

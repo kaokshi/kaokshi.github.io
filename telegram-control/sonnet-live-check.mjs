@@ -16,7 +16,9 @@ async function request(path, data={}) {
  const response = await fetch("https://zen-editorial-control.kvasrapr.workers.dev/api/core/"+path,{
   method:"POST",headers:{"Content-Type":"application/json"},
   body:JSON.stringify({...data,initData:params.toString()}),redirect:"error",signal:AbortSignal.timeout(125000)});
- const body = await response.json();
+ const body = await response.json(); 
+ if (body.error==="agent_call_exceeds_limit" && /^\d+(\.\d+)?$/.test(body.boundRub))
+  console.log("SONNET_BOUND_RUB="+body.boundRub);
  if (!response.ok) {
   const code = /^[a-z0-9_]{1,72}$/.test(body.error||"") ? body.error : "unknown";
   throw new Error("http_"+response.status+"_"+code);
@@ -25,6 +27,13 @@ async function request(path, data={}) {
 }
 
 try {
+ const pricingResponse = await fetch("https://routerai.ru/api/v1/models", {
+  headers:{Authorization:"Bearer "+process.env.ROUTERAI_API_KEY},redirect:"error"});
+ const model = (await pricingResponse.json()).data?.find(row=>row.id===desired.model);
+ for (const field of ["prompt","completion","input_cache_write","input_cache_write_1h"]) {
+  if (model?.pricing_units?.[field]==="token" && Number.isFinite(Number(model.pricing[field])))
+   console.log("SONNET_TARIFF_"+field+"="+Number(model.pricing[field]));
+ }
  check(token && /^\d+$/.test(owner||""),"owner_configuration_missing");
  const agent = await request("agent");
  check(agent.enabled===true && agent.chargeHold===false && agent.productionHold===false,"chat_gate_blocked");
