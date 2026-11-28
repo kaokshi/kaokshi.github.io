@@ -12,6 +12,10 @@ on:
         type: boolean
         default: false
         required: true
+      test_isolated_chat:
+        description: Submit one approved Claude Sonnet chat request with a budget of at most 5 RUB
+        type: boolean
+        default: false
       enable_private_executor:
         description: Enable authenticated production claims. Publication and RSS stay disabled.
         type: boolean
@@ -56,5 +60,7 @@ jobs:
           ZEN_STUDIO_ENROLL_SECRET: ${{ secrets.ZEN_STUDIO_ENROLL_SECRET }}
           ZEN_STUDIO_DISPATCH_TOKEN: ${{ secrets.ZEN_STUDIO_DISPATCH_TOKEN }}
           ZEN_STUDIO_SYNC_ENABLED: ${{ vars.ZEN_STUDIO_SYNC_ENABLED }}
+          ZEN_CONTROL_TEST_ISOLATED_CHAT: ${{ inputs.test_isolated_chat }}
+          ROUTERAI_CHAT_API_KEY: ${{ secrets.ROUTERAI_CHAT_API_KEY }}
           ROUTERAI_API_KEY: ${{ secrets.ROUTERAI_API_KEY }}
         run: node deploy.mjs
