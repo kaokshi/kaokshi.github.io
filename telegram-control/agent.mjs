@@ -172,7 +172,8 @@ export class AgentHandler{
   const path=new URL(request.url).pathname;
   if(request.method==="GET"&&path==="/core/agent")return Response.json(await this.view());
   if(request.method!=="POST")return new Response("Not found",{status:404});
-  const d=await request.json();
+  let d;try{d=await request.json();}catch{return Response.json({error:"invalid_json"},{status:400});}
+  if(!d||typeof d!=="object"||Array.isArray(d))return Response.json({error:"invalid_json"},{status:400});
   try{
    const r=path==="/core/agent/chat"?await this.chat(d):path==="/core/agent/apply"?await this.apply(d):{status:404,body:{error:"unknown"}};
    return Response.json(r.body,{status:r.status});
