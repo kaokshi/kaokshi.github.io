@@ -1,0 +1,50 @@
+name: Claudy monthly key limits probe
+on:
+  push:
+    branches: [assistant/claudy-isolated-benchmark]
+    paths: ['.github/workflows/claudy-monthly-limits.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read provider key and account monthly totals
+        env:
+          CLAUDY_SONNET_API_KEY: ${{ secrets.CLAUDY_SONNET_API_KEY }}
+          CLAUDY_OPUS_API_KEY: ${{ secrets.CLAUDY_OPUS_API_KEY }}
+          CLAUDY_EDITORIAL_API_KEY: ${{ secrets.CLAUDY_EDITORIAL_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request
+          from decimal import Decimal
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*a): return None
+          def limits(x):
+              if not isinstance(x,dict): return None
+              out={}
+              for k in ("monthly_limit","spent_this_month","left"):
+                  try:
+                      n=Decimal(str(x[k]))
+                      if not n.is_finite() or n<0:return None
+                      out[k]=str(n)
+                  except Exception:return None
+              return out
+          ok=True
+          for role in ("SONNET","OPUS","EDITORIAL"):
+              try:
+                  key=os.environ["CLAUDY_"+role+"_API_KEY"]
+                  req=urllib.request.Request("https://api.claudy.shop/v1/me",headers={"Authorization":"Bearer "+key,"Accept":"application/json"})
+                  with urllib.request.build_opener(NoRedirect()).open(req,timeout=20) as r:
+                      d=json.load(r)
+                  key_limit=limits(d.get("key"))
+                  account=limits(d.get("account_limit"))
+                  print("MONTHLY_LIMIT",json.dumps({"role":role,"key":key_limit,"account_limit":account}),flush=True)
+                  ok=ok and key_limit is not None
+              except Exception:
+                  print("MONTHLY_ERROR",role,flush=True)
+                  ok=False
+          if not ok: raise SystemExit(1)
+          PY
