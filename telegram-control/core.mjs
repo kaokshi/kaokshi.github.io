@@ -1,5 +1,7 @@
 import {opsState,opsView,updateOps,notifyTimer} from "./ops.mjs";
 import {readBudget,writeBudget} from "./budget.mjs";
+import {readClaudyStatus,balanceMovement} from "./claudy-monitor.mjs";
+import {claudyRoleKey} from "./claudy-role-keys.mjs";
 import {saveJob,jobsView,cancelJob,productionReadiness,validateJob,STAGES} from "./production.mjs";
 import {previewJob} from "./adapter.mjs";
 import {intakeView,controlView,queueView,accountView} from "./intake.mjs";
@@ -99,7 +101,20 @@ export class CoreHandler {
    return Response.json({settings,models:AGENT_MODELS,reasoningLevels:AGENT_REASONING,history:await agentSettingsHistory(this.storage),executionEnabled:false,publicationAuthorized:false,rssEnabled:false});
   }
 
-  if(request.method==="GET"&&url.pathname==="/core/budget")return Response.json(await readBudget(this.storage,now));
+  if(request.method==="GET"&&url.pathname==="/core/budget"){
+   const budget=await readBudget(this.storage,now);
+   // Provider observation only; never mutates billing or charge-hold records.
+   const key=claudyRoleKey(this.env,"chat");
+   const last=await this.storage.get("telemetry:claudy:chat:latest");
+   let claudy=last?.current;
+   let movement=last?.movement??null;
+   if(!key||!claudy||!Number.isFinite(claudy.observedAt)||now-claudy.observedAt>=60000||claudy.observedAt>now){
+    claudy=await readClaudyStatus(key,{now});
+    movement=balanceMovement(last?.current,claudy);
+    await this.storage.put("telemetry:claudy:chat:latest",{current:claudy,movement});
+   }
+   return Response.json({...budget,providers:{claudy:{...claudy,movement,credentialRole:"chat",balanceScope:"account",paidChatEnabled:false}}});
+  }
   if(request.method==="GET"&&url.pathname=="/core/models")return Response.json(await readModels(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/jobs"){
    const [jobs,readiness,budget,ops,settings]=await Promise.all([jobsView(this.storage),productionReadiness(),
