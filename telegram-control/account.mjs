@@ -21,7 +21,9 @@ const fail=(status,error)=>({status,body:{error}});
 export async function claimProduction(tx,d,now){
  if(!valid(d))return fail(400,"invalid_account_operation");
  const chat=await tx.get("agent:charge-hold");
- if((chat&&chat.billingLane!=="verified_dedicated_chat")||await tx.get(LOCK))return fail(409,"account_charge_hold");
+ // A chat hold on a different account (verified dedicated RouterAI chat, or the
+ // separate Claudy account) does not block production on the shared RouterAI account.
+ if((chat&&!["verified_dedicated_chat","claudy_chat"].includes(chat.billingLane))||await tx.get(LOCK))return fail(409,"account_charge_hold");
  if(await tx.get("account:closed:"+d.operation))return fail(409,"account_operation_seen");
  const hold={id:d.id,operation:d.operation,startedAt:now};
  await tx.put(LOCK,hold);

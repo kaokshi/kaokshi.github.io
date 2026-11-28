@@ -14,7 +14,8 @@ import {runProbe} from "./probe.mjs";
 import {requestStage} from "./stage-intent.mjs";
 import {notifyReceipt} from "./notifications.mjs";
 import {readMemory,writeMemory} from "./memory.mjs";
-import {readAgentSettings,writeAgentSettings,agentSettingsHistory,AGENT_MODELS,AGENT_REASONING} from "./agent-settings.mjs";
+import {readAgentSettings,writeAgentSettings,agentSettingsHistory,AGENT_MODELS,AGENT_REASONING,AGENT_PROVIDERS} from "./agent-settings.mjs";
+import {chatBilling} from "./account.mjs";
 import {diagnose} from "./diagnostics.mjs";
 import {recoverTimer,recoverInterrupted} from "./recovery.mjs";
 // ZEN CORE v0.1: persistent owner plan, deterministic cloud scheduler, dry-run only.
@@ -118,7 +119,8 @@ export class CoreHandler {
   if(request.method==="GET"&&url.pathname==="/core/ops")return Response.json(await opsView(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/agent/settings"){
    const settings=await readAgentSettings(this.storage);
-   return Response.json({settings,models:AGENT_MODELS,reasoningLevels:AGENT_REASONING,history:await agentSettingsHistory(this.storage),executionEnabled:false,publicationAuthorized:false,rssEnabled:false});
+   const configured={routerai:Boolean(chatBilling(this.env).token),claudy:Boolean(claudyRoleKey(this.env,"chat"))};
+   return Response.json({settings,models:AGENT_MODELS,providers:AGENT_PROVIDERS.map(p=>({...p,configured:configured[p.id]})),reasoningLevels:AGENT_REASONING,history:await agentSettingsHistory(this.storage),executionEnabled:false,publicationAuthorized:false,rssEnabled:false});
   }
 
   if(request.method==="GET"&&url.pathname==="/core/budget"){
@@ -126,7 +128,7 @@ export class CoreHandler {
    // Provider observation only; never mutates billing or charge-hold records.
    const key=claudyRoleKey(this.env,"chat");
    const {current:claudy,movement}=await this.claudyTelemetry(key,now);
-   return Response.json({...budget,providers:{claudy:{...claudy,movement,credentialRole:"chat",balanceScope:"account",paidChatEnabled:false}}});
+   return Response.json({...budget,providers:{claudy:{...claudy,movement,credentialRole:"chat",balanceScope:"account",paidChatEnabled:Boolean(key)&&(await readAgentSettings(this.storage)).provider==="claudy",settlement:"monthly_counter_delta_single_flight"}}});
   }
   if(request.method==="GET"&&url.pathname=="/core/models")return Response.json(await readModels(this.storage));
   if(request.method==="GET"&&url.pathname==="/core/jobs"){
