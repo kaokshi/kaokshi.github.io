@@ -127,7 +127,7 @@ test("the chat view reports the configured model and the actual spend", async ()
 test("dedicated chat uses its own key while the production hold remains closed", async () => {
  const {storage} = fixture();
  await storage.put("account:production-hold", {id:"production", operation:"production/science/1/plan"});
- const agent = new AgentHandler({storage}, {ROUTERAI_API_KEY:"production-key", ROUTERAI_CHAT_API_KEY:"chat-key"}, new CoreHandler({storage}));
+ const agent = new AgentHandler({storage}, {ROUTERAI_API_KEY:"production-key", ROUTERAI_CHAT_API_KEY:"chat-key", ZEN_CHAT_BALANCE_VERIFIED:"true"}, new CoreHandler({storage}));
  const original = globalThis.fetch;
  let paid = 0;
  globalThis.fetch = async (url, opts) => {

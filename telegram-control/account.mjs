@@ -4,8 +4,16 @@
 export function chatBilling(env){
  const shared=env?.ROUTERAI_API_KEY;
  const dedicated=env?.ROUTERAI_CHAT_API_KEY;
- if(dedicated)return {token:dedicated===shared?null:dedicated,independent:dedicated!==shared};
+ if(env?.ZEN_CHAT_BALANCE_VERIFIED==="true"&&dedicated)return {token:dedicated===shared?null:dedicated,independent:dedicated!==shared};
  return {token:shared,independent:false};
+}
+export function compareChatBalances(productionBefore, chat, productionAfter){
+ const finite=value=>(
+  typeof value==="number"||typeof value==="string"&&value.trim()!==""
+ )&&Number.isFinite(Number(value))&&Number(value)>=0;
+ if(![productionBefore,chat,productionAfter].every(finite))return "unavailable";
+ if(Number(productionBefore)!==Number(productionAfter))return "production_changed";
+ return Math.abs(Number(chat)-Number(productionBefore))>=0.01?"distinct":"same";
 }
 const LOCK="account:production-hold";
 const valid=d=>typeof d?.operation==="string"&&/^[-a-zA-Z0-9:_/]{1,180}$/.test(d.operation)&&typeof d.id==="string"&&/^[-a-zA-Z0-9:]{1,120}$/.test(d.id)&&d.operation.startsWith(d.id+"/");
@@ -13,7 +21,7 @@ const fail=(status,error)=>({status,body:{error}});
 export async function claimProduction(tx,d,now){
  if(!valid(d))return fail(400,"invalid_account_operation");
  const chat=await tx.get("agent:charge-hold");
- if((chat&&chat.billingLane!=="dedicated_chat")||await tx.get(LOCK))return fail(409,"account_charge_hold");
+ if((chat&&chat.billingLane!=="verified_dedicated_chat")||await tx.get(LOCK))return fail(409,"account_charge_hold");
  if(await tx.get("account:closed:"+d.operation))return fail(409,"account_operation_seen");
  const hold={id:d.id,operation:d.operation,startedAt:now};
  await tx.put(LOCK,hold);

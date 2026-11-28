@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {claimProduction,closeProduction} from "./account.mjs";
+import {chatBilling,compareChatBalances,claimProduction,closeProduction} from "./account.mjs";
 import {accountView,bridgeRequest} from "./intake.mjs";
 const now=1795536000000;
 const op={id:"agent:fixture",operation:"agent:fixture/science/1/plan"};
@@ -63,6 +63,18 @@ test("bounded uncertain closure releases the lane but permanently closes the ope
 
 test("a dedicated chat charge does not block the independent production account",async()=>{
  const s=fixture();
- await s.put("agent:charge-hold",{status:"unknown",billingLane:"dedicated_chat"});
+ await s.put("agent:charge-hold",{status:"unknown",billingLane:"verified_dedicated_chat"});
  assert.equal((await claimProduction(s,op,now)).status,200);
+});
+
+test("an unverified chat credential cannot bypass a shared account hold",async()=>{
+ const env={ROUTERAI_API_KEY:"production",ROUTERAI_CHAT_API_KEY:"chat"};
+ assert.deepEqual(chatBilling(env),{token:"production",independent:false});
+ assert.equal(compareChatBalances("2619.35","2619.35","2619.35"),"same");
+ assert.equal(compareChatBalances("2619.35",null,"2619.35"),"unavailable");
+ assert.equal(compareChatBalances("2619.35","0.99","2619.34"),"production_changed");
+ assert.equal(compareChatBalances("2619.35","0.99","2619.35"),"distinct");
+ const s=fixture();
+ await s.put("agent:charge-hold",{status:"unknown",billingLane:"dedicated_chat"});
+ assert.equal((await claimProduction(s,op,now)).status,409);
 });
