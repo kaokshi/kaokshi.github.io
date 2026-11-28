@@ -1,0 +1,49 @@
+name: Claudy free preflight probe
+on:
+  push:
+    branches: [assistant/claudy-isolated-benchmark]
+    paths: ['.github/workflows/claudy-free-preflight.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe documented free count and account balance endpoints
+        env:
+          CLAUDY_API_KEY: ${{ secrets.CLAUDY_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          from decimal import Decimal
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*a): return None
+          key=os.environ["CLAUDY_API_KEY"]
+          def call(path,payload=None):
+              headers={"Authorization":"Bearer "+key,"anthropic-version":"2023-06-01","Content-Type":"application/json","X-Claudy-Cache":"off"}
+              req=urllib.request.Request("https://api.claudy.shop"+path,data=None if payload is None else json.dumps(payload).encode(),headers=headers)
+              with urllib.request.build_opener(NoRedirect()).open(req,timeout=20) as r:
+                  h={k:r.headers.get(k) for k in ("X-RateLimit-Limit","X-RateLimit-Remaining","X-RateLimit-Reset","Retry-After")}
+                  return json.load(r),{k:v for k,v in h.items() if v and v.isdigit()}
+          def balance(d):
+              if not isinstance(d,dict): return None
+              for k in ("balance_rub","balanceRub","credits_rub","balance_rubles"):
+                  if k in d:
+                      v=Decimal(str(d[k]))
+                      if v.is_finite() and v>=0:return v
+              if d.get("currency") in ("RUB","rub"):return Decimal(str(d["balance"]))
+              for k in ("data","account","balance"):
+                  v=balance(d.get(k))
+                  if v is not None:return v
+          try:
+              before=balance(call("/v1/me")[0])
+              obj,h=call("/v1/messages/count_tokens",{"model":"claude-sonnet-5-5","system":"Answer in JSON.","messages":[{"role":"user","content":"Synthetic preflight fixture."}]})
+              after=balance(call("/v1/me")[0])
+              print("FREE_PROBE",json.dumps({"input_tokens":obj.get("input_tokens") if type(obj.get("input_tokens")) is int else None,"balance_before":str(before),"balance_after":str(after),"rate_headers":h}))
+              assert before is not None and after==before and type(obj.get("input_tokens")) is int and obj["input_tokens"]>=0
+          except Exception:
+              print("FREE_PROBE_FAILED")
+              raise SystemExit(1)
+          PY
