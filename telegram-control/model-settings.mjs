@@ -3,6 +3,7 @@
 // live RouterAI snapshot verifies its price; nothing is assumed about a price.
 import {STAGES} from "./production.mjs";
 import {verifiedCatalogue} from "./model-prices.mjs";
+import {claudyModel} from "./claudy-adapter.mjs";
 export const POLICY_KEY="models:policy",ACK_KEY="models:executor-ack",HISTORY_PREFIX="models:history:";
 export const REASONING_LEVELS=Object.freeze(["off","low","medium","high"]);
 // Candidate models the owner may choose between. Availability and price come from the snapshot.
@@ -25,6 +26,16 @@ export function defaultCatalogue(){
   if(base&&!seen.has(id))seen.set(id,{id,capability:base.capability,label:base.label,available:true,priceVerified:false,priceSource:null,source:"telegram-control/model-settings.mjs#CANDIDATE_MODELS"});
  }
  return [...seen.values()];
+}
+// Target-provider metadata is informational until provider-specific execution is approved.
+// Do not use estimates to mark a RouterAI price as verified or authorize a settings change.
+export function providerPlan(catalogue){
+ return catalogue.map(m=>{
+  const c=claudyModel(m.id);
+  if(c)return {id:m.id,targetProvider:"claudy",nativeModel:c.id,executionEnabled:false,rateStatus:"configured_estimate",inputRubPerMillion:c.input,outputRubPerMillion:c.output,settlementVerified:false};
+  if(m.id.startsWith("anthropic/"))return {id:m.id,targetProvider:"claudy",executionEnabled:false,rateStatus:"not_configured",settlementVerified:false};
+  return {id:m.id,targetProvider:"routerai",executionEnabled:false,rateStatus:m.priceVerified?"observed_routerai":"unverified",settlementVerified:false};
+ });
 }
 export async function readCatalogue(storage,now=Date.now()){
  return verifiedCatalogue(defaultCatalogue(),await storage.get("models:verified-catalogue"),now);
@@ -84,7 +95,7 @@ export async function readModels(storage,catalogue){
  const effective=await effectiveModels(storage);
  const history=[];
  for(let r=requested.revision;r>=1&&history.length<10&&r>requested.revision-10;r--){const h=await storage.get(key(r));if(h)history.push(h);}
- return {roles:ROLES,catalogue,reasoningLevels:REASONING_LEVELS,requested,effective,pendingSync:requested.revision!==effective.revision||requested.hash!==effective.hash,executorSync:effective.source==="executor_ack"?"acknowledged":"not_connected",history,executionEnabled:false,publicationAuthorized:false,rssEnabled:false,note:"Active orders keep their pinned revision."};
+ return {roles:ROLES,catalogue,providerPlan:providerPlan(catalogue),effectiveTransport:"routerai",claudyExecutionEnabled:false,reasoningLevels:REASONING_LEVELS,requested,effective,pendingSync:requested.revision!==effective.revision||requested.hash!==effective.hash,executorSync:effective.source==="executor_ack"?"acknowledged":"not_connected",history,executionEnabled:false,publicationAuthorized:false,rssEnabled:false,note:"Active orders keep their pinned revision."};
 }
 export async function writeModels(storage,data,now=Date.now(),catalogue){
  if(data?.confirm!==true)return {status:400,body:{error:"confirmation_required"}};
