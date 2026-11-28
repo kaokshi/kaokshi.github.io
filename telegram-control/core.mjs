@@ -50,6 +50,24 @@ export function slots(settings,now){
 export function nextSlots(settings,now){return slots(settings,now).filter(x=>x.at>now).slice(0,60);}
 export class CoreHandler {
  constructor(ctx,env={}){this.storage=ctx.storage;this.env=env;}
+ async claudyTelemetry(key,now){
+  if(!key)return {current:await readClaudyStatus("",{now}),movement:null};
+  if(this.claudyTelemetryFlight)return this.claudyTelemetryFlight;
+  const work=async()=>{
+   const storageKey="telemetry:claudy:chat:latest";
+   const last=await this.storage.get(storageKey);
+   if(Number.isFinite(last?.current?.observedAt)&&now-last.current.observedAt>=0&&now-last.current.observedAt<60000)return last;
+   const current=await readClaudyStatus(key,{now});
+   return this.storage.transaction(async tx=>{
+    const previous=await tx.get(storageKey);
+    if(Number.isFinite(previous?.current?.observedAt)&&previous.current.observedAt>=now)return previous;
+    const next={current,movement:balanceMovement(previous?.current,current)};
+    await tx.put(storageKey,next);return next;
+   });
+  };
+  this.claudyTelemetryFlight=work().finally(()=>{this.claudyTelemetryFlight=null;});
+  return this.claudyTelemetryFlight;
+ }
  async state(){return await this.storage.get("core:settings")||initial();}
  async view(now=Date.now()){
   const settings=await this.state(),events=await this.storage.list({prefix:"core:event:",reverse:true,limit:60}),orders=await this.storage.list({prefix:"core:order:",reverse:true,limit:30});
@@ -105,14 +123,7 @@ export class CoreHandler {
    const budget=await readBudget(this.storage,now);
    // Provider observation only; never mutates billing or charge-hold records.
    const key=claudyRoleKey(this.env,"chat");
-   const last=await this.storage.get("telemetry:claudy:chat:latest");
-   let claudy=last?.current;
-   let movement=last?.movement??null;
-   if(!key||!claudy||!Number.isFinite(claudy.observedAt)||now-claudy.observedAt>=60000||claudy.observedAt>now){
-    claudy=await readClaudyStatus(key,{now});
-    movement=balanceMovement(last?.current,claudy);
-    await this.storage.put("telemetry:claudy:chat:latest",{current:claudy,movement});
-   }
+   const {current:claudy,movement}=await this.claudyTelemetry(key,now);
    return Response.json({...budget,providers:{claudy:{...claudy,movement,credentialRole:"chat",balanceScope:"account",paidChatEnabled:false}}});
   }
   if(request.method==="GET"&&url.pathname=="/core/models")return Response.json(await readModels(this.storage));
