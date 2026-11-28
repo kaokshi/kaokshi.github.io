@@ -2,7 +2,7 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {AnalyticsHandler, DAILY_MS, RESERVATION_MS, STUDIO_CHANNELS, studioBridge} from "./studio-analytics.mjs";
 import {openStudioState, sealStudioState} from "./studio-auth.mjs";
-import {assertStudio, cloudSession, routeConfig, syncStudio} from "../scripts/zen_studio_sync.mjs";
+import {assertStudio, cloudSession, confirmReportMenu, routeConfig, syncStudio} from "../scripts/zen_studio_sync.mjs";
 import {miniApp} from "./miniapp.mjs";
 import {HTML, CSS, JS} from "./ui.mjs";
 
@@ -252,4 +252,32 @@ test("statistics uses the existing themed app, owner endpoint and accessible con
  assert.match(CSS, /\.analytics-metrics[^}]+var\(--txt\)/);
  assert.match(JS, /\/api\/analytics\/refresh/);
  assert.doesNotThrow(() => new Function(JS));
+});
+
+test("Dzen report menu: confirm exactly one other same-label item, refuse ambiguity", async () => {
+ const box = (x, y) => ({x, y, width: 80, height: 30});
+ const page = items => {
+  const clicks = [];
+  return {clicks, getByText: () => ({filter: () => ({count: async () => items().length,
+   nth: i => ({boundingBox: async () => items()[i], click: async () => clicks.push(i)})})})};
+ };
+ const control = {first: () => ({boundingBox: async () => ({x: 1160, y: 190, width: 110, height: 44})})};
+ const pause = async () => {};
+ let calls = 0;
+ const menuPage = page(() => (++calls > 1 ? [box(1200, 200), box(1100, 565)] : [box(1200, 200)]));
+ assert.equal(await confirmReportMenu(menuPage, "Отчёт", control, () => false, {pause}), true);
+ assert.deepEqual(menuPage.clicks, [1]);
+ const single = page(() => [box(1200, 200)]);
+ assert.equal(await confirmReportMenu(single, "Отчёт", control, () => false, {pause, attempts: 3}), false);
+ assert.deepEqual(single.clicks, []);
+ let got = false;
+ const done = page(() => [box(1200, 200), box(1100, 565)]);
+ assert.equal(await confirmReportMenu(done, "Отчёт", control, () => got, {pause}), true);
+ got = true;
+ const finished = page(() => [box(1200, 200), box(1100, 565)]);
+ assert.equal(await confirmReportMenu(finished, "Отчёт", control, () => got, {pause}), false);
+ assert.deepEqual(finished.clicks, []);
+ const ambiguous = page(() => [box(1200, 200), box(1100, 500), box(1100, 565)]);
+ await assert.rejects(confirmReportMenu(ambiguous, "Отчёт", control, () => false, {pause}), /export_unverified/);
+ assert.deepEqual(ambiguous.clicks, []);
 });

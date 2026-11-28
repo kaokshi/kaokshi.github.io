@@ -130,9 +130,17 @@ def import_report(data, channel, expected_channel_id=None):
             rid = s.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
             target = rels.get(rid, "")
             target = target.removeprefix("/xl/")
-            if name not in ("Статистика", "Дзен") or name in sheets or not re.fullmatch(r"worksheets/sheet[0-9]+\.xml", target):
+            if name in sheets or not re.fullmatch(r"worksheets/sheet[0-9]+\.xml", target):
                 raise ValueError("unsupported_sheet")
+            if name not in ("Статистика", "Дзен"):
+                # Dzen added per-platform sheets (e.g. "Mail.ru"). They are not part of the
+                # verified channel totals; skip them without reading their contents.
+                if not isinstance(name, str) or not 1 <= len(name) <= 31:
+                    raise ValueError("unsupported_sheet")
+                sheets.setdefault("__extra__", set()).add(name)
+                continue
             sheets[name] = parse_sheet(cells(xml(z, "xl/"+target), strings), channel, name)
+        sheets.pop("__extra__", None)
         if set(sheets) != {"Статистика", "Дзен"}:
             raise ValueError("missing_sheet")
     main, platform = sheets["Статистика"], sheets["Дзен"]
