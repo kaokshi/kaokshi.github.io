@@ -1,0 +1,24 @@
+name: Claudy Opus final audit stage two
+on:
+  push:
+    branches: [assistant/zen-final-opus-audit]
+    paths: ['.github/workflows/claudy-editorial-audit.yml']
+permissions:
+  contents: read
+concurrency:
+  group: claudy-opus-ui-review
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 -m py_compile scripts/claudy_final_audit.py
+      - name: Independent editorial audit of public source
+        env:
+          CLAUDY_OPUS_API_KEY: ${{ secrets.CLAUDY_OPUS_API_KEY }}
+        run: python3 -u scripts/claudy_final_audit.py
