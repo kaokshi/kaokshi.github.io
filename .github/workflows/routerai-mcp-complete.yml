@@ -1,0 +1,38 @@
+name: RouterAI complete statement audit
+on:
+  push:
+    branches: [assistant/routerai-mcp-readonly-probe]
+    paths: ['.github/workflows/routerai-mcp-complete.yml']
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify pagination with synthetic responses
+        run: |
+          python - <<'PY'
+          from src.editorial_routerai_mcp import read_all_statement
+          def fake(method, params, ident):
+              cursor=params["arguments"].get("cursor")
+              return {"structuredContent":{"transactions":[{"id":"b" if cursor else "a"}],"next_cursor":None if cursor else "page2"}}
+          assert len(read_all_statement({},fake))==2
+          def repeat(method, params, ident):
+              return {"structuredContent":{"transactions":[{"id":"a"}],"next_cursor":"page2"}}
+          try: read_all_statement({},repeat)
+          except SystemExit: pass
+          else: raise AssertionError("duplicate accepted")
+          print("pagination guards passed")
+          PY
+      - name: Read all statement pages without exposing financial records
+        env:
+          ROUTERAI_MCP_TOKEN: ${{ secrets.ROUTERAI_MCP_TOKEN }}
+        run: python -m src.editorial_routerai_mcp audit --from-date 2026-11-25 --to-date 2026-11-27
