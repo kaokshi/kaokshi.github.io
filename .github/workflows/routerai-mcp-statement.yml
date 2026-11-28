@@ -1,0 +1,25 @@
+name: RouterAI MCP statement schema
+on:
+  push:
+    branches: [assistant/routerai-mcp-readonly-probe]
+    paths: ['.github/workflows/routerai-mcp-statement.yml']
+permissions:
+  contents: read
+jobs:
+  read:
+    if: github.repository == 'kaokshi/kaokshi.github.io' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check syntax
+        run: python -m py_compile src/editorial_routerai_mcp.py
+      - name: Read statement schema without publishing financial data
+        env:
+          ROUTERAI_MCP_TOKEN: ${{ secrets.ROUTERAI_MCP_TOKEN }}
+        run: python -m src.editorial_routerai_mcp statement --from-date 2026-11-25 --to-date 2026-11-27
