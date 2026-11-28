@@ -3,6 +3,7 @@ import {spawn} from "node:child_process";
 import {once} from "node:events";
 import {pathToFileURL} from "node:url";
 import {DAILY_MS, RESERVATION_MS, STUDIO_CHANNELS} from "../telegram-control/studio-analytics.mjs";
+import {PRIMARY_CHANNEL, validChannel} from "../telegram-control/studio-channels.mjs";
 import {openStudioState, studioRoute} from "../telegram-control/studio-auth.mjs";
 const require = createRequire(import.meta.url);
 const {analytics} = require("./zen_browser_usage_readonly.cjs");
@@ -39,11 +40,24 @@ export async function bridge(origin, secret, action, payload, fetcher = fetch) {
  return result;
 }
 
+// Statistics routes per channel: one JSON secret DZEN_STUDIO_ROUTES ({"<channel>": "<url>"}), so a new
+// registry channel needs no workflow change. Legacy per-channel DZEN_<KEY>_STATS_URL values still work.
+export function channelRoutes(env) {
+ let configured = {};
+ if (env.DZEN_STUDIO_ROUTES) {
+  try { configured = JSON.parse(env.DZEN_STUDIO_ROUTES); } catch { throw Error("route_unconfigured"); }
+  if (!configured || typeof configured !== "object" || Array.isArray(configured)) throw Error("route_unconfigured");
+ }
+ return Object.fromEntries(STUDIO_CHANNELS.map(channel =>
+  [channel, configured[channel] || env["DZEN_" + channel.toUpperCase() + "_STATS_URL"]]));
+}
+
 export function routeConfig(env, mode) {
- const channels = mode === "science" ? ["science"] : STUDIO_CHANNELS;
+ const channels = validChannel(mode) ? [mode] : STUDIO_CHANNELS;
  let selected;
  try {
-  selected = Object.fromEntries(channels.map(channel => [channel, studioRoute(env["DZEN_" + channel.toUpperCase() + "_STATS_URL"])]));
+  const urls = channelRoutes(env);
+  selected = Object.fromEntries(channels.map(channel => [channel, studioRoute(urls[channel])]));
   if (new Set(Object.values(selected).map(route => route.id)).size !== channels.length) throw Error();
  } catch { throw Error("route_unconfigured"); }
  const path = env.DZEN_STUDIO_EXPORT_PATH || "";
@@ -188,7 +202,7 @@ function bounded(task, limit) {
  })]).finally(() => clearTimeout(timer));
 }
 
-export async function cloudSession({client, state, routes, scan, now = Date.now, pause = sleep}) {
+export async function cloudSession({client, state, states, routes, scan, now = Date.now, pause = sleep}) {
  const started = now();
  let attempted = false, browser, sessionId, error = null, rows;
  const deadline = started + WORK;
@@ -202,9 +216,17 @@ export async function cloudSession({client, state, routes, scan, now = Date.now,
   if (!/^[a-f0-9-]{36}$/i.test(sid || "")) throw Error("session_failed");
   sessionId = sid;
   browser = await step(() => client.connect(sid));
-  const context = await step(() => browser.newContext({storageState: state, acceptDownloads: false,
-     serviceWorkers: "block", timezoneId: "Europe/Moscow"}));
-  rows = await step(() => scan(context, routes, step));
+  // Channels on different accounts never share cookies: one context per distinct session.
+  const perChannel = states || Object.fromEntries(Object.keys(routes?.selected || {}).map(channel => [channel, state]));
+  const contexts = new Map();
+  const contextFor = {};
+  for (const [channel, channelState] of Object.entries(perChannel)) {
+   if (!contexts.has(channelState)) contexts.set(channelState, await step(() => browser.newContext({storageState: channelState,
+     acceptDownloads: false, serviceWorkers: "block", timezoneId: "Europe/Moscow"})));
+   contextFor[channel] = contexts.get(channelState);
+  }
+  const first = contexts.values().next().value;
+  rows = await step(() => scan(first, routes, step, contextFor));
  } catch (failure) { error = SAFE.has(failure?.message) ? failure.message : "session_failed"; }
  let closed = !attempted;
  if (sessionId) {
@@ -223,9 +245,9 @@ export async function cloudSession({client, state, routes, scan, now = Date.now,
  return {attempted, allocated: !!sessionId, closed: closed && elapsedMs <= CAP, elapsedMs, rows: error ? [] : rows, error};
 }
 
-async function scanStudio(context, {selected, path, name}, step) {
+async function scanStudio(context, {selected, path, name}, step, contextFor = {}) {
  const pages = await Promise.all(Object.entries(selected).map(async ([channel, route]) => {
-  const page = await step(() => context.newPage());
+  const page = await step(() => (contextFor[channel] || context).newPage());
   // The bare statistics route opens the subscribers tab; the XLSX report lives on the publications tab.
   const response = await step(() => page.goto(route.url + STATS_VIEW, {waitUntil: "domcontentloaded", timeout: 9000}));
   await step(() => assertStudio(page, route));
@@ -234,7 +256,7 @@ async function scanStudio(context, {selected, path, name}, step) {
  }));
  return Promise.all(pages.map(async ({channel, route, page}) => {
   let bytes;
-  try { bytes = await step(() => workbook(context, page, path, name)); }
+  try { bytes = await step(() => workbook(page.context(), page, path, name)); }
   catch (error) { await step(() => assertStudio(page, route)); throw error; }
   await step(() => assertStudio(page, route));
   return step(() => importWorkbook(bytes, channel, route.id));
@@ -290,12 +312,24 @@ export async function syncStudio({mode, env, request, client, scan = scanStudio,
   claimed = true;
   if (!env.ZEN_STUDIO_VAULT_KEY) throw Error("auth_missing");
   const routes = routeConfig(env, mode);
-  const state = await openStudioState(vault.envelope, env.ZEN_STUDIO_VAULT_KEY, routes.selected.science.url);
+  // Each channel's session is bound to the route of the channel it was enrolled for.
+  const urls = channelRoutes(env);
+  const opened = new Map();
+  const states = {};
+  for (const channel of Object.keys(routes.selected)) {
+   const item = vault.envelopes?.[channel] || {envelope: vault.envelope, bound: PRIMARY_CHANNEL};
+   if (!validChannel(item.bound)) throw Error("invalid_auth");
+   const cacheKey = item.bound + ":" + (item.envelope?.ciphertext || "").slice(0, 32);
+   if (!opened.has(cacheKey)) opened.set(cacheKey, await openStudioState(item.envelope, env.ZEN_STUDIO_VAULT_KEY,
+    studioRoute(urls[item.bound]).url));
+   states[channel] = opened.get(cacheKey);
+  }
+  const state = states[Object.keys(routes.selected)[0]];
   const day = UTC(now());
   report.usedMs = await client.usage(day);
   if ((await client.active()).length) throw Error("active_session");
   await request("reserve", {run, usedMs: report.usedMs, day});
-  const result = await cloudSession({client, state, routes, scan, now});
+  const result = await cloudSession({client, state, states, routes, scan, now});
   report.browserAttempted = result.attempted;
   report.browserAllocated = result.allocated;
   report.closed = result.closed;
@@ -319,7 +353,7 @@ export async function syncStudio({mode, env, request, client, scan = scanStudio,
 async function main() {
  const env = process.env;
  const mode = env.ZEN_STUDIO_MODE;
- if (!["science", "all", "hourly", "quota"].includes(mode)) throw Error("sync_failed");
+ if (!(["all", "hourly", "quota"].includes(mode) || validChannel(mode))) throw Error("sync_failed");
  const request = (action, data) => bridge(env.ZEN_STUDIO_WORKER_URL, env.ZEN_STUDIO_BRIDGE_SECRET, action, data);
  const report = await syncStudio({mode, env, request, client: cloudflare(env)});
  console.log(JSON.stringify({...report, dailyMs: DAILY_MS, sessionMs: CAP, keepAliveMs: KEEP_ALIVE,

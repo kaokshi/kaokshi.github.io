@@ -13,10 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Read-only quota or an authorized Studio collection
-        type: choice
+        description: 'quota, all, hourly, or a channel key from telegram-control/studio-channels.mjs (science, legends, cinema, ...)'
+        type: string
         default: quota
-        options: [quota, science, all, hourly]
 permissions:
   contents: read
 concurrency:
@@ -109,6 +108,7 @@ jobs:
           ZEN_STUDIO_VAULT_KEY: ${{ secrets.ZEN_STUDIO_VAULT_KEY }}
           ZEN_STUDIO_BRIDGE_SECRET: ${{ secrets.ZEN_STUDIO_BRIDGE_SECRET }}
           ZEN_STUDIO_MODE: ${{ inputs.mode || 'hourly' }}
+          DZEN_STUDIO_ROUTES: ${{ secrets.DZEN_STUDIO_ROUTES }}
           DZEN_SCIENCE_STATS_URL: ${{ secrets.DZEN_SCIENCE_STATS_URL }}
           DZEN_LEGENDS_STATS_URL: ${{ secrets.DZEN_LEGENDS_STATS_URL }}
           DZEN_CINEMA_STATS_URL: ${{ secrets.DZEN_CINEMA_STATS_URL }}

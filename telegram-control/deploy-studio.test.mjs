@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {readModules, relevantSettings, studioUpload, verifyPrivateEndpoints} from "./deploy-studio.mjs";
 
 const shared = ["entry.mjs", "worker.mjs", "miniapp.mjs", "ui.mjs"];
-const add = ["studio-analytics.mjs", "studio-auth.mjs"];
+const add = ["studio-analytics.mjs", "studio-auth.mjs", "studio-channels.mjs"];
 
 test("content upload includes only Studio changes and retains every other live module", async () => {
  const live = new Map(shared.map(name => [name, new Blob([name])]));
