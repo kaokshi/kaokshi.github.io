@@ -1,0 +1,23 @@
+name: Claudy Opus implemented chat review
+on:
+  push:
+    branches: [assistant/zen-conversation-redesign]
+    paths: ['.github/workflows/claudy-chat-ux-followup.yml']
+permissions:
+  contents: read
+concurrency:
+  group: claudy-opus-ui-review
+  cancel-in-progress: false
+jobs:
+  review:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: One owner-requested review of revised public interface
+        env:
+          CLAUDY_OPUS_API_KEY: ${{ secrets.CLAUDY_OPUS_API_KEY }}
+        run: python3 -u scripts/claudy_chat_ux_followup.py
