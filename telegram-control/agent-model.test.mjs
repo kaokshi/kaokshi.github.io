@@ -146,3 +146,32 @@ test("dedicated chat uses its own key while the production hold remains closed",
   assert.equal((await storage.get("account:production-hold")).id,"production");
  }finally{globalThis.fetch=original;}
 });
+
+
+test("chat generation receipt survives an interrupted response without retry", async () => {
+ const {storage}=fixture();
+ const agent=new AgentHandler({storage},{ROUTERAI_API_KEY:"fake"},new CoreHandler({storage}));
+ const id="9b00a000-1111-4222-8333-444444444444";
+ const original=globalThis.fetch;
+ let paid=0;
+ globalThis.fetch=async url=>{
+  if(url.endsWith("/models"))return Response.json({data:[priceRow(MODEL)]});
+  if(url.endsWith("/credits"))return Response.json({data:{credits:100}});
+  paid++;
+  return {ok:true,headers:new Headers({"X-Generation-Id":"rai-fixture-123"}),json:async()=>{
+   assert.equal((await storage.get("agent:generation:"+id)).generationId,"rai-fixture-123");
+   throw Error("interrupted");
+  }};
+ };
+ try{
+  const result=await agent.chat({id,text:"Synthetic",consent:true});
+  assert.equal(result.body.message.status,"failed");
+  assert.equal((await storage.get("agent:charge-hold")).generationId,"rai-fixture-123");
+  assert.equal((await storage.get("agent:charge-hold")).status,"unknown");
+  assert.equal((await storage.get("agent:generation:"+id)).model,MODEL);
+  assert.equal((await agent.chat({id,text:"Synthetic",consent:true})).status,409);
+  assert.equal(paid,1);
+  assert.equal((await agent.view()).enabled,false);
+  assert.equal(JSON.stringify(await agent.view()).includes("rai-fixture-123"),false);
+ }finally{globalThis.fetch=original;}
+});
